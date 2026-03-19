@@ -1,0 +1,36 @@
+{
+  "name": "@dp-pcs/ogp",
+  "version": "0.1.0",
+  "description": "OGP (Open Gateway Protocol) federation daemon for OpenClaw",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ogp": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ogp",
+    "openclaw",
+    "federation",
+    "gateway-protocol"
+  ],
+  "author": "David Proctor",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.0.0",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
