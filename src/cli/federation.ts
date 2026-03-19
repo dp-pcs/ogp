@@ -53,7 +53,7 @@ export async function federationRequest(peerUrl: string, peerId: string): Promis
       return;
     }
 
-    const result = await response.json();
+    const result = await response.json() as { status?: string; message?: string };
     console.log('✓ Federation request sent');
     console.log(`  Status: ${result.status}`);
     console.log(`  Message: ${result.message}`);
