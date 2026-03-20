@@ -157,3 +157,24 @@ program
   });
 
 program.parse();
+
+program
+  .command('config')
+  .description('View or update OGP configuration')
+  .option('--set <key=value>', 'Set a config value (e.g. --set gatewayUrl=https://xyz.trycloudflare.com)')
+  .option('--get <key>', 'Get a config value')
+  .action((opts) => {
+    const { loadConfig, saveConfig } = require('./shared/config.js');
+    const config = loadConfig() || {};
+    if (opts.set) {
+      const [key, ...rest] = opts.set.split('=');
+      const value = rest.join('=');
+      (config as any)[key] = value;
+      saveConfig(config);
+      console.log(`✓ Set ${key} = ${value}`);
+    } else if (opts.get) {
+      console.log((config as any)[opts.get] ?? 'not set');
+    } else {
+      console.log(JSON.stringify(config, null, 2));
+    }
+  });

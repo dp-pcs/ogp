@@ -8,7 +8,7 @@ export async function runSetup() {
     const daemonPort = await rl.question('Daemon port [18790]: ');
     const openclawUrl = await rl.question('OpenClaw URL [http://localhost:18789]: ');
     const openclawToken = await rl.question('OpenClaw API token: ');
-    const gatewayUrl = await rl.question('Gateway URL (your public URL): ');
+    const gatewayUrl = await rl.question('Gateway URL (your public URL — run "ogp expose" first to get this, or leave blank to set later): ');
     const displayName = await rl.question('Display name: ');
     const email = await rl.question('Email: ');
     const stateDir = await rl.question('State directory [~/.ogp]: ');
