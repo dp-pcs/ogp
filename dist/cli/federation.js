@@ -93,14 +93,26 @@ export async function federationApprove(peerId) {
     }
     approvePeer(peerId);
     console.log(`✓ Approved peer: ${peerId}`);
-    // Notify the peer
+    // Notify the peer — send both formats for maximum compatibility
     try {
+        const keypair = loadOrGenerateKeyPair();
+        const ourConfig = requireConfig();
+        const nonce = crypto.randomUUID();
         await fetch(`${peer.gatewayUrl}/federation/approve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                // Package format
                 peerId: peer.id,
-                approved: true
+                approved: true,
+                // Fork format (for interoperability)
+                fromGatewayId: `${new URL(ourConfig.gatewayUrl).hostname}:${ourConfig.daemonPort}`,
+                fromDisplayName: ourConfig.displayName,
+                fromGatewayUrl: ourConfig.gatewayUrl,
+                fromPublicKey: keypair.publicKey,
+                fromEmail: ourConfig.email,
+                timestamp: new Date().toISOString(),
+                nonce,
             })
         });
         console.log('✓ Notified peer of approval');

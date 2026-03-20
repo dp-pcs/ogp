@@ -71,27 +71,44 @@ export function startServer(config, background = false) {
         }
     });
     // POST /federation/approve - Peer approves our request
+    // Accepts both package format {peerId, approved} and fork format {fromGatewayId, fromGatewayUrl, ...}
     app.post('/federation/approve', async (req, res) => {
         try {
-            const { peerId, approved, fromGatewayUrl } = req.body || {};
-            const approved_flag = approved !== false; // default true if not specified
-            // Try to find peer by peerId first, then by any pending peer
-            let peer = peerId ? getPeer(peerId) : null;
-            // Fallback: find any pending peer (we likely only have one pending at a time)
+            const body = req.body || {};
+            // Fork format: full identity card sent as approval signal
+            const fromGatewayId = body.fromGatewayId;
+            const fromGatewayUrl = body.fromGatewayUrl;
+            const fromDisplayName = body.fromDisplayName;
+            const fromPublicKey = body.fromPublicKey;
+            const fromEmail = body.fromEmail;
+            // Package format: simple peerId + approved flag
+            const peerId = body.peerId;
+            // Find the peer to approve — try multiple strategies
+            let peer = null;
+            if (peerId)
+                peer = getPeer(peerId);
+            if (!peer && fromGatewayId)
+                peer = getPeer(fromGatewayId);
+            if (!peer && fromGatewayUrl) {
+                const allPeers = listPeers();
+                peer = allPeers.find((p) => p.gatewayUrl === fromGatewayUrl) || null;
+            }
+            // Last resort: approve any pending peer
             if (!peer) {
                 const allPeers = listPeers();
-                const pending = allPeers.find((p) => p.status === 'pending');
-                if (pending) {
-                    peer = pending;
-                }
+                peer = allPeers.find((p) => p.status === 'pending') || null;
             }
             if (!peer) {
                 return res.status(404).json({ error: 'No pending peer found' });
             }
-            if (approved_flag) {
-                approvePeer(peer.id);
-                console.log(`[OGP] Federation approved by ${peer.displayName}`);
+            // Update peer info if fork sent richer data
+            if (fromDisplayName || fromPublicKey || fromEmail) {
+                peer.displayName = fromDisplayName || peer.displayName;
+                peer.publicKey = fromPublicKey || peer.publicKey;
+                peer.email = fromEmail || peer.email;
             }
+            approvePeer(peer.id);
+            console.log(`[OGP] Federation approved by ${peer.displayName}`);
             res.json({ received: true });
         }
         catch (error) {
