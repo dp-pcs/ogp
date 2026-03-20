@@ -1,7 +1,8 @@
 import { listPeers, getPeer, approvePeer, rejectPeer, type Peer } from '../daemon/peers.js';
 import { requireConfig } from '../shared/config.js';
-import { getPublicKey, getPrivateKey } from '../daemon/keypair.js';
+import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject } from '../shared/signing.js';
+import * as crypto from 'node:crypto';
 
 export async function federationList(status?: 'pending' | 'approved' | 'rejected'): Promise<void> {
   const peers = listPeers(status);
@@ -34,18 +35,27 @@ export async function federationRequest(peerUrl: string, peerId: string): Promis
     publicKey: getPublicKey()
   };
 
-  // Sign the request
-  const { payload, signature } = signObject(ourPeerInfo, getPrivateKey());
+  const keypair = loadOrGenerateKeyPair();
+  const nonce = crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+
+  const requestBody = {
+    fromGatewayId: `${new URL(config.gatewayUrl).hostname}:${config.daemonPort}`,
+    fromDisplayName: config.displayName,
+    fromGatewayUrl: config.gatewayUrl,
+    fromPublicKey: keypair.publicKey,
+    fromEmail: config.email,
+    proposedScope: ['calendar-read', 'ping'],
+    timestamp,
+    nonce,
+  };
 
   // Send request
   try {
     const response = await fetch(`${peerUrl}/federation/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        peer: payload,
-        signature
-      })
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
