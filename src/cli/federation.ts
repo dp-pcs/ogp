@@ -68,20 +68,26 @@ export async function federationRequest(peerUrl: string, peerId: string): Promis
     console.log(`  Status: ${result.status}`);
     console.log(`  Message: ${result.message}`);
 
-    // Store outbound pending peer so we can recognize the approval callback
-    // The responder will store us by our gatewayUrl hostname:port as the peerId
-    const { addPeer } = await import('../daemon/peers.js');
-    const gatewayHostname = new URL(config.gatewayUrl).hostname;
-    const ourPeerId = `${gatewayHostname}:${config.daemonPort}`;
-    addPeer({
-      id: ourPeerId,
-      displayName: peer.displayName,
-      email: peer.email,
-      gatewayUrl: peerUrl,
-      publicKey: peer.publicKey,
-      status: 'pending',
-      requestedAt: new Date().toISOString()
-    });
+    // Fetch their federation card to get their actual identity
+    // Store them as a pending peer so we can send intents when approved
+    try {
+      const { addPeer } = await import('../daemon/peers.js');
+      const cardRes = await fetch(`${peerUrl}/.well-known/ogp`);
+      if (cardRes.ok) {
+        const card = await cardRes.json() as { displayName?: string; email?: string; publicKey?: string };
+        const peerHostname = new URL(peerUrl).hostname;
+        const peerPort = new URL(peerUrl).port || '18790';
+        addPeer({
+          id: `${peerHostname}:${peerPort}`,
+          displayName: card.displayName || peerId,
+          email: card.email || '',
+          gatewayUrl: peerUrl,
+          publicKey: card.publicKey || '',
+          status: 'pending',
+          requestedAt: new Date().toISOString()
+        });
+      }
+    } catch { /* non-fatal */ }
   } catch (error) {
     console.error('Failed to send request:', error);
   }
