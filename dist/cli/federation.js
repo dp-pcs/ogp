@@ -157,9 +157,11 @@ export async function federationSend(peerId, intent, payloadJson) {
         return;
     }
     const payload = JSON.parse(payloadJson);
+    const keypair = loadOrGenerateKeyPair();
+    const ourId = `${new URL(config.gatewayUrl).hostname}:${config.daemonPort}`;
     const message = {
         intent,
-        from: config.email, // or another identifier
+        from: ourId,
         to: peerId,
         nonce: crypto.randomUUID(),
         timestamp: new Date().toISOString(),
