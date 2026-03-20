@@ -107,6 +107,25 @@ federation
   });
 
 federation
+  .command('ping')
+  .description('Ping a peer gateway to test connectivity')
+  .argument('<peer-url>', 'Peer gateway URL')
+  .action(async (peerUrl) => {
+    try {
+      const res = await fetch(`${peerUrl}/federation/ping`);
+      if (res.ok) {
+        const data = await res.json() as { displayName?: string; gatewayUrl?: string; timestamp?: string };
+        console.log(`✓ Pong from ${data.displayName} (${data.gatewayUrl})`);
+        console.log(`  Time: ${data.timestamp}`);
+      } else {
+        console.error(`✗ Ping failed: ${res.status} ${res.statusText}`);
+      }
+    } catch (err) {
+      console.error(`✗ Ping failed:`, err);
+    }
+  });
+
+federation
   .command('send')
   .description('Send a message to a federated peer')
   .argument('<peer-id>', 'Peer ID')

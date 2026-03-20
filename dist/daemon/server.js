@@ -99,6 +99,15 @@ export function startServer(config, background = false) {
             res.status(500).json({ error: 'Internal server error' });
         }
     });
+    // GET /federation/ping - Simple liveness + identity check (no auth required)
+    app.get('/federation/ping', (req, res) => {
+        res.json({
+            pong: true,
+            displayName: cfg.displayName,
+            gatewayUrl: cfg.gatewayUrl,
+            timestamp: new Date().toISOString()
+        });
+    });
     // POST /federation/message - Receive federated message
     app.post('/federation/message', async (req, res) => {
         try {
