@@ -67,6 +67,21 @@ export async function federationRequest(peerUrl: string, peerId: string): Promis
     console.log('✓ Federation request sent');
     console.log(`  Status: ${result.status}`);
     console.log(`  Message: ${result.message}`);
+
+    // Store outbound pending peer so we can recognize the approval callback
+    // The responder will store us by our gatewayUrl hostname:port as the peerId
+    const { addPeer } = await import('../daemon/peers.js');
+    const gatewayHostname = new URL(config.gatewayUrl).hostname;
+    const ourPeerId = `${gatewayHostname}:${config.daemonPort}`;
+    addPeer({
+      id: ourPeerId,
+      displayName: peer.displayName,
+      email: peer.email,
+      gatewayUrl: peerUrl,
+      publicKey: peer.publicKey,
+      status: 'pending',
+      requestedAt: new Date().toISOString()
+    });
   } catch (error) {
     console.error('Failed to send request:', error);
   }
