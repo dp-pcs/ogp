@@ -133,6 +133,16 @@ program
   });
 
 program
+  .command('shutdown')
+  .description('Stop both the OGP daemon and tunnel')
+  .action(() => {
+    console.log('Shutting down OGP...');
+    stopExpose();
+    stopServer();
+    console.log('✓ OGP daemon and tunnel stopped.');
+  });
+
+program
   .command('install')
   .description('Install LaunchAgent to start daemon on login (macOS)')
   .action(async () => {
