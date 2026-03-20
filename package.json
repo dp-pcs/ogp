@@ -6,13 +6,13 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "ogp": "./dist/cli.js"
+    "ogp": "./dist/cli.js",
+    "ogp-install-skills": "./scripts/install-skills.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "prepublishOnly": "npm run build",
-    "postinstall": "node scripts/install-skills.js"
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "ogp",
