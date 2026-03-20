@@ -2,7 +2,7 @@
 
 import { Command } from 'commander';
 import { runSetup } from './cli/setup.js';
-import { startServer, stopServer } from './daemon/server.js';
+import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig } from './shared/config.js';
 import {
   federationList,
@@ -11,7 +11,8 @@ import {
   federationReject,
   federationSend
 } from './cli/federation.js';
-import { expose } from './cli/expose.js';
+import { expose, stopExpose } from './cli/expose.js';
+import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 
 const program = new Command();
 
@@ -30,9 +31,10 @@ program
 program
   .command('start')
   .description('Start the OGP daemon')
-  .action(() => {
+  .option('-b, --background', 'Run in background')
+  .action((options) => {
     const config = requireConfig();
-    startServer(config);
+    startServer(config, options.background);
   });
 
 program
@@ -46,12 +48,20 @@ program
   .command('status')
   .description('Show daemon status')
   .action(() => {
+    const status = getDaemonStatus();
+
+    if (status.running) {
+      console.log(`Status: Running (PID: ${status.pid})`);
+    } else {
+      console.log('Status: Stopped');
+    }
+
     const config = loadConfig();
     if (!config) {
-      console.log('Status: Not configured (run "ogp setup")');
+      console.log('\nConfiguration: Not configured (run "ogp setup")');
       return;
     }
-    console.log('Configuration:');
+    console.log('\nConfiguration:');
     console.log(`  Daemon port: ${config.daemonPort}`);
     console.log(`  OpenClaw URL: ${config.openclawUrl}`);
     console.log(`  Gateway URL: ${config.gatewayUrl}`);
@@ -110,8 +120,30 @@ program
   .command('expose')
   .description('Expose daemon via tunnel (cloudflared or ngrok)')
   .option('-m, --method <method>', 'Tunnel method (cloudflared|ngrok)', 'cloudflared')
+  .option('-b, --background', 'Run in background')
   .action(async (options) => {
-    await expose(options.method);
+    await expose(options.method, options.background);
+  });
+
+program
+  .command('expose-stop')
+  .description('Stop background tunnel')
+  .action(() => {
+    stopExpose();
+  });
+
+program
+  .command('install')
+  .description('Install LaunchAgent to start daemon on login (macOS)')
+  .action(async () => {
+    await installLaunchAgent();
+  });
+
+program
+  .command('uninstall')
+  .description('Uninstall LaunchAgent (macOS)')
+  .action(async () => {
+    await uninstallLaunchAgent();
   });
 
 program.parse();
