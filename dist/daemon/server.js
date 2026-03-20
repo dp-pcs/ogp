@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { requireConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
-import { addPeer, getPeer, approvePeer } from './peers.js';
+import { addPeer, getPeer, approvePeer, listPeers } from './peers.js';
 import { handleMessage } from './message-handler.js';
 let server = null;
 const DAEMON_PID_FILE = path.join(getConfigDir(), 'daemon.pid');
@@ -73,16 +73,23 @@ export function startServer(config, background = false) {
     // POST /federation/approve - Peer approves our request
     app.post('/federation/approve', async (req, res) => {
         try {
-            const { peerId, approved } = req.body;
-            if (!peerId || approved === undefined) {
-                return res.status(400).json({ error: 'Missing peerId or approved status' });
-            }
-            const peer = getPeer(peerId);
+            const { peerId, approved, fromGatewayUrl } = req.body || {};
+            const approved_flag = approved !== false; // default true if not specified
+            // Try to find peer by peerId first, then by any pending peer
+            let peer = peerId ? getPeer(peerId) : null;
+            // Fallback: find any pending peer (we likely only have one pending at a time)
             if (!peer) {
-                return res.status(404).json({ error: 'Unknown peer' });
+                const allPeers = listPeers();
+                const pending = allPeers.find((p) => p.status === 'pending');
+                if (pending) {
+                    peer = pending;
+                }
             }
-            if (approved) {
-                approvePeer(peerId);
+            if (!peer) {
+                return res.status(404).json({ error: 'No pending peer found' });
+            }
+            if (approved_flag) {
+                approvePeer(peer.id);
                 console.log(`[OGP] Federation approved by ${peer.displayName}`);
             }
             res.json({ received: true });
