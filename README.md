@@ -1,56 +1,156 @@
 # @dp-pcs/ogp
 
-> OGP (Open Gateway Protocol) federation daemon for OpenClaw
+> Open Gateway Protocol (OGP) - Federation for OpenClaw AI Gateways
 
-A companion daemon that adds peer-to-peer federation capability to any stock OpenClaw installation — no fork required.
+OGP enables peer-to-peer federation between OpenClaw instances, allowing AI agents to communicate and collaborate across different deployments. Think of it as email for AI agents - each OpenClaw instance can securely send and receive messages from other instances without any central authority.
 
-## Features
+## What This Package Does
 
-- **Zero-fork federation**: Runs alongside OpenClaw on a separate port
-- **Cryptographically signed**: Ed25519 signatures on all messages
-- **Intent-based messaging**: Extensible intent registry for different message types
-- **Peer management**: Approve/reject federation requests
-- **OpenClaw integration**: Automatic webhook notifications to your agent
-- **Public tunnel support**: Built-in cloudflared/ngrok integration
+This is a companion daemon that adds federation capabilities to any standard OpenClaw installation. It runs alongside your OpenClaw instance on a separate port and handles:
+
+- Cryptographically signed peer-to-peer messaging using Ed25519
+- Peer relationship management (request, approve, reject)
+- Message verification and relay to your OpenClaw agent
+- Public tunnel support (cloudflared/ngrok) for internet accessibility
+- Optional macOS LaunchAgent for automatic startup
+
+## Prerequisites
+
+- **Node.js 18 or higher**
+- **OpenClaw installed and running** - Get it at [https://openclaw.ai](https://openclaw.ai)
+- **OpenClaw API token** - Generated during OpenClaw setup
+
+## Installation
+
+```bash
+npm install -g github:dp-pcs/ogp
+```
+
+After installation, install the OGP skills for Claude Code:
+
+```bash
+ogp-install-skills
+```
 
 ## Quick Start
 
-### Installation
+### 1. Setup
+
+Run the interactive setup wizard:
 
 ```bash
-npm install -g @dp-pcs/ogp
+ogp setup
 ```
 
-### Setup
+You'll be prompted for:
+- Daemon port (default: 18790)
+- OpenClaw URL (default: http://localhost:18789)
+- OpenClaw API token
+- Your public gateway URL (can update later)
+- Display name and email
+
+### 2. Start the Daemon
 
 ```bash
-# Interactive setup
-ogp setup
-
-# Start daemon
 ogp start
+```
 
-# Expose via tunnel (get public URL)
+Or run in the background:
+
+```bash
+ogp start --background
+```
+
+### 3. Expose to the Internet
+
+```bash
 ogp expose
 ```
 
-### Federation
+This starts a cloudflared tunnel and displays your public URL. Copy this URL and update your configuration:
+
+1. Stop the daemon: `ogp stop`
+2. Edit `~/.ogp/config.json` and update `"gatewayUrl"` with your tunnel URL
+3. Restart: `ogp start --background`
+4. Optionally run tunnel in background: `ogp expose --background`
+
+### 4. Share Your URL
+
+Share your gateway URL with peers who want to federate with you. They can discover your public key at:
+
+```
+https://your-tunnel-url.com/.well-known/ogp
+```
+
+## All Commands
+
+### Daemon Management
+
+| Command | Description |
+|---------|-------------|
+| `ogp setup` | Interactive setup wizard |
+| `ogp start` | Start daemon in foreground |
+| `ogp start --background` | Start daemon as background process |
+| `ogp stop` | Stop the daemon |
+| `ogp status` | Show daemon status and configuration |
+
+### Tunnel Management
+
+| Command | Description |
+|---------|-------------|
+| `ogp expose` | Start cloudflared tunnel in foreground |
+| `ogp expose --background` | Run tunnel as background process |
+| `ogp expose --provider ngrok` | Use ngrok instead of cloudflared |
+| `ogp expose stop` | Stop the tunnel |
+
+### System Integration (macOS)
+
+| Command | Description |
+|---------|-------------|
+| `ogp install` | Install LaunchAgent for auto-start on login |
+| `ogp uninstall` | Remove LaunchAgent |
+
+### Federation Management
+
+| Command | Description |
+|---------|-------------|
+| `ogp federation list` | List all peers |
+| `ogp federation list --status pending` | List pending federation requests |
+| `ogp federation list --status approved` | List approved peers |
+| `ogp federation request <url> <peer-id>` | Request federation with a peer |
+| `ogp federation approve <peer-id>` | Approve a federation request |
+| `ogp federation reject <peer-id>` | Reject a federation request |
+| `ogp federation send <peer-id> <intent> <json>` | Send a message to an approved peer |
+
+### Federation Examples
 
 ```bash
 # Request federation with another OGP instance
 ogp federation request https://peer.example.com peer-alice
 
-# List pending requests
+# Check pending requests
 ogp federation list --status pending
 
 # Approve a peer
 ogp federation approve peer-alice
 
-# Send a message
+# Send a simple message
 ogp federation send peer-alice message '{"text":"Hello!"}'
+
+# Send a task request
+ogp federation send peer-alice task-request '{
+  "taskType": "analysis",
+  "description": "Analyze recent logs"
+}'
+
+# Send a status update
+ogp federation send peer-alice status-update '{
+  "status": "completed",
+  "message": "Task finished"
+}'
 ```
 
-## How It Works
+## How Federation Works
 
 ```
 ┌─────────────┐         ┌──────────────┐         ┌─────────────┐
@@ -60,35 +160,16 @@ ogp federation send peer-alice message '{"text":"Hello!"}'
 └─────────────┘         └──────────────┘         └─────────────┘
 ```
 
-1. OGP daemon runs on port 18790 (configurable)
-2. Exposes federation endpoints and `/.well-known/ogp` for discovery
-3. Manages Ed25519 keypairs and peer relationships
-4. Verifies signatures on incoming messages
-5. Forwards events to OpenClaw via webhook
+1. **Discovery**: Peers discover each other via `/.well-known/ogp` endpoint
+2. **Request**: Alice requests federation with Bob's OGP instance
+3. **Approval**: Bob approves (or rejects) the federation request
+4. **Messaging**: Approved peers can send cryptographically signed messages
+5. **Verification**: Recipient OGP daemon verifies signatures using sender's public key
+6. **Relay**: Valid messages are forwarded to the local OpenClaw agent via webhook
 
-## Architecture
-
-### Directory Structure
-
-```
-~/.ogp/
-  config.json       # Daemon configuration
-  keypair.json      # Ed25519 keypair
-  peers.json        # Federated peers
-  intents.json      # Intent registry
-```
-
-### Endpoints
-
-- `GET /.well-known/ogp` - Discovery endpoint
-- `POST /federation/request` - Receive federation request
-- `POST /federation/approve` - Peer approves your request
-- `POST /federation/message` - Receive federated message
-- `GET /federation/reply/:nonce` - Retrieve message reply
+All messages are signed with Ed25519 cryptographic signatures to prevent tampering and impersonation.
 
 ### Message Format
-
-All messages are signed with Ed25519:
 
 ```json
 {
@@ -106,17 +187,17 @@ All messages are signed with Ed25519:
 }
 ```
 
-## Default Intents
+### Default Intents
 
 - **message**: Simple text message
-- **task-request**: Request a peer to perform a task
+- **task-request**: Request peer to perform a task
 - **status-update**: Status update from a peer
 
-Add custom intents by editing `~/.ogp/intents.json`.
+Custom intents can be added by editing `~/.ogp/intents.json`.
 
 ## Configuration
 
-`~/.ogp/config.json`:
+Configuration is stored in `~/.ogp/config.json`:
 
 ```json
 {
@@ -130,82 +211,34 @@ Add custom intents by editing `~/.ogp/intents.json`.
 }
 ```
 
-## CLI Reference
+Additional state files:
+- `~/.ogp/keypair.json` - Ed25519 keypair (keep secure!)
+- `~/.ogp/peers.json` - Federated peer list
+- `~/.ogp/intents.json` - Intent registry
 
-### Setup & Control
+## Documentation
 
-```bash
-ogp setup           # Interactive setup wizard
-ogp start           # Start daemon
-ogp stop            # Stop daemon
-ogp status          # Show status
-ogp expose          # Expose via tunnel
-```
-
-### Federation Management
-
-```bash
-ogp federation list [--status pending|approved|rejected]
-ogp federation request <peer-url> <peer-id>
-ogp federation approve <peer-id>
-ogp federation reject <peer-id>
-ogp federation send <peer-id> <intent> <json-payload>
-```
-
-### Examples
-
-```bash
-# Simple message
-ogp federation send alice message '{"text":"Hi!"}'
-
-# Task request
-ogp federation send bob task-request '{
-  "taskType": "analysis",
-  "description": "Analyze recent logs",
-  "parameters": {"since": "2026-03-18"}
-}'
-
-# Status update
-ogp federation send charlie status-update '{
-  "status": "completed",
-  "message": "Task finished successfully"
-}'
-```
-
-## Integration with OpenClaw
-
-When a federated message arrives, OGP sends a webhook to OpenClaw:
-
-```bash
-POST http://localhost:18789/api/system-event
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "text": "[OGP] Message from Alice: Hello!",
-  "sessionKey": "agent:main:main",
-  "ogp": {
-    "from": "peer-alice",
-    "intent": "message",
-    "nonce": "550e8400-e29b-41d4-a716-446655440000",
-    "payload": { "text": "Hello!" }
-  }
-}
-```
-
-Your OpenClaw agent receives this as a system event and can respond accordingly.
+- [Quick Start Guide](./docs/quickstart.md) - Detailed step-by-step setup
+- [Federation Flow](./docs/federation-flow.md) - How federation works internally
+- [Protocol Specification](https://github.com/dp-pcs/openclaw-federation) - Full OGP protocol spec
 
 ## Security
 
-- **Ed25519 signatures**: All messages cryptographically signed
-- **Peer approval**: Only approved peers can send messages
+- **Ed25519 signatures**: All messages are cryptographically signed
+- **Peer approval required**: Only approved peers can send messages
 - **Signature verification**: Invalid signatures are rejected
+- **HTTPS tunnels**: Encrypted transport via cloudflared/ngrok
 - **Nonce tracking**: Prevents replay attacks
-- **HTTPS tunnels**: Encrypted transport (via cloudflared/ngrok)
+
+**Best practices:**
+- Keep `~/.ogp/keypair.json` secure with proper file permissions (`chmod 600`)
+- Verify peer identity out-of-band before approving federation requests
+- Always use HTTPS tunnels (never expose raw HTTP)
+- Monitor OpenClaw logs for suspicious peer activity
 
 ## Development
 
-### Build from source
+### Build from Source
 
 ```bash
 git clone https://github.com/dp-pcs/ogp.git
@@ -215,42 +248,35 @@ npm run build
 npm link
 ```
 
-### Project structure
+### Project Structure
 
 ```
 src/
   cli.ts              # Main CLI entrypoint
   daemon/
-    server.ts         # HTTP server
+    server.ts         # HTTP server and endpoints
     keypair.ts        # Ed25519 keypair management
-    peers.ts          # Peer storage
-    intent-registry.ts
-    message-handler.ts
-    notify.ts         # OpenClaw webhook
+    peers.ts          # Peer storage and management
+    intent-registry.ts # Intent definitions
+    message-handler.ts # Message verification and routing
+    notify.ts         # OpenClaw webhook integration
   cli/
     setup.ts          # Setup wizard
     federation.ts     # Federation commands
     expose.ts         # Tunnel management
+    install.ts        # LaunchAgent installation
   shared/
-    signing.ts        # Ed25519 sign/verify
-    config.ts         # Config management
+    signing.ts        # Ed25519 sign/verify utilities
+    config.ts         # Configuration management
 ```
-
-## Roadmap
-
-- [ ] Reply message storage
-- [ ] Message queue for offline peers
-- [ ] Multi-intent subscription filters
-- [ ] Peer discovery via DNS
-- [ ] Federation mesh topology
-- [ ] E2E encryption option
-- [ ] Rate limiting
-- [ ] WebSocket support for real-time events
 
 ## License
 
 MIT
 
-## Author
+## Links
 
-David Proctor
+- **GitHub Repository**: https://github.com/dp-pcs/ogp
+- **Issues**: https://github.com/dp-pcs/ogp/issues
+- **OGP Protocol Spec**: https://github.com/dp-pcs/openclaw-federation
+- **OpenClaw**: https://openclaw.ai

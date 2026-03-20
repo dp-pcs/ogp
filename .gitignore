@@ -1,5 +1,24 @@
+# Dependencies
 node_modules/
-dist/
+
+# Build output
+# Note: dist/ is NOT ignored because it needs to be published to npm
+
+# Logs
 *.log
+daemon.log
+tunnel.log
+
+# macOS
 .DS_Store
+
+# Environment
 .env
+
+# OGP state directory (test config)
+.ogp/
+
+# Process IDs
+*.pid
+daemon.pid
+tunnel.pid
