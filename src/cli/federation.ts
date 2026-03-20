@@ -36,19 +36,19 @@ export async function federationRequest(peerUrl: string, peerId: string): Promis
   };
 
   const keypair = loadOrGenerateKeyPair();
-  const nonce = crypto.randomUUID();
-  const timestamp = new Date().toISOString();
 
-  const requestBody = {
-    fromGatewayId: `${new URL(config.gatewayUrl).hostname}:${config.daemonPort}`,
-    fromDisplayName: config.displayName,
-    fromGatewayUrl: config.gatewayUrl,
-    fromPublicKey: keypair.publicKey,
-    fromEmail: config.email,
-    proposedScope: ['calendar-read', 'ping'],
-    timestamp,
-    nonce,
+  const peer = {
+    id: `${new URL(config.gatewayUrl).hostname}:${config.daemonPort}`,
+    displayName: config.displayName,
+    email: config.email,
+    gatewayUrl: config.gatewayUrl,
+    publicKey: keypair.publicKey,
   };
+
+  const { sign } = await import('../shared/signing.js');
+  const signature = sign(JSON.stringify(peer), keypair.privateKey);
+
+  const requestBody = { peer, signature };
 
   // Send request
   try {
