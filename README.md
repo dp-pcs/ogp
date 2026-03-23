@@ -268,6 +268,65 @@ ogp federation agent david personal-finances "What's your budget?"  # ✗ Topic 
 - v0.2 gateways automatically detect protocol version
 - No breaking changes - existing federations continue working
 
+## Agent-Comms Response Policies
+
+Control how your agent responds to incoming agent-comms messages with per-peer policies.
+
+### Response Levels
+
+| Level | Behavior |
+|-------|----------|
+| `full` | Respond openly, share details |
+| `summary` | High-level responses only |
+| `escalate` | Ask human before responding |
+| `deny` | Politely decline to discuss |
+
+### Policy Commands
+
+```bash
+# View all policies
+ogp agent-comms policies
+
+# View policies for a specific peer
+ogp agent-comms policies stan
+
+# Configure global defaults
+ogp agent-comms configure --global --topics "general,testing" --level summary
+
+# Configure specific peer(s)
+ogp agent-comms configure stan --topics "memory-management" --level full --notes "Trusted"
+ogp agent-comms configure stan,leo,alice --topics "testing" --level full  # Multi-select
+
+# Add/remove topics
+ogp agent-comms add-topic stan calendar --level escalate
+ogp agent-comms remove-topic stan personal
+
+# Reset peer to global defaults
+ogp agent-comms reset stan
+
+# View activity log
+ogp agent-comms activity
+ogp agent-comms activity --last 20
+ogp agent-comms activity stan  # Filter by peer
+
+# Settings
+ogp agent-comms default summary    # Set default level
+ogp agent-comms logging on         # Enable/disable logging
+```
+
+### Policy Inheritance
+
+1. **Peer-specific** policies override global policies
+2. **Global** policies apply to all peers without specific config
+3. **Default level** applies to unknown topics
+
+When an agent-comms message arrives, your agent receives the policy level in metadata:
+```
+[OGP Agent-Comms] Stanislav → memory-management [FULL]: How do you persist context?
+```
+
+Your agent can then respond according to the policy level.
+
 ## Configuration
 
 Configuration is stored in `~/.ogp/config.json`:
@@ -288,6 +347,24 @@ Additional state files:
 - `~/.ogp/keypair.json` - Ed25519 keypair (keep secure!)
 - `~/.ogp/peers.json` - Federated peer list
 - `~/.ogp/intents.json` - Intent registry
+
+## Skills (Claude Code)
+
+OGP includes skills for Claude Code agents. Install them with:
+
+```bash
+ogp-install-skills
+```
+
+### Available Skills
+
+| Skill | Purpose |
+|-------|---------|
+| **ogp** | Core protocol: federation setup, peer management, sending messages |
+| **ogp-expose** | Tunnel setup: cloudflared/ngrok configuration |
+| **ogp-agent-comms** | Interactive wizard: configure response policies per-peer |
+
+The `ogp-agent-comms` skill guides you through setting up response policies interactively, including multi-select for batch peer configuration.
 
 ## Documentation
 
