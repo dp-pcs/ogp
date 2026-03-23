@@ -1,8 +1,18 @@
 ---
 skill_name: ogp
-version: 0.1.0
-description: Manage OGP (Open Gateway Protocol) daemon and federation
-trigger: Use when the user wants to configure, start, or manage the OGP federation daemon
+version: 0.2.0
+description: Manage OGP (Open Gateway Protocol) daemon and federation. OGP adds peer-to-peer federation to OpenClaw, allowing AI agents to communicate across different deployments with cryptographic identity and signed messages.
+trigger: Use when the user wants to configure, start, or manage the OGP federation daemon, manage federated peers, send messages to peers, or check federation status.
+requires:
+  bins:
+    - ogp
+  state_paths:
+    - ~/.ogp/config.json
+    - ~/.ogp/peers.json
+    - ~/.ogp/daemon.pid
+    - ~/.ogp/keypair.json
+  install: npm install -g @dp-pcs/ogp
+  docs: https://github.com/dp-pcs/ogp
 ---
 ## Prerequisites
 
