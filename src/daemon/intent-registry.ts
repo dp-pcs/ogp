@@ -47,6 +47,21 @@ const DEFAULT_INTENTS: Intent[] = [
       },
       required: ['status']
     }
+  },
+  {
+    name: 'agent-comms',
+    description: 'Agent-to-agent communication with topic routing',
+    schema: {
+      type: 'object',
+      properties: {
+        topic: { type: 'string', description: 'Topic category for routing (e.g., "memory-management")' },
+        message: { type: 'string', description: 'The message content' },
+        replyTo: { type: 'string', format: 'uri', description: 'Callback URL for async reply' },
+        conversationId: { type: 'string', description: 'Thread identifier for multi-turn conversations' },
+        priority: { type: 'string', enum: ['low', 'normal', 'high'], description: 'Message priority level' }
+      },
+      required: ['topic', 'message']
+    }
   }
 ];
 

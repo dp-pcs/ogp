@@ -9,7 +9,10 @@ import {
   federationRequest,
   federationApprove,
   federationReject,
-  federationSend
+  federationSend,
+  federationShowScopes,
+  federationUpdateGrants,
+  federationSendAgentComms
 } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
@@ -19,7 +22,7 @@ const program = new Command();
 program
   .name('ogp')
   .description('OGP (Open Gateway Protocol) federation daemon for OpenClaw')
-  .version('0.1.0');
+  .version('0.2.0');
 
 program
   .command('setup')
@@ -92,10 +95,18 @@ federation
 
 federation
   .command('approve')
-  .description('Approve a pending federation request')
+  .description('Approve a pending federation request with optional scope grants')
   .argument('<peer-id>', 'Peer ID')
-  .action(async (peerId) => {
-    await federationApprove(peerId);
+  .option('--intents <list>', 'Comma-separated intents to grant (e.g., message,agent-comms)')
+  .option('--rate <limit>', 'Rate limit as requests/seconds (e.g., 100/3600)')
+  .option('--topics <list>', 'Comma-separated topics for agent-comms (e.g., memory-management,task-delegation)')
+  .action(async (peerId, options) => {
+    const approveOptions = {
+      intents: options.intents ? options.intents.split(',').map((s: string) => s.trim()) : undefined,
+      rate: options.rate,
+      topics: options.topics ? options.topics.split(',').map((s: string) => s.trim()) : undefined
+    };
+    await federationApprove(peerId, approveOptions);
   });
 
 federation
@@ -133,6 +144,49 @@ federation
   .argument('<payload>', 'Payload as JSON string')
   .action(async (peerId, intent, payload) => {
     await federationSend(peerId, intent, payload);
+  });
+
+federation
+  .command('scopes')
+  .description('Show scope grants for a peer')
+  .argument('<peer-id>', 'Peer ID')
+  .action(async (peerId) => {
+    await federationShowScopes(peerId);
+  });
+
+federation
+  .command('grant')
+  .description('Update scope grants for an approved peer')
+  .argument('<peer-id>', 'Peer ID')
+  .option('--intents <list>', 'Comma-separated intents to grant (e.g., message,agent-comms)')
+  .option('--rate <limit>', 'Rate limit as requests/seconds (e.g., 100/3600)')
+  .option('--topics <list>', 'Comma-separated topics for agent-comms')
+  .action(async (peerId, options) => {
+    const grantOptions = {
+      intents: options.intents ? options.intents.split(',').map((s: string) => s.trim()) : undefined,
+      rate: options.rate,
+      topics: options.topics ? options.topics.split(',').map((s: string) => s.trim()) : undefined
+    };
+    await federationUpdateGrants(peerId, grantOptions);
+  });
+
+federation
+  .command('agent')
+  .description('Send an agent-comms message to a peer')
+  .argument('<peer-id>', 'Peer ID')
+  .argument('<topic>', 'Topic (e.g., memory-management)')
+  .argument('<message>', 'Message text')
+  .option('-p, --priority <level>', 'Priority (low|normal|high)', 'normal')
+  .option('-c, --conversation <id>', 'Conversation ID for threading')
+  .option('-w, --wait', 'Wait for reply')
+  .option('-t, --timeout <ms>', 'Reply timeout in milliseconds', '30000')
+  .action(async (peerId, topic, message, options) => {
+    await federationSendAgentComms(peerId, topic, message, {
+      priority: options.priority as 'low' | 'normal' | 'high',
+      conversationId: options.conversation,
+      waitForReply: options.wait,
+      replyTimeout: parseInt(options.timeout, 10)
+    });
   });
 
 program

@@ -4,9 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { requireConfig, type OGPConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey, getPrivateKey } from './keypair.js';
-import { addPeer, getPeer, approvePeer, listPeers, type Peer } from './peers.js';
+import { addPeer, getPeer, approvePeer, listPeers, updatePeer, updatePeerReceivedScopes, type Peer } from './peers.js';
 import { handleMessage, type FederationMessage } from './message-handler.js';
 import { signObject } from '../shared/signing.js';
+import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
+import { startReplyCleanup, stopReplyCleanup, getPendingReply, deletePendingReply, storePendingReply, type ReplyPayload } from './reply-handler.js';
+import type { ScopeBundle } from './scopes.js';
+import { loadIntents } from './intent-registry.js';
 
 let server: any = null;
 
@@ -37,15 +41,24 @@ export function startServer(config?: OGPConfig, background = false): void {
 
   // /.well-known/ogp - Discovery endpoint
   app.get('/.well-known/ogp', (req: Request, res: Response) => {
+    // Get supported intents from registry
+    const intents = loadIntents();
+    const intentNames = intents.map(i => i.name);
+
     res.json({
-      version: '0.1.0',
+      version: '0.2.0',
       displayName: cfg.displayName,
       email: cfg.email,
       gatewayUrl: cfg.gatewayUrl,
       publicKey: getPublicKey(),
+      capabilities: {
+        intents: intentNames,
+        features: ['scope-negotiation', 'reply-callback']
+      },
       endpoints: {
         request: `${cfg.gatewayUrl}/federation/request`,
         approve: `${cfg.gatewayUrl}/federation/approve`,
+        message: `${cfg.gatewayUrl}/federation/message`,
         reply: `${cfg.gatewayUrl}/federation/reply/:nonce`
       }
     });
@@ -87,6 +100,7 @@ export function startServer(config?: OGPConfig, background = false): void {
 
   // POST /federation/approve - Peer approves our request
   // Accepts both package format {peerId, approved} and fork format {fromGatewayId, fromGatewayUrl, ...}
+  // v0.2.0: Also accepts scopeGrants for scope negotiation
   app.post('/federation/approve', async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
@@ -100,6 +114,10 @@ export function startServer(config?: OGPConfig, background = false): void {
 
       // Package format: simple peerId + approved flag
       const peerId = body.peerId;
+
+      // v0.2.0: Scope grants from the approving peer
+      const scopeGrants = body.scopeGrants as ScopeBundle | undefined;
+      const protocolVersion = body.protocolVersion || (scopeGrants ? '0.2.0' : '0.1.0');
 
       // Find the peer to approve — try multiple strategies
       let peer = null;
@@ -121,14 +139,25 @@ export function startServer(config?: OGPConfig, background = false): void {
       }
 
       // Update peer info if fork sent richer data
-      if (fromDisplayName || fromPublicKey || fromEmail) {
-        peer.displayName = fromDisplayName || peer.displayName;
-        peer.publicKey = fromPublicKey || peer.publicKey;
-        peer.email = fromEmail || peer.email;
+      const peerUpdates: Partial<Peer> = {};
+      if (fromDisplayName) peerUpdates.displayName = fromDisplayName;
+      if (fromPublicKey) peerUpdates.publicKey = fromPublicKey;
+      if (fromEmail) peerUpdates.email = fromEmail;
+      peerUpdates.protocolVersion = protocolVersion;
+
+      // Store received scopes (what this peer grants TO us)
+      if (scopeGrants) {
+        peerUpdates.receivedScopes = scopeGrants;
+        console.log(`[OGP] Received scope grants from ${peer.displayName}:`, scopeGrants.scopes.map(s => s.intent).join(', '));
+      }
+
+      // Update peer with new info
+      if (Object.keys(peerUpdates).length > 0) {
+        updatePeer(peer.id, peerUpdates);
       }
 
       approvePeer(peer.id);
-      console.log(`[OGP] Federation approved by ${peer.displayName}`);
+      console.log(`[OGP] Federation approved by ${peer.displayName} (v${protocolVersion})`);
 
       res.json({ received: true });
     } catch (error) {
@@ -169,23 +198,73 @@ export function startServer(config?: OGPConfig, background = false): void {
     }
   });
 
-  // GET /federation/reply/:nonce - Get reply to a message
+  // GET /federation/reply/:nonce - Poll for reply to a message
   app.get('/federation/reply/:nonce', (req: Request, res: Response) => {
-    // Simple implementation - in production, store replies in a database
+    const { nonce } = req.params;
+    const reply = getPendingReply(nonce);
+
+    if (!reply) {
+      return res.status(404).json({
+        nonce,
+        status: 'pending',
+        message: 'Reply not yet available'
+      });
+    }
+
+    // Delete after retrieval
+    deletePendingReply(nonce);
+
     res.json({
-      nonce: req.params.nonce,
-      status: 'not-implemented',
-      message: 'Reply storage not yet implemented'
+      nonce,
+      status: 'complete',
+      reply: {
+        success: reply.success,
+        data: reply.data,
+        error: reply.error,
+        timestamp: reply.timestamp
+      }
     });
+  });
+
+  // POST /federation/reply/:nonce - Receive reply callback from remote gateway
+  app.post('/federation/reply/:nonce', (req: Request, res: Response) => {
+    const { nonce } = req.params;
+    const body = req.body || {};
+
+    // The reply can come in different formats
+    const reply = body.reply || body;
+
+    const replyPayload: ReplyPayload = {
+      nonce,
+      success: reply.success ?? true,
+      data: reply.data,
+      error: reply.error,
+      timestamp: reply.timestamp || new Date().toISOString()
+    };
+
+    // Store for later retrieval
+    storePendingReply(nonce, replyPayload);
+    console.log(`[OGP] Received reply callback for nonce ${nonce}`);
+
+    res.json({ received: true });
   });
 
   server = app.listen(cfg.daemonPort, () => {
     console.log(`[OGP] Daemon listening on port ${cfg.daemonPort}`);
     console.log(`[OGP] Public key: ${getPublicKey()}`);
+
+    // Start cleanup timers
+    startDoormanCleanup();
+    startReplyCleanup();
+    console.log(`[OGP] Started doorman and reply cleanup timers`);
   });
 }
 
 export function stopServer(): void {
+  // Stop cleanup timers
+  stopDoormanCleanup();
+  stopReplyCleanup();
+
   // Check for PID file
   if (!fs.existsSync(DAEMON_PID_FILE)) {
     console.log('OGP daemon is not running');

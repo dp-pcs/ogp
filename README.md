@@ -121,6 +121,16 @@ https://your-tunnel-url.com/.well-known/ogp
 | `ogp federation approve <peer-id>` | Approve a federation request |
 | `ogp federation reject <peer-id>` | Reject a federation request |
 | `ogp federation send <peer-id> <intent> <json>` | Send a message to an approved peer |
+| `ogp federation scopes <peer-id>` | Show scope grants for a peer |
+| `ogp federation grant <peer-id> [options]` | Update scope grants for a peer |
+| `ogp federation agent <peer-id> <topic> <message>` | Send agent-comms message |
+
+### Scope Options (v0.2.0)
+
+When approving or granting scopes:
+- `--intents <list>` - Comma-separated intents (e.g., `message,agent-comms`)
+- `--rate <limit>` - Rate limit as requests/seconds (e.g., `100/3600`)
+- `--topics <list>` - Topics for agent-comms (e.g., `memory-management,task-delegation`)
 
 ### Federation Examples
 
@@ -131,11 +141,34 @@ ogp federation request https://peer.example.com peer-alice
 # Check pending requests
 ogp federation list --status pending
 
-# Approve a peer
+# Approve a peer (v0.1 mode - no scope restrictions)
 ogp federation approve peer-alice
+
+# Approve with scope grants (v0.2.0)
+ogp federation approve peer-alice \
+  --intents message,agent-comms \
+  --rate 100/3600 \
+  --topics memory-management,task-delegation
+
+# View peer scopes
+ogp federation scopes peer-alice
+
+# Update grants for an existing peer
+ogp federation grant peer-alice \
+  --intents agent-comms \
+  --topics project-planning
 
 # Send a simple message
 ogp federation send peer-alice message '{"text":"Hello!"}'
+
+# Send agent-comms (v0.2.0)
+ogp federation agent peer-alice memory-management "How do you persist context?"
+
+# Send agent-comms with priority
+ogp federation agent peer-alice task-delegation "Schedule standup" --priority high
+
+# Send agent-comms and wait for reply
+ogp federation agent peer-alice queries "What's the status?" --wait --timeout 60000
 
 # Send a task request
 ogp federation send peer-alice task-request '{
@@ -192,8 +225,48 @@ All messages are signed with Ed25519 cryptographic signatures to prevent tamperi
 - **message**: Simple text message
 - **task-request**: Request peer to perform a task
 - **status-update**: Status update from a peer
+- **agent-comms**: Agent-to-agent communication with topic routing (v0.2.0)
 
 Custom intents can be added by editing `~/.ogp/intents.json`.
+
+## Scope Negotiation (v0.2.0)
+
+OGP v0.2.0 introduces a three-layer scope model based on BGP-style per-peer policies:
+
+```
+Layer 1: Gateway Capabilities  → What I CAN support (advertised globally)
+Layer 2: Peer Negotiation      → What I WILL grant YOU (per-peer, during approval)
+Layer 3: Runtime Enforcement   → Is THIS request within YOUR granted scope (doorman)
+```
+
+### How It Works
+
+1. **Discovery**: Peers discover each other's capabilities via `/.well-known/ogp`
+2. **Request**: Peer A requests federation with Peer B
+3. **Grant**: Peer B approves with specific scope grants (intents, rate limits, topics)
+4. **Enforcement**: The doorman validates every incoming message against granted scopes
+
+### Example: David ↔ Stan Federation
+
+```bash
+# David approves Stan with agent-comms for memory-management topics only
+ogp federation approve stan \
+  --intents agent-comms \
+  --topics memory-management \
+  --rate 10/60
+
+# Stan can now send:
+ogp federation agent david memory-management "How do you persist context?"  # ✓
+
+# But NOT:
+ogp federation agent david personal-finances "What's your budget?"  # ✗ Topic not allowed
+```
+
+### Backward Compatibility
+
+- v0.1 peers work without scope negotiation (default rate limits apply)
+- v0.2 gateways automatically detect protocol version
+- No breaking changes - existing federations continue working
 
 ## Configuration
 
@@ -220,6 +293,8 @@ Additional state files:
 
 - [Quick Start Guide](./docs/quickstart.md) - Detailed step-by-step setup
 - [Federation Flow](./docs/federation-flow.md) - How federation works internally
+- [Scope Negotiation](./docs/scopes.md) - Per-peer scope configuration (v0.2.0)
+- [Agent Communications](./docs/agent-comms.md) - Agent-to-agent messaging (v0.2.0)
 - [Protocol Specification](https://github.com/dp-pcs/openclaw-federation) - Full OGP protocol spec
 
 ## Security
@@ -257,12 +332,15 @@ src/
     server.ts         # HTTP server and endpoints
     keypair.ts        # Ed25519 keypair management
     peers.ts          # Peer storage and management
+    scopes.ts         # Scope types and utilities (v0.2.0)
+    doorman.ts        # Scope enforcement + rate limiting (v0.2.0)
+    reply-handler.ts  # Async reply mechanism (v0.2.0)
     intent-registry.ts # Intent definitions
     message-handler.ts # Message verification and routing
     notify.ts         # OpenClaw webhook integration
   cli/
     setup.ts          # Setup wizard
-    federation.ts     # Federation commands
+    federation.ts     # Federation commands (scopes, agent-comms)
     expose.ts         # Tunnel management
     install.ts        # LaunchAgent installation
   shared/

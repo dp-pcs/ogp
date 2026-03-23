@@ -2,6 +2,8 @@ import { verifyObject } from '../shared/signing.js';
 import { getPeer } from './peers.js';
 import { getIntent } from './intent-registry.js';
 import { notifyOpenClaw } from './notify.js';
+import { checkAccess } from './doorman.js';
+import { handleReply, createReply } from './reply-handler.js';
 
 export interface FederationMessage {
   intent: string;
@@ -10,6 +12,9 @@ export interface FederationMessage {
   nonce: string;       // unique message ID
   timestamp: string;
   payload: any;
+  // v0.2.0 agent-comms fields
+  replyTo?: string;        // callback URL for async replies
+  conversationId?: string; // thread identifier
 }
 
 export interface MessageResponse {
@@ -17,19 +22,22 @@ export interface MessageResponse {
   nonce: string;
   response?: any;
   error?: string;
+  statusCode?: number;     // HTTP status code
+  retryAfter?: number;     // For 429 rate limit responses
 }
 
 export async function handleMessage(
   message: FederationMessage,
   signature: string
 ): Promise<MessageResponse> {
-  // 1. Verify sender
+  // 1. Verify sender exists and is approved
   const peer = getPeer(message.from);
   if (!peer) {
     return {
       success: false,
       nonce: message.nonce,
-      error: 'Unknown peer'
+      error: 'Unknown peer',
+      statusCode: 403
     };
   }
 
@@ -37,7 +45,8 @@ export async function handleMessage(
     return {
       success: false,
       nonce: message.nonce,
-      error: 'Peer not approved'
+      error: 'Peer not approved',
+      statusCode: 403
     };
   }
 
@@ -46,21 +55,45 @@ export async function handleMessage(
     return {
       success: false,
       nonce: message.nonce,
-      error: 'Invalid signature'
+      error: 'Invalid signature',
+      statusCode: 401
     };
   }
 
-  // 3. Check intent exists
+  // 3. Doorman scope check (v0.2.0)
+  const accessResult = checkAccess(message.from, message.intent, message.payload);
+  if (!accessResult.allowed) {
+    console.log(`[OGP] Access denied for ${message.from}: ${accessResult.reason}`);
+    return {
+      success: false,
+      nonce: message.nonce,
+      error: accessResult.reason,
+      statusCode: accessResult.statusCode,
+      retryAfter: accessResult.retryAfter
+    };
+  }
+
+  if (accessResult.isV1Peer) {
+    console.log(`[OGP] Processing message from v0.1 peer ${message.from} (legacy mode)`);
+  }
+
+  // 4. Check intent exists
   const intent = getIntent(message.intent);
   if (!intent) {
     return {
       success: false,
       nonce: message.nonce,
-      error: `Unknown intent: ${message.intent}`
+      error: `Unknown intent: ${message.intent}`,
+      statusCode: 400
     };
   }
 
-  // 4. Notify OpenClaw
+  // 5. Handle agent-comms specially (includes replyTo support)
+  if (message.intent === 'agent-comms') {
+    return handleAgentComms(message, peer.displayName);
+  }
+
+  // 6. Standard intent handling: Notify OpenClaw
   const notificationText = formatNotification(message, peer.displayName);
   await notifyOpenClaw({
     text: notificationText,
@@ -69,18 +102,66 @@ export async function handleMessage(
         from: message.from,
         intent: message.intent,
         nonce: message.nonce,
-        payload: message.payload
+        payload: message.payload,
+        replyTo: message.replyTo,
+        conversationId: message.conversationId
       }
     }
   });
 
-  // 5. Return success
+  // 7. Return success
   return {
     success: true,
     nonce: message.nonce,
     response: {
       received: true,
       timestamp: new Date().toISOString()
+    }
+  };
+}
+
+/**
+ * Handle agent-comms intent with topic routing and reply support
+ */
+async function handleAgentComms(
+  message: FederationMessage,
+  displayName: string
+): Promise<MessageResponse> {
+  const payload = message.payload || {};
+  const topic = payload.topic || 'general';
+  const messageText = payload.message || '';
+  const priority = payload.priority || 'normal';
+
+  // Build enhanced notification
+  const priorityIndicator = priority === 'high' ? '[HIGH] ' : priority === 'low' ? '[low] ' : '';
+  const notificationText = `[OGP Agent-Comms] ${priorityIndicator}${displayName} → ${topic}: ${messageText}`;
+
+  await notifyOpenClaw({
+    text: notificationText,
+    metadata: {
+      ogp: {
+        from: message.from,
+        intent: 'agent-comms',
+        nonce: message.nonce,
+        topic,
+        message: messageText,
+        priority,
+        replyTo: message.replyTo,
+        conversationId: message.conversationId,
+        payload: message.payload
+      }
+    }
+  });
+
+  return {
+    success: true,
+    nonce: message.nonce,
+    response: {
+      received: true,
+      topic,
+      timestamp: new Date().toISOString(),
+      // Tell sender how to get replies if they didn't provide callback
+      replyEndpoint: message.replyTo ? undefined : `/federation/reply/${message.nonce}`
     }
   };
 }
