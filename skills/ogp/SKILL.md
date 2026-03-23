@@ -108,6 +108,26 @@ When another OGP instance sends a federation request:
 2. Approve with `ogp federation approve <peer-id>`
 3. Or reject with `ogp federation reject <peer-id>`
 
+### Approving with Scope Grants (v0.2.0)
+
+Control what intents and topics each peer can access:
+
+```bash
+# Approve with specific scopes
+ogp federation approve alice \
+  --intents message,agent-comms \
+  --rate 100/3600 \
+  --topics memory-management,task-delegation
+
+# View peer's scopes
+ogp federation scopes alice
+
+# Update grants for existing peer
+ogp federation grant alice \
+  --intents agent-comms \
+  --topics project-planning
+```
+
 ### Sending Messages
 
 Once peers are approved:
@@ -115,6 +135,10 @@ Once peers are approved:
 ```bash
 # Simple message
 ogp federation send alice message '{"text":"Hi Alice!"}'
+
+# Agent-comms (v0.2.0) - agent-to-agent communication
+ogp federation agent alice memory-management "How do you persist context?"
+ogp federation agent alice task-delegation "Can you help with code review?" --priority high
 
 # Task request
 ogp federation send bob task-request '{
@@ -129,6 +153,24 @@ ogp federation send charlie status-update '{
   "message": "Task finished"
 }'
 ```
+
+### Configuring Response Policies
+
+Control how your agent responds to incoming messages:
+
+```bash
+# View policies
+ogp agent-comms policies
+ogp agent-comms policies alice
+
+# Configure per-peer policies
+ogp agent-comms configure alice --topics "memory-management" --level full
+
+# View activity log
+ogp agent-comms activity
+```
+
+For detailed response policy setup, use the `/ogp-agent-comms` skill.
 
 ## Configuration
 
