@@ -102,15 +102,18 @@ export function checkAccess(
   }
 
   // 2. Determine scope bundle to use
+  // Priority: grantedScopes takes precedence over protocolVersion
   let scopeBundle: ScopeBundle;
   let isV1Peer = false;
 
-  if (!peer.protocolVersion || peer.protocolVersion === '0.1.0' || !peer.grantedScopes) {
-    // v0.1 peer or no scope negotiation - use default scopes
+  if (peer.grantedScopes) {
+    // Use negotiated scopes if they exist
+    scopeBundle = peer.grantedScopes;
+    isV1Peer = !peer.protocolVersion || peer.protocolVersion === '0.1.0';
+  } else {
+    // No scope negotiation done - fall back to v0.1 defaults
     isV1Peer = true;
     scopeBundle = DEFAULT_V1_SCOPES;
-  } else {
-    scopeBundle = peer.grantedScopes;
   }
 
   // 3. Find scope grant for this intent
