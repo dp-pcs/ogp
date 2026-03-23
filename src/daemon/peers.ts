@@ -1,7 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { getConfigDir, ensureConfigDir } from '../shared/config.js';
+import {
+  getConfigDir,
+  ensureConfigDir,
+  type ResponseLevel,
+  type ResponsePolicy,
+  type TopicPolicy
+} from '../shared/config.js';
 import type { ScopeBundle } from './scopes.js';
+
+// Re-export types for convenience
+export type { ResponseLevel, ResponsePolicy, TopicPolicy };
 
 export interface Peer {
   id: string;           // unique peer ID (hostname or user-chosen)
@@ -17,6 +26,8 @@ export interface Peer {
   protocolVersion?: string;          // "0.1.0" or "0.2.0"
   grantedScopes?: ScopeBundle;       // what I grant TO this peer
   receivedScopes?: ScopeBundle;      // what this peer grants TO me
+  // Agent-comms response policy
+  responsePolicy?: ResponsePolicy;   // how my agent responds to this peer
 }
 
 const PEERS_FILE = path.join(getConfigDir(), 'peers.json');
@@ -136,6 +147,75 @@ export function updatePeer(peerId: string, updates: Partial<Peer>): boolean {
   if (peerIndex === -1) return false;
 
   peers[peerIndex] = { ...peers[peerIndex], ...updates };
+  savePeers(peers);
+  return true;
+}
+
+/**
+ * Update response policy for a peer
+ */
+export function updatePeerResponsePolicy(peerId: string, policy: ResponsePolicy): boolean {
+  const peers = loadPeers();
+  const peer = peers.find(p => p.id === peerId);
+  if (!peer) return false;
+
+  peer.responsePolicy = policy;
+  savePeers(peers);
+  return true;
+}
+
+/**
+ * Set a topic policy for a peer
+ */
+export function setPeerTopicPolicy(
+  peerId: string,
+  topic: string,
+  level: ResponseLevel,
+  notes?: string
+): boolean {
+  const peers = loadPeers();
+  const peer = peers.find(p => p.id === peerId);
+  if (!peer) return false;
+
+  if (!peer.responsePolicy) {
+    peer.responsePolicy = {};
+  }
+
+  peer.responsePolicy[topic] = { level, ...(notes && { notes }) };
+  savePeers(peers);
+  return true;
+}
+
+/**
+ * Remove a topic from peer's response policy
+ */
+export function removePeerTopicPolicy(peerId: string, topic: string): boolean {
+  const peers = loadPeers();
+  const peer = peers.find(p => p.id === peerId);
+  if (!peer || !peer.responsePolicy) return false;
+
+  delete peer.responsePolicy[topic];
+  savePeers(peers);
+  return true;
+}
+
+/**
+ * Get response policy for a peer (peer-specific only, no global fallback)
+ */
+export function getPeerResponsePolicy(peerId: string): ResponsePolicy | null {
+  const peer = getPeer(peerId);
+  return peer?.responsePolicy || null;
+}
+
+/**
+ * Clear response policy for a peer (reset to global defaults)
+ */
+export function clearPeerResponsePolicy(peerId: string): boolean {
+  const peers = loadPeers();
+  const peer = peers.find(p => p.id === peerId);
+  if (!peer) return false;
+
+  delete peer.responsePolicy;
   savePeers(peers);
   return true;
 }

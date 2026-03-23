@@ -2,6 +2,35 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
+/**
+ * Response level for agent-comms
+ */
+export type ResponseLevel = 'full' | 'summary' | 'escalate' | 'deny';
+
+/**
+ * Topic policy configuration
+ */
+export interface TopicPolicy {
+  level: ResponseLevel;
+  notes?: string;
+}
+
+/**
+ * Response policy mapping topics to policies
+ */
+export interface ResponsePolicy {
+  [topic: string]: TopicPolicy;
+}
+
+/**
+ * Agent-comms configuration
+ */
+export interface AgentCommsConfig {
+  globalPolicy: ResponsePolicy;
+  defaultLevel: ResponseLevel;
+  activityLog: boolean;
+}
+
 export interface OGPConfig {
   daemonPort: number;
   openclawUrl: string;
@@ -10,6 +39,8 @@ export interface OGPConfig {
   displayName: string;
   email: string;
   stateDir: string;
+  // Agent-comms configuration (optional)
+  agentComms?: AgentCommsConfig;
 }
 
 const DEFAULT_CONFIG_DIR = path.join(os.homedir(), '.ogp');

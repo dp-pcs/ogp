@@ -4,6 +4,7 @@ import { getIntent } from './intent-registry.js';
 import { notifyOpenClaw } from './notify.js';
 import { checkAccess } from './doorman.js';
 import { handleReply, createReply } from './reply-handler.js';
+import { logActivity, getEffectivePolicy } from './agent-comms.js';
 
 export interface FederationMessage {
   intent: string;
@@ -132,9 +133,23 @@ async function handleAgentComms(
   const messageText = payload.message || '';
   const priority = payload.priority || 'normal';
 
-  // Build enhanced notification
+  // Get effective response policy for this peer and topic
+  const policy = getEffectivePolicy(message.from, topic);
+
+  // Log incoming activity
+  logActivity({
+    direction: 'in',
+    peerId: message.from,
+    peerName: displayName,
+    topic,
+    message: messageText,
+    level: policy.level
+  });
+
+  // Build enhanced notification with policy info
   const priorityIndicator = priority === 'high' ? '[HIGH] ' : priority === 'low' ? '[low] ' : '';
-  const notificationText = `[OGP Agent-Comms] ${priorityIndicator}${displayName} → ${topic}: ${messageText}`;
+  const policyTag = `[${policy.level.toUpperCase()}]`;
+  const notificationText = `[OGP Agent-Comms] ${priorityIndicator}${displayName} → ${topic} ${policyTag}: ${messageText}`;
 
   await notifyOpenClaw({
     text: notificationText,
@@ -148,7 +163,12 @@ async function handleAgentComms(
         priority,
         replyTo: message.replyTo,
         conversationId: message.conversationId,
-        payload: message.payload
+        payload: message.payload,
+        // Include policy info for agent to use
+        responsePolicy: {
+          level: policy.level,
+          notes: policy.notes
+        }
       }
     }
   });

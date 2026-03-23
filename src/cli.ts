@@ -16,6 +16,18 @@ import {
 } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
+import {
+  showPolicies,
+  configurePolicies,
+  addTopic,
+  removeTopic,
+  resetPolicy,
+  showActivity,
+  clearActivity,
+  setDefault,
+  setLogging
+} from './cli/agent-comms.js';
+import type { ResponseLevel } from './daemon/peers.js';
 
 const program = new Command();
 
@@ -229,20 +241,18 @@ program
     await uninstallLaunchAgent();
   });
 
-program.parse();
-
 program
   .command('config')
   .description('View or update OGP configuration')
   .option('--set <key=value>', 'Set a config value (e.g. --set gatewayUrl=https://xyz.trycloudflare.com)')
   .option('--get <key>', 'Get a config value')
   .action((opts) => {
-    const { loadConfig, saveConfig } = require('./shared/config.js');
     const config = loadConfig() || {};
     if (opts.set) {
       const [key, ...rest] = opts.set.split('=');
       const value = rest.join('=');
       (config as any)[key] = value;
+      const { saveConfig } = require('./shared/config.js');
       saveConfig(config);
       console.log(`✓ Set ${key} = ${value}`);
     } else if (opts.get) {
@@ -251,3 +261,93 @@ program
       console.log(JSON.stringify(config, null, 2));
     }
   });
+
+// Agent-comms configuration commands
+const agentComms = program
+  .command('agent-comms')
+  .description('Configure agent-to-agent communication policies');
+
+agentComms
+  .command('policies')
+  .description('Show response policies (global and per-peer)')
+  .argument('[peer-id]', 'Optional peer ID to show specific peer policies')
+  .action((peerId) => {
+    showPolicies(peerId);
+  });
+
+agentComms
+  .command('configure')
+  .description('Configure response policies for peers or globally')
+  .argument('[peer-ids]', 'Comma-separated peer IDs (or use --global)')
+  .option('--global', 'Configure global default policies')
+  .option('--topics <list>', 'Comma-separated topics to configure')
+  .option('--level <level>', 'Response level (full|summary|escalate|deny)')
+  .option('--notes <text>', 'Notes about this policy')
+  .action((peerIds, options) => {
+    configurePolicies(peerIds, {
+      global: options.global,
+      topics: options.topics,
+      level: options.level as ResponseLevel,
+      notes: options.notes
+    });
+  });
+
+agentComms
+  .command('add-topic')
+  .description('Add a topic to a peer\'s response policy')
+  .argument('<peer-id>', 'Peer ID')
+  .argument('<topic>', 'Topic name')
+  .option('--level <level>', 'Response level (full|summary|escalate|deny)', 'summary')
+  .option('--notes <text>', 'Notes about this topic')
+  .action((peerId, topic, options) => {
+    addTopic(peerId, topic, options.level as ResponseLevel, options.notes);
+  });
+
+agentComms
+  .command('remove-topic')
+  .description('Remove a topic from a peer\'s response policy')
+  .argument('<peer-id>', 'Peer ID')
+  .argument('<topic>', 'Topic name')
+  .action((peerId, topic) => {
+    removeTopic(peerId, topic);
+  });
+
+agentComms
+  .command('reset')
+  .description('Reset a peer\'s policy to global defaults')
+  .argument('<peer-id>', 'Peer ID')
+  .action((peerId) => {
+    resetPolicy(peerId);
+  });
+
+agentComms
+  .command('activity')
+  .description('Show agent-comms activity log')
+  .argument('[peer-id]', 'Optional peer ID to filter')
+  .option('--last <n>', 'Show last N entries', '50')
+  .option('--clear', 'Clear the activity log')
+  .action((peerId, options) => {
+    if (options.clear) {
+      clearActivity();
+    } else {
+      showActivity(peerId, parseInt(options.last, 10));
+    }
+  });
+
+agentComms
+  .command('default')
+  .description('Set default response level for unknown topics')
+  .argument('<level>', 'Response level (full|summary|escalate|deny)')
+  .action((level) => {
+    setDefault(level as ResponseLevel);
+  });
+
+agentComms
+  .command('logging')
+  .description('Enable or disable activity logging')
+  .argument('<state>', 'on or off')
+  .action((state) => {
+    setLogging(state === 'on' || state === 'true' || state === 'enable');
+  });
+
+program.parse();

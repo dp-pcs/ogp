@@ -1,0 +1,279 @@
+/**
+ * CLI commands for agent-comms configuration
+ */
+
+import {
+  loadAgentCommsConfig,
+  saveAgentCommsConfig,
+  setGlobalTopicPolicy,
+  removeGlobalTopicPolicy,
+  setDefaultLevel,
+  getAllEffectivePolicies,
+  readActivityLog,
+  clearActivityLog,
+  setActivityLogging,
+  type AgentCommsConfig
+} from '../daemon/agent-comms.js';
+
+import {
+  listPeers,
+  getPeer,
+  setPeerTopicPolicy,
+  removePeerTopicPolicy,
+  clearPeerResponsePolicy,
+  type ResponseLevel,
+  type ResponsePolicy
+} from '../daemon/peers.js';
+
+/**
+ * Show all policies (global + per-peer)
+ */
+export function showPolicies(peerId?: string): void {
+  const config = loadAgentCommsConfig();
+
+  if (peerId) {
+    // Show specific peer's effective policies
+    const peer = findPeerByIdOrName(peerId);
+    if (!peer) {
+      console.error(`Peer not found: ${peerId}`);
+      return;
+    }
+
+    console.log(`\nPOLICIES FOR ${peer.displayName} (${peer.id}):\n`);
+
+    const effective = getAllEffectivePolicies(peer.id);
+    const peerSpecific = peer.responsePolicy || {};
+
+    if (Object.keys(effective).length === 0) {
+      console.log('  No policies configured (will use default level)');
+    } else {
+      for (const [topic, policy] of Object.entries(effective)) {
+        const source = peerSpecific[topic] ? '(peer-specific)' : '(global)';
+        const notes = policy.notes ? ` - ${policy.notes}` : '';
+        console.log(`  ${topic}: ${policy.level} ${source}${notes}`);
+      }
+    }
+
+    console.log(`\n  Default level: ${config.defaultLevel}`);
+  } else {
+    // Show global policies and summary of per-peer
+    console.log('\nGLOBAL POLICIES:\n');
+
+    if (Object.keys(config.globalPolicy).length === 0) {
+      console.log('  No global policies configured');
+    } else {
+      for (const [topic, policy] of Object.entries(config.globalPolicy)) {
+        const notes = policy.notes ? ` - ${policy.notes}` : '';
+        console.log(`  ${topic}: ${policy.level}${notes}`);
+      }
+    }
+
+    console.log(`\n  Default level: ${config.defaultLevel}`);
+    console.log(`  Activity logging: ${config.activityLog ? 'enabled' : 'disabled'}`);
+
+    // Show peers with custom policies
+    const peers = listPeers('approved');
+    const peersWithPolicies = peers.filter(p => p.responsePolicy && Object.keys(p.responsePolicy).length > 0);
+
+    if (peersWithPolicies.length > 0) {
+      console.log('\nPEER-SPECIFIC POLICIES:\n');
+      for (const peer of peersWithPolicies) {
+        console.log(`  ${peer.displayName} (${peer.id}):`);
+        for (const [topic, policy] of Object.entries(peer.responsePolicy!)) {
+          console.log(`    ${topic}: ${policy.level}`);
+        }
+      }
+    }
+  }
+
+  console.log('');
+}
+
+/**
+ * Configure policies
+ */
+export interface ConfigureOptions {
+  global?: boolean;
+  topics?: string;
+  level?: ResponseLevel;
+  notes?: string;
+}
+
+export function configurePolicies(peerIds: string | undefined, options: ConfigureOptions): void {
+  const level = options.level || 'summary';
+  const topics = options.topics?.split(',').map(t => t.trim()) || [];
+  const notes = options.notes;
+
+  if (options.global) {
+    // Configure global policies
+    if (topics.length === 0) {
+      console.error('Error: --topics is required');
+      return;
+    }
+
+    for (const topic of topics) {
+      setGlobalTopicPolicy(topic, level, notes);
+    }
+
+    console.log(`\nUpdated global policies:`);
+    for (const topic of topics) {
+      console.log(`  ${topic}: ${level}`);
+    }
+    console.log('');
+    return;
+  }
+
+  if (!peerIds) {
+    console.error('Error: Specify peer ID(s) or use --global');
+    return;
+  }
+
+  if (topics.length === 0) {
+    console.error('Error: --topics is required');
+    return;
+  }
+
+  // Parse peer IDs (comma-separated)
+  const ids = peerIds.split(',').map(id => id.trim());
+  const results: { peer: string; success: boolean }[] = [];
+
+  for (const id of ids) {
+    // Try to find peer by ID or display name
+    const peer = findPeerByIdOrName(id);
+    if (!peer) {
+      results.push({ peer: id, success: false });
+      continue;
+    }
+
+    for (const topic of topics) {
+      setPeerTopicPolicy(peer.id, topic, level, notes);
+    }
+    results.push({ peer: peer.displayName, success: true });
+  }
+
+  console.log('\nConfiguration results:');
+  for (const r of results) {
+    if (r.success) {
+      console.log(`  ✓ ${r.peer}: configured ${topics.join(', ')} as ${level}`);
+    } else {
+      console.log(`  ✗ ${r.peer}: peer not found`);
+    }
+  }
+  console.log('');
+}
+
+/**
+ * Add a topic to a peer's policy
+ */
+export function addTopic(peerId: string, topic: string, level: ResponseLevel, notes?: string): void {
+  const peer = findPeerByIdOrName(peerId);
+  if (!peer) {
+    console.error(`Peer not found: ${peerId}`);
+    return;
+  }
+
+  setPeerTopicPolicy(peer.id, topic, level, notes);
+  console.log(`\nAdded topic '${topic}' with level '${level}' for ${peer.displayName}\n`);
+}
+
+/**
+ * Remove a topic from a peer's policy
+ */
+export function removeTopic(peerId: string, topic: string): void {
+  const peer = findPeerByIdOrName(peerId);
+  if (!peer) {
+    console.error(`Peer not found: ${peerId}`);
+    return;
+  }
+
+  removePeerTopicPolicy(peer.id, topic);
+  console.log(`\nRemoved topic '${topic}' from ${peer.displayName}'s policy\n`);
+}
+
+/**
+ * Reset a peer's policy to global defaults
+ */
+export function resetPolicy(peerId: string): void {
+  const peer = findPeerByIdOrName(peerId);
+  if (!peer) {
+    console.error(`Peer not found: ${peerId}`);
+    return;
+  }
+
+  clearPeerResponsePolicy(peer.id);
+  console.log(`\nReset ${peer.displayName}'s policy to global defaults\n`);
+}
+
+/**
+ * Show activity log
+ */
+export function showActivity(peerId?: string, last?: number): void {
+  const lines = readActivityLog({ peerId, last: last || 50 });
+
+  if (lines.length === 0) {
+    console.log('\nNo activity logged yet.\n');
+    return;
+  }
+
+  console.log('\nAGENT-COMMS ACTIVITY:\n');
+  for (const line of lines) {
+    console.log(`  ${line}`);
+  }
+  console.log('');
+}
+
+/**
+ * Clear activity log
+ */
+export function clearActivity(): void {
+  clearActivityLog();
+  console.log('\nActivity log cleared.\n');
+}
+
+/**
+ * Set default response level
+ */
+export function setDefault(level: ResponseLevel): void {
+  setDefaultLevel(level);
+  console.log(`\nDefault response level set to: ${level}\n`);
+}
+
+/**
+ * Enable/disable activity logging
+ */
+export function setLogging(enabled: boolean): void {
+  setActivityLogging(enabled);
+  console.log(`\nActivity logging: ${enabled ? 'enabled' : 'disabled'}\n`);
+}
+
+/**
+ * Helper: Find peer by ID or display name
+ */
+function findPeerByIdOrName(idOrName: string): ReturnType<typeof getPeer> {
+  // Try exact ID match first
+  let peer = getPeer(idOrName);
+  if (peer) return peer;
+
+  // Try partial ID match
+  const peers = listPeers('approved');
+  peer = peers.find(p => p.id.includes(idOrName)) || null;
+  if (peer) return peer;
+
+  // Try display name match (case-insensitive)
+  const lowerName = idOrName.toLowerCase();
+  peer = peers.find(p => p.displayName.toLowerCase().includes(lowerName)) || null;
+
+  return peer;
+}
+
+/**
+ * Interactive peer selection (returns peer IDs)
+ */
+export function listPeersForSelection(): { id: string; name: string; hasPolicy: boolean }[] {
+  const peers = listPeers('approved');
+  return peers.map(p => ({
+    id: p.id,
+    name: p.displayName,
+    hasPolicy: !!(p.responsePolicy && Object.keys(p.responsePolicy).length > 0)
+  }));
+}
