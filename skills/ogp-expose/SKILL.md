@@ -1,15 +1,41 @@
 ---
 skill_name: ogp-expose
-version: 0.1.0
-description: Expose OGP daemon via public tunnel (cloudflared/ngrok)
-trigger: Use when the user wants to expose their OGP daemon to the internet
+version: 0.2.1
+description: Expose OGP daemon via public tunnel (cloudflared/ngrok). Automates tunnel setup so federated peers can reach your gateway from anywhere on the internet, without exposing your real IP address.
+trigger: Use when the user wants to expose their OGP daemon to the internet, get a public URL for federation, or set up a tunnel for peer discovery.
+requires:
+  bins:
+    - ogp
+  optional_bins:
+    - cloudflared
+    - ngrok
+  state_paths:
+    - ~/.ogp/config.json
+    - ~/.ogp/tunnel.pid
+    - ~/.ogp/tunnel.log
+  install: npm install -g @dp-pcs/ogp
+  docs: https://github.com/dp-pcs/ogp
 ---
+
+## Security Note
+
+**Tunnels are optional — and often more private than alternatives.**
+
+`ogp expose` uses cloudflared or ngrok to create a secure public URL for your OGP daemon. This is one approach, not the only approach. You can expose your gateway however you prefer:
+
+- **Cloudflared/ngrok tunnel** (default) — your real IP is never exposed; traffic routes through the tunnel provider's infrastructure
+- **Reverse proxy** (nginx, Caddy, etc.) — if you have a server with a static IP
+- **VPN/Tailscale** — federate only with peers on the same network
+- **Any publicly reachable URL** — update `gatewayUrl` in `~/.ogp/config.json` manually
+
+The tunnel approach is provided as a zero-config convenience. It installs no persistent services unless you explicitly run `ogp install` (which creates a LaunchAgent/systemd service and asks for confirmation first).
+
 ## Prerequisites
 
 The OGP daemon must be installed. If you see errors like 'ogp: command not found', install it first:
 
 ```bash
-npm install -g github:dp-pcs/ogp --ignore-scripts
+npm install -g @dp-pcs/ogp
 ogp-install-skills
 ogp setup
 ```
