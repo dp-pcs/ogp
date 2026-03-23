@@ -71,8 +71,27 @@ export function loadIntents(): Intent[] {
     saveIntents(DEFAULT_INTENTS);
     return DEFAULT_INTENTS;
   }
+
   const data = fs.readFileSync(INTENTS_FILE, 'utf-8');
-  return JSON.parse(data) as Intent[];
+  const existingIntents = JSON.parse(data) as Intent[];
+
+  // Merge new default intents that don't exist in the file (upgrade path)
+  let updated = false;
+  for (const defaultIntent of DEFAULT_INTENTS) {
+    const exists = existingIntents.some(i => i.name === defaultIntent.name);
+    if (!exists) {
+      existingIntents.push(defaultIntent);
+      updated = true;
+      console.log(`[OGP] Added new default intent: ${defaultIntent.name}`);
+    }
+  }
+
+  // Save if we added new intents
+  if (updated) {
+    saveIntents(existingIntents);
+  }
+
+  return existingIntents;
 }
 
 export function saveIntents(intents: Intent[]): void {
