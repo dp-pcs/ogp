@@ -78,7 +78,7 @@ ogp federation list --status approved --json
 Example interaction:
 ```
 Select peers to configure:
-  [x] Stanislav (giving-produces-microphone-mild.trycloudflare.com)
+  [x] Stanislav (peer-gateway.trycloudflare.com)
   [ ] Leonardo (leo-gateway.example.com)
   [x] Alice (alice.ngrok-free.app)
 
