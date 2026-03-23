@@ -1,8 +1,9 @@
-import { listPeers, getPeer, approvePeer, rejectPeer } from '../daemon/peers.js';
+import { listPeers, getPeer, approvePeer, rejectPeer, updatePeerGrantedScopes } from '../daemon/peers.js';
 import { requireConfig } from '../shared/config.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
+import { createScopeBundle, createScopeGrant, parseRateLimit, formatRateLimit, DEFAULT_RATE_LIMIT } from '../daemon/scopes.js';
 export async function federationList(status) {
     const peers = listPeers(status);
     if (peers.length === 0) {
@@ -81,7 +82,7 @@ export async function federationRequest(peerUrl, peerId) {
         console.error('Failed to send request:', error);
     }
 }
-export async function federationApprove(peerId) {
+export async function federationApprove(peerId, options = {}) {
     const peer = getPeer(peerId);
     if (!peer) {
         console.error(`Peer not found: ${peerId}`);
@@ -90,6 +91,31 @@ export async function federationApprove(peerId) {
     if (peer.status === 'approved') {
         console.log(`Peer ${peerId} is already approved.`);
         return;
+    }
+    // Build scope grants if provided
+    let scopeGrants;
+    if (options.intents && options.intents.length > 0) {
+        const rateLimit = options.rate ? parseRateLimit(options.rate) : DEFAULT_RATE_LIMIT;
+        if (!rateLimit) {
+            console.error(`Invalid rate limit format: ${options.rate} (expected: requests/seconds e.g., 100/3600)`);
+            return;
+        }
+        const scopes = options.intents.map(intent => {
+            const grant = createScopeGrant(intent, { rateLimit });
+            // Add topics for agent-comms
+            if (intent === 'agent-comms' && options.topics && options.topics.length > 0) {
+                grant.topics = options.topics;
+            }
+            return grant;
+        });
+        scopeGrants = createScopeBundle(scopes);
+        // Store the grants locally
+        updatePeerGrantedScopes(peerId, scopeGrants);
+        console.log(`✓ Granted scopes: ${options.intents.join(', ')}`);
+        if (options.topics && options.topics.length > 0) {
+            console.log(`  Topics: ${options.topics.join(', ')}`);
+        }
+        console.log(`  Rate limit: ${formatRateLimit(rateLimit)}`);
     }
     approvePeer(peerId);
     console.log(`✓ Approved peer: ${peerId}`);
@@ -113,6 +139,9 @@ export async function federationApprove(peerId) {
                 fromEmail: ourConfig.email,
                 timestamp: new Date().toISOString(),
                 nonce,
+                // v0.2.0: Include scope grants
+                protocolVersion: '0.2.0',
+                scopeGrants
             })
         });
         console.log('✓ Notified peer of approval');
@@ -187,6 +216,194 @@ export async function federationSend(peerId, intent, payloadJson) {
     }
     catch (error) {
         console.error('Failed to send message:', error);
+    }
+}
+/**
+ * Show scope grants for a peer
+ */
+export async function federationShowScopes(peerId) {
+    const peer = getPeer(peerId);
+    if (!peer) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    console.log(`\nSCOPES FOR ${peer.displayName} (${peerId}):\n`);
+    console.log('  Status:', peer.status);
+    console.log('  Protocol:', peer.protocolVersion || '0.1.0 (legacy)');
+    console.log('');
+    // What I grant TO this peer
+    if (peer.grantedScopes) {
+        console.log('  GRANTED TO PEER (what they can request from me):');
+        for (const scope of peer.grantedScopes.scopes) {
+            const status = scope.enabled ? '✓' : '✗';
+            console.log(`    ${status} ${scope.intent}`);
+            if (scope.rateLimit) {
+                console.log(`      Rate: ${formatRateLimit(scope.rateLimit)}`);
+            }
+            if (scope.topics && scope.topics.length > 0) {
+                console.log(`      Topics: ${scope.topics.join(', ')}`);
+            }
+            if (scope.expiresAt) {
+                console.log(`      Expires: ${scope.expiresAt}`);
+            }
+        }
+        console.log(`    Granted at: ${peer.grantedScopes.grantedAt}`);
+    }
+    else {
+        console.log('  GRANTED TO PEER: None (v0.1 mode - default rate limits apply)');
+    }
+    console.log('');
+    // What this peer grants TO me
+    if (peer.receivedScopes) {
+        console.log('  RECEIVED FROM PEER (what I can request from them):');
+        for (const scope of peer.receivedScopes.scopes) {
+            const status = scope.enabled ? '✓' : '✗';
+            console.log(`    ${status} ${scope.intent}`);
+            if (scope.rateLimit) {
+                console.log(`      Rate: ${formatRateLimit(scope.rateLimit)}`);
+            }
+            if (scope.topics && scope.topics.length > 0) {
+                console.log(`      Topics: ${scope.topics.join(', ')}`);
+            }
+        }
+        console.log(`    Granted at: ${peer.receivedScopes.grantedAt}`);
+    }
+    else {
+        console.log('  RECEIVED FROM PEER: None (awaiting their approval with scopes)');
+    }
+    console.log('');
+}
+/**
+ * Update scope grants for an existing peer
+ */
+export async function federationUpdateGrants(peerId, options) {
+    const peer = getPeer(peerId);
+    if (!peer) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    if (peer.status !== 'approved') {
+        console.error(`Peer ${peerId} is not approved. Use 'approve' to approve with scopes.`);
+        return;
+    }
+    if (!options.intents || options.intents.length === 0) {
+        console.error('No intents specified. Use --intents to specify intents to grant.');
+        return;
+    }
+    const rateLimit = options.rate ? parseRateLimit(options.rate) : DEFAULT_RATE_LIMIT;
+    if (!rateLimit) {
+        console.error(`Invalid rate limit format: ${options.rate}`);
+        return;
+    }
+    const scopes = options.intents.map(intent => {
+        const grant = createScopeGrant(intent, { rateLimit });
+        if (intent === 'agent-comms' && options.topics && options.topics.length > 0) {
+            grant.topics = options.topics;
+        }
+        return grant;
+    });
+    const scopeGrants = createScopeBundle(scopes);
+    updatePeerGrantedScopes(peerId, scopeGrants);
+    console.log(`✓ Updated grants for ${peerId}:`);
+    console.log(`  Intents: ${options.intents.join(', ')}`);
+    if (options.topics && options.topics.length > 0) {
+        console.log(`  Topics: ${options.topics.join(', ')}`);
+    }
+    console.log(`  Rate limit: ${formatRateLimit(rateLimit)}`);
+    // Optionally notify peer of updated grants (they can re-fetch our card)
+    console.log('\nNote: Peer will see updated capabilities on next card fetch.');
+}
+/**
+ * Send an agent-comms message to a peer
+ */
+export async function federationSendAgentComms(peerId, topic, messageText, options = {}) {
+    const config = requireConfig();
+    const peer = getPeer(peerId);
+    if (!peer) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    if (peer.status !== 'approved') {
+        console.error(`Peer ${peerId} is not approved`);
+        return;
+    }
+    const keypair = loadOrGenerateKeyPair();
+    const ourId = `${new URL(config.gatewayUrl).hostname}:${config.daemonPort}`;
+    const nonce = crypto.randomUUID();
+    // Build replyTo URL if we want to receive callbacks
+    const replyTo = options.waitForReply
+        ? `${config.gatewayUrl}/federation/reply/${nonce}`
+        : undefined;
+    const message = {
+        intent: 'agent-comms',
+        from: ourId,
+        to: peerId,
+        nonce,
+        timestamp: new Date().toISOString(),
+        replyTo,
+        conversationId: options.conversationId,
+        payload: {
+            topic,
+            message: messageText,
+            priority: options.priority || 'normal'
+        }
+    };
+    const { payload: signedPayload, signature } = signObject(message, getPrivateKey());
+    try {
+        const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: signedPayload,
+                signature
+            })
+        });
+        if (!response.ok) {
+            const body = await response.text();
+            if (response.status === 403) {
+                console.error(`Access denied: ${body}`);
+                console.log('Hint: Peer may not have granted you agent-comms scope for this topic.');
+            }
+            else if (response.status === 429) {
+                console.error(`Rate limited: ${body}`);
+            }
+            else {
+                console.error(`Send failed: ${response.status} ${response.statusText}`);
+            }
+            return;
+        }
+        const result = await response.json();
+        console.log(`✓ Agent-comms sent to ${peer.displayName}`);
+        console.log(`  Topic: ${topic}`);
+        console.log(`  Message: ${messageText}`);
+        // Poll for reply if requested
+        if (options.waitForReply) {
+            console.log('\nWaiting for reply...');
+            const timeout = options.replyTimeout || 30000;
+            const pollInterval = 2000;
+            const startTime = Date.now();
+            while (Date.now() - startTime < timeout) {
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+                try {
+                    const replyRes = await fetch(`${config.gatewayUrl}/federation/reply/${nonce}`);
+                    if (replyRes.ok) {
+                        const replyData = await replyRes.json();
+                        if (replyData.status === 'complete' && replyData.reply) {
+                            console.log('\n✓ Reply received:');
+                            console.log(JSON.stringify(replyData.reply, null, 2));
+                            return;
+                        }
+                    }
+                }
+                catch {
+                    // Continue polling
+                }
+            }
+            console.log('\n⏱ Reply timeout - no response received');
+        }
+    }
+    catch (error) {
+        console.error('Failed to send agent-comms:', error);
     }
 }
 //# sourceMappingURL=federation.js.map

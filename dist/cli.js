@@ -3,14 +3,15 @@ import { Command } from 'commander';
 import { runSetup } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig } from './shared/config.js';
-import { federationList, federationRequest, federationApprove, federationReject, federationSend } from './cli/federation.js';
+import { federationList, federationRequest, federationApprove, federationReject, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
+import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, showActivity, clearActivity, setDefault, setLogging } from './cli/agent-comms.js';
 const program = new Command();
 program
     .name('ogp')
     .description('OGP (Open Gateway Protocol) federation daemon for OpenClaw')
-    .version('0.1.0');
+    .version('0.2.0');
 program
     .command('setup')
     .description('Interactive setup wizard')
@@ -74,10 +75,18 @@ federation
 });
 federation
     .command('approve')
-    .description('Approve a pending federation request')
+    .description('Approve a pending federation request with optional scope grants')
     .argument('<peer-id>', 'Peer ID')
-    .action(async (peerId) => {
-    await federationApprove(peerId);
+    .option('--intents <list>', 'Comma-separated intents to grant (e.g., message,agent-comms)')
+    .option('--rate <limit>', 'Rate limit as requests/seconds (e.g., 100/3600)')
+    .option('--topics <list>', 'Comma-separated topics for agent-comms (e.g., memory-management,task-delegation)')
+    .action(async (peerId, options) => {
+    const approveOptions = {
+        intents: options.intents ? options.intents.split(',').map((s) => s.trim()) : undefined,
+        rate: options.rate,
+        topics: options.topics ? options.topics.split(',').map((s) => s.trim()) : undefined
+    };
+    await federationApprove(peerId, approveOptions);
 });
 federation
     .command('reject')
@@ -115,6 +124,46 @@ federation
     .action(async (peerId, intent, payload) => {
     await federationSend(peerId, intent, payload);
 });
+federation
+    .command('scopes')
+    .description('Show scope grants for a peer')
+    .argument('<peer-id>', 'Peer ID')
+    .action(async (peerId) => {
+    await federationShowScopes(peerId);
+});
+federation
+    .command('grant')
+    .description('Update scope grants for an approved peer')
+    .argument('<peer-id>', 'Peer ID')
+    .option('--intents <list>', 'Comma-separated intents to grant (e.g., message,agent-comms)')
+    .option('--rate <limit>', 'Rate limit as requests/seconds (e.g., 100/3600)')
+    .option('--topics <list>', 'Comma-separated topics for agent-comms')
+    .action(async (peerId, options) => {
+    const grantOptions = {
+        intents: options.intents ? options.intents.split(',').map((s) => s.trim()) : undefined,
+        rate: options.rate,
+        topics: options.topics ? options.topics.split(',').map((s) => s.trim()) : undefined
+    };
+    await federationUpdateGrants(peerId, grantOptions);
+});
+federation
+    .command('agent')
+    .description('Send an agent-comms message to a peer')
+    .argument('<peer-id>', 'Peer ID')
+    .argument('<topic>', 'Topic (e.g., memory-management)')
+    .argument('<message>', 'Message text')
+    .option('-p, --priority <level>', 'Priority (low|normal|high)', 'normal')
+    .option('-c, --conversation <id>', 'Conversation ID for threading')
+    .option('-w, --wait', 'Wait for reply')
+    .option('-t, --timeout <ms>', 'Reply timeout in milliseconds', '30000')
+    .action(async (peerId, topic, message, options) => {
+    await federationSendAgentComms(peerId, topic, message, {
+        priority: options.priority,
+        conversationId: options.conversation,
+        waitForReply: options.wait,
+        replyTimeout: parseInt(options.timeout, 10)
+    });
+});
 program
     .command('expose')
     .description('Expose daemon via tunnel (cloudflared or ngrok)')
@@ -150,19 +199,18 @@ program
     .action(async () => {
     await uninstallLaunchAgent();
 });
-program.parse();
 program
     .command('config')
     .description('View or update OGP configuration')
     .option('--set <key=value>', 'Set a config value (e.g. --set gatewayUrl=https://xyz.trycloudflare.com)')
     .option('--get <key>', 'Get a config value')
     .action((opts) => {
-    const { loadConfig, saveConfig } = require('./shared/config.js');
     const config = loadConfig() || {};
     if (opts.set) {
         const [key, ...rest] = opts.set.split('=');
         const value = rest.join('=');
         config[key] = value;
+        const { saveConfig } = require('./shared/config.js');
         saveConfig(config);
         console.log(`✓ Set ${key} = ${value}`);
     }
@@ -173,4 +221,85 @@ program
         console.log(JSON.stringify(config, null, 2));
     }
 });
+// Agent-comms configuration commands
+const agentComms = program
+    .command('agent-comms')
+    .description('Configure agent-to-agent communication policies');
+agentComms
+    .command('policies')
+    .description('Show response policies (global and per-peer)')
+    .argument('[peer-id]', 'Optional peer ID to show specific peer policies')
+    .action((peerId) => {
+    showPolicies(peerId);
+});
+agentComms
+    .command('configure')
+    .description('Configure response policies for peers or globally')
+    .argument('[peer-ids]', 'Comma-separated peer IDs (or use --global)')
+    .option('--global', 'Configure global default policies')
+    .option('--topics <list>', 'Comma-separated topics to configure')
+    .option('--level <level>', 'Response level (full|summary|escalate|deny)')
+    .option('--notes <text>', 'Notes about this policy')
+    .action((peerIds, options) => {
+    configurePolicies(peerIds, {
+        global: options.global,
+        topics: options.topics,
+        level: options.level,
+        notes: options.notes
+    });
+});
+agentComms
+    .command('add-topic')
+    .description('Add a topic to a peer\'s response policy')
+    .argument('<peer-id>', 'Peer ID')
+    .argument('<topic>', 'Topic name')
+    .option('--level <level>', 'Response level (full|summary|escalate|deny)', 'summary')
+    .option('--notes <text>', 'Notes about this topic')
+    .action((peerId, topic, options) => {
+    addTopic(peerId, topic, options.level, options.notes);
+});
+agentComms
+    .command('remove-topic')
+    .description('Remove a topic from a peer\'s response policy')
+    .argument('<peer-id>', 'Peer ID')
+    .argument('<topic>', 'Topic name')
+    .action((peerId, topic) => {
+    removeTopic(peerId, topic);
+});
+agentComms
+    .command('reset')
+    .description('Reset a peer\'s policy to global defaults')
+    .argument('<peer-id>', 'Peer ID')
+    .action((peerId) => {
+    resetPolicy(peerId);
+});
+agentComms
+    .command('activity')
+    .description('Show agent-comms activity log')
+    .argument('[peer-id]', 'Optional peer ID to filter')
+    .option('--last <n>', 'Show last N entries', '50')
+    .option('--clear', 'Clear the activity log')
+    .action((peerId, options) => {
+    if (options.clear) {
+        clearActivity();
+    }
+    else {
+        showActivity(peerId, parseInt(options.last, 10));
+    }
+});
+agentComms
+    .command('default')
+    .description('Set default response level for unknown topics')
+    .argument('<level>', 'Response level (full|summary|escalate|deny)')
+    .action((level) => {
+    setDefault(level);
+});
+agentComms
+    .command('logging')
+    .description('Enable or disable activity logging')
+    .argument('<state>', 'on or off')
+    .action((state) => {
+    setLogging(state === 'on' || state === 'true' || state === 'enable');
+});
+program.parse();
 //# sourceMappingURL=cli.js.map

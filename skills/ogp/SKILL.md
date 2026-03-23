@@ -4,6 +4,19 @@ version: 0.1.0
 description: Manage OGP (Open Gateway Protocol) daemon and federation
 trigger: Use when the user wants to configure, start, or manage the OGP federation daemon
 ---
+## Prerequisites
+
+The OGP daemon must be installed. If you see errors like 'ogp: command not found', install it first:
+
+```bash
+npm install -g github:dp-pcs/ogp --ignore-scripts
+ogp-install-skills
+ogp setup
+```
+
+Full documentation: https://github.com/dp-pcs/ogp
+
+
 
 # OGP Federation Management
 

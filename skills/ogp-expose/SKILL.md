@@ -4,6 +4,19 @@ version: 0.1.0
 description: Expose OGP daemon via public tunnel (cloudflared/ngrok)
 trigger: Use when the user wants to expose their OGP daemon to the internet
 ---
+## Prerequisites
+
+The OGP daemon must be installed. If you see errors like 'ogp: command not found', install it first:
+
+```bash
+npm install -g github:dp-pcs/ogp --ignore-scripts
+ogp-install-skills
+ogp setup
+```
+
+Full documentation: https://github.com/dp-pcs/ogp
+
+
 
 # OGP Expose - Public Tunnel Setup
 
