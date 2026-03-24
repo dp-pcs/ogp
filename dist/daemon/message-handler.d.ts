@@ -7,6 +7,7 @@ export interface FederationMessage {
     payload: any;
     replyTo?: string;
     conversationId?: string;
+    projectId?: string;
 }
 export interface MessageResponse {
     success: boolean;

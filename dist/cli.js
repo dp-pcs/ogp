@@ -8,6 +8,7 @@ import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, showActivity, clearActivity, setDefault, setLogging } from './cli/agent-comms.js';
 import { registerNewIntent, listRegisteredIntents, removeIntent } from './cli/intent-registry.js';
+import { projectCreate, projectJoin, projectList, projectContribute, projectQuery, projectStatus, projectRequestJoin, projectSendContribution, projectQueryPeer, projectStatusPeer } from './cli/project.js';
 const program = new Command();
 program
     .name('ogp')
@@ -334,6 +335,112 @@ intent
     .argument('<name>', 'Intent name')
     .action((name) => {
     removeIntent(name);
+});
+// Project management commands
+const project = program
+    .command('project')
+    .description('Manage project contexts for shared collaboration');
+project
+    .command('create')
+    .description('Create a new project locally')
+    .argument('<project-id>', 'Unique project identifier')
+    .argument('<project-name>', 'Human-readable project name')
+    .option('--description <text>', 'Project description')
+    .action(async (projectId, projectName, options) => {
+    await projectCreate(projectId, projectName, options);
+});
+project
+    .command('join')
+    .description('Join an existing project (local or create new)')
+    .argument('<project-id>', 'Project identifier to join')
+    .argument('[project-name]', 'Project name (required with --create)')
+    .option('--create', 'Create the project if it doesn\'t exist locally')
+    .option('--description <text>', 'Project description (with --create)')
+    .action(async (projectId, projectName, options) => {
+    await projectJoin(projectId, projectName, options);
+});
+project
+    .command('list')
+    .description('List all local projects')
+    .action(async () => {
+    await projectList();
+});
+project
+    .command('contribute')
+    .description('Add a contribution to a project topic')
+    .argument('<project-id>', 'Project to contribute to')
+    .argument('<topic>', 'Topic area for this contribution')
+    .argument('<summary>', 'Summary of the contribution')
+    .option('--metadata <json>', 'Additional structured data as JSON')
+    .action(async (projectId, topic, summary, options) => {
+    await projectContribute(projectId, topic, summary, options);
+});
+project
+    .command('query')
+    .description('Query project contributions')
+    .argument('<project-id>', 'Project to query')
+    .option('--topic <name>', 'Filter by topic')
+    .option('--author <id>', 'Filter by author')
+    .option('--search <text>', 'Search by text content')
+    .option('--limit <n>', 'Maximum results to return', '20')
+    .action(async (projectId, options) => {
+    const queryOptions = {
+        ...options,
+        limit: parseInt(options.limit, 10)
+    };
+    await projectQuery(projectId, queryOptions);
+});
+project
+    .command('status')
+    .description('Show project status overview')
+    .argument('<project-id>', 'Project to show status for')
+    .action(async (projectId) => {
+    await projectStatus(projectId);
+});
+// Project federation commands (peer-to-peer)
+project
+    .command('request-join')
+    .description('Request to join a project from a peer')
+    .argument('<peer-id>', 'Peer to request from')
+    .argument('<project-id>', 'Project identifier')
+    .argument('<project-name>', 'Project name')
+    .option('--description <text>', 'Project description')
+    .action(async (peerId, projectId, projectName, options) => {
+    await projectRequestJoin(peerId, projectId, projectName, options);
+});
+project
+    .command('send-contribution')
+    .description('Send a contribution to a peer\'s project')
+    .argument('<peer-id>', 'Peer to send to')
+    .argument('<project-id>', 'Project identifier')
+    .argument('<topic>', 'Topic area')
+    .argument('<summary>', 'Contribution summary')
+    .option('--metadata <json>', 'Additional structured data as JSON')
+    .action(async (peerId, projectId, topic, summary, options) => {
+    await projectSendContribution(peerId, projectId, topic, summary, options);
+});
+project
+    .command('query-peer')
+    .description('Query a peer\'s project contributions')
+    .argument('<peer-id>', 'Peer to query')
+    .argument('<project-id>', 'Project identifier')
+    .option('--topic <name>', 'Filter by topic')
+    .option('--author <id>', 'Filter by author')
+    .option('--limit <n>', 'Maximum results to return', '20')
+    .action(async (peerId, projectId, options) => {
+    const queryOptions = {
+        ...options,
+        limit: parseInt(options.limit, 10)
+    };
+    await projectQueryPeer(peerId, projectId, queryOptions);
+});
+project
+    .command('status-peer')
+    .description('Request project status from a peer')
+    .argument('<peer-id>', 'Peer to request from')
+    .argument('<project-id>', 'Project identifier')
+    .action(async (peerId, projectId) => {
+    await projectStatusPeer(peerId, projectId);
 });
 program.parse();
 //# sourceMappingURL=cli.js.map

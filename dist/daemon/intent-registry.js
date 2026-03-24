@@ -53,6 +53,58 @@ const DEFAULT_INTENTS = [
             },
             required: ['topic', 'message']
         }
+    },
+    {
+        name: 'project.join',
+        description: 'Join a named project context',
+        schema: {
+            type: 'object',
+            properties: {
+                projectId: { type: 'string', description: 'Unique project identifier' },
+                projectName: { type: 'string', description: 'Human-readable project name' },
+                projectDescription: { type: 'string', description: 'Optional project description' }
+            },
+            required: ['projectId', 'projectName']
+        }
+    },
+    {
+        name: 'project.contribute',
+        description: 'Add a summary/update to a project topic',
+        schema: {
+            type: 'object',
+            properties: {
+                projectId: { type: 'string', description: 'Project to contribute to' },
+                topic: { type: 'string', description: 'Topic area for this contribution' },
+                summary: { type: 'string', description: 'Summary of the contribution' },
+                metadata: { type: 'object', description: 'Additional structured data' }
+            },
+            required: ['projectId', 'topic', 'summary']
+        }
+    },
+    {
+        name: 'project.query',
+        description: 'Ask what a peer has done on a project topic',
+        schema: {
+            type: 'object',
+            properties: {
+                projectId: { type: 'string', description: 'Project to query' },
+                topic: { type: 'string', description: 'Topic to query about (optional)' },
+                authorId: { type: 'string', description: 'Specific author to query (optional)' },
+                limit: { type: 'number', description: 'Maximum number of contributions to return', minimum: 1, maximum: 50 }
+            },
+            required: ['projectId']
+        }
+    },
+    {
+        name: 'project.status',
+        description: 'Get current state of all topics in a project',
+        schema: {
+            type: 'object',
+            properties: {
+                projectId: { type: 'string', description: 'Project to get status for' }
+            },
+            required: ['projectId']
+        }
     }
 ];
 export function loadIntents() {

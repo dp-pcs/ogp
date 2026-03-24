@@ -4,6 +4,8 @@ import { getIntent } from './intent-registry.js';
 import { notifyOpenClaw } from './notify.js';
 import { checkAccess } from './doorman.js';
 import { logActivity, getEffectivePolicy } from './agent-comms.js';
+import { getProject, joinProject, isProjectMember, contributeToProject, getTopicContributions, getAuthorContributions, getProjectStatus, ensureProjectTopic, createProject, addProject } from './projects.js';
+import { loadConfig } from '../shared/config.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 export async function handleMessage(message, signature) {
@@ -62,6 +64,10 @@ export async function handleMessage(message, signature) {
     // 5. Handle agent-comms specially (includes replyTo support)
     if (message.intent === 'agent-comms') {
         return handleAgentComms(message, peer.displayName);
+    }
+    // 5.1. Handle project intents specially
+    if (message.intent.startsWith('project.')) {
+        return handleProjectIntent(message, peer.displayName);
     }
     // 6. Execute intent handler if one is registered
     if (intent.handler) {
@@ -167,6 +173,14 @@ function formatNotification(message, displayName) {
             return `[OGP] Task request from ${displayName}: ${payload.description}`;
         case 'status-update':
             return `[OGP] Status update from ${displayName}: ${payload.message || payload.status}`;
+        case 'project.join':
+            return `[OGP Project] ${displayName} wants to join project '${payload.projectName}' (${payload.projectId})`;
+        case 'project.contribute':
+            return `[OGP Project] ${displayName} contributed to project '${payload.projectId}' topic '${payload.topic}': ${payload.summary}`;
+        case 'project.query':
+            return `[OGP Project] ${displayName} queried project '${payload.projectId}'`;
+        case 'project.status':
+            return `[OGP Project] ${displayName} requested status for project '${payload.projectId}'`;
         default:
             return `[OGP] ${intent} from ${displayName}`;
     }
@@ -235,5 +249,337 @@ async function executeIntentHandler(handlerPath, message, peerDisplayName) {
         }));
         child.stdin?.end();
     });
+}
+/**
+ * Handle project.* intents with business logic
+ */
+async function handleProjectIntent(message, displayName) {
+    const config = loadConfig();
+    if (!config) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'Gateway not configured',
+            statusCode: 500
+        };
+    }
+    const payload = message.payload || {};
+    try {
+        switch (message.intent) {
+            case 'project.join':
+                return await handleProjectJoin(message, displayName, payload);
+            case 'project.contribute':
+                return await handleProjectContribute(message, displayName, payload);
+            case 'project.query':
+                return await handleProjectQuery(message, displayName, payload);
+            case 'project.status':
+                return await handleProjectStatus(message, displayName, payload);
+            default:
+                return {
+                    success: false,
+                    nonce: message.nonce,
+                    error: `Unknown project intent: ${message.intent}`,
+                    statusCode: 400
+                };
+        }
+    }
+    catch (error) {
+        console.error(`[OGP] Project intent error:`, error);
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'Internal server error processing project intent',
+            statusCode: 500
+        };
+    }
+}
+/**
+ * Handle project.join intent
+ */
+async function handleProjectJoin(message, displayName, payload) {
+    const { projectId, projectName, projectDescription } = payload;
+    if (!projectId || !projectName) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'Missing required fields: projectId, projectName',
+            statusCode: 400
+        };
+    }
+    // Check if project exists locally
+    let project = getProject(projectId);
+    if (!project) {
+        // Create the project locally
+        project = createProject(projectId, projectName, projectDescription);
+        addProject(project);
+        console.log(`[OGP] Created project '${projectName}' (${projectId}) from peer ${message.from}`);
+    }
+    // Add the requesting peer as a member
+    const success = joinProject(projectId, message.from);
+    if (success) {
+        const notificationText = `[OGP Project] ${displayName} joined project '${projectName}' (${projectId})`;
+        await notifyOpenClaw({
+            text: notificationText,
+            metadata: {
+                ogp: {
+                    from: message.from,
+                    intent: 'project.join',
+                    nonce: message.nonce,
+                    projectId,
+                    projectName,
+                    payload: message.payload
+                }
+            }
+        });
+        return {
+            success: true,
+            nonce: message.nonce,
+            response: {
+                joined: true,
+                projectId,
+                projectName,
+                timestamp: new Date().toISOString()
+            }
+        };
+    }
+    else {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'Failed to join project',
+            statusCode: 500
+        };
+    }
+}
+/**
+ * Handle project.contribute intent
+ */
+async function handleProjectContribute(message, displayName, payload) {
+    const { projectId, topic, summary, metadata } = payload;
+    if (!projectId || !topic || !summary) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'Missing required fields: projectId, topic, summary',
+            statusCode: 400
+        };
+    }
+    // Check if project exists and peer is a member
+    const project = getProject(projectId);
+    if (!project) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: `Project '${projectId}' not found`,
+            statusCode: 404
+        };
+    }
+    if (!isProjectMember(projectId, message.from)) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'You are not a member of this project',
+            statusCode: 403
+        };
+    }
+    // Ensure topic exists
+    ensureProjectTopic(projectId, topic);
+    // Add the contribution
+    const contributionId = contributeToProject(projectId, topic, message.from, summary, metadata);
+    if (contributionId) {
+        const notificationText = `[OGP Project] ${displayName} contributed to '${project.name}' topic '${topic}': ${summary}`;
+        await notifyOpenClaw({
+            text: notificationText,
+            metadata: {
+                ogp: {
+                    from: message.from,
+                    intent: 'project.contribute',
+                    nonce: message.nonce,
+                    projectId,
+                    topic,
+                    summary,
+                    contributionId,
+                    payload: message.payload
+                }
+            }
+        });
+        return {
+            success: true,
+            nonce: message.nonce,
+            response: {
+                contributed: true,
+                projectId,
+                topic,
+                contributionId,
+                timestamp: new Date().toISOString()
+            }
+        };
+    }
+    else {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'Failed to add contribution',
+            statusCode: 500
+        };
+    }
+}
+/**
+ * Handle project.query intent
+ */
+async function handleProjectQuery(message, displayName, payload) {
+    const { projectId, topic, authorId, limit = 20 } = payload;
+    if (!projectId) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'Missing required field: projectId',
+            statusCode: 400
+        };
+    }
+    // Check if project exists and peer is a member
+    const project = getProject(projectId);
+    if (!project) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: `Project '${projectId}' not found`,
+            statusCode: 404
+        };
+    }
+    if (!isProjectMember(projectId, message.from)) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'You are not a member of this project',
+            statusCode: 403
+        };
+    }
+    // Get contributions based on query parameters
+    let contributions;
+    let queryDescription;
+    if (topic) {
+        contributions = getTopicContributions(projectId, topic, limit);
+        queryDescription = `topic '${topic}'`;
+    }
+    else if (authorId) {
+        contributions = getAuthorContributions(projectId, authorId, limit);
+        queryDescription = `author '${authorId}'`;
+    }
+    else {
+        // Get all recent contributions
+        contributions = [];
+        for (const projectTopic of project.topics) {
+            contributions.push(...projectTopic.contributions);
+        }
+        contributions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        contributions = contributions.slice(0, limit);
+        queryDescription = 'all recent';
+    }
+    const notificationText = `[OGP Project] ${displayName} queried project '${project.name}' for ${queryDescription} contributions (${contributions.length} found)`;
+    await notifyOpenClaw({
+        text: notificationText,
+        metadata: {
+            ogp: {
+                from: message.from,
+                intent: 'project.query',
+                nonce: message.nonce,
+                projectId,
+                queryDescription,
+                resultCount: contributions.length,
+                payload: message.payload
+            }
+        }
+    });
+    return {
+        success: true,
+        nonce: message.nonce,
+        response: {
+            projectId,
+            projectName: project.name,
+            contributions: contributions.map(c => ({
+                id: c.id,
+                timestamp: c.timestamp,
+                authorId: c.authorId,
+                topic: c.topic,
+                summary: c.summary,
+                metadata: c.metadata
+            })),
+            timestamp: new Date().toISOString()
+        }
+    };
+}
+/**
+ * Handle project.status intent
+ */
+async function handleProjectStatus(message, displayName, payload) {
+    const { projectId } = payload;
+    if (!projectId) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'Missing required field: projectId',
+            statusCode: 400
+        };
+    }
+    // Check if project exists and peer is a member
+    const statusData = getProjectStatus(projectId);
+    if (!statusData) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: `Project '${projectId}' not found`,
+            statusCode: 404
+        };
+    }
+    const { project } = statusData;
+    if (!isProjectMember(projectId, message.from)) {
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'You are not a member of this project',
+            statusCode: 403
+        };
+    }
+    const notificationText = `[OGP Project] ${displayName} requested status for project '${project.name}' (${statusData.topics.length} topics)`;
+    await notifyOpenClaw({
+        text: notificationText,
+        metadata: {
+            ogp: {
+                from: message.from,
+                intent: 'project.status',
+                nonce: message.nonce,
+                projectId,
+                topicCount: statusData.topics.length,
+                payload: message.payload
+            }
+        }
+    });
+    return {
+        success: true,
+        nonce: message.nonce,
+        response: {
+            project: {
+                id: project.id,
+                name: project.name,
+                description: project.description,
+                members: project.members,
+                createdAt: project.createdAt,
+                updatedAt: project.updatedAt
+            },
+            topics: statusData.topics.map(topic => ({
+                name: topic.name,
+                description: topic.description,
+                contributionCount: topic.contributionCount,
+                contributors: topic.contributors,
+                lastContribution: topic.lastContribution ? {
+                    timestamp: topic.lastContribution.timestamp,
+                    authorId: topic.lastContribution.authorId,
+                    summary: topic.lastContribution.summary
+                } : null
+            })),
+            timestamp: new Date().toISOString()
+        }
+    };
 }
 //# sourceMappingURL=message-handler.js.map
