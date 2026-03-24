@@ -2,7 +2,7 @@ import express, { type Express, type Request, type Response } from 'express';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { requireConfig, type OGPConfig, getConfigDir } from '../shared/config.js';
+import { requireConfig, loadConfig, type OGPConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey, getPrivateKey } from './keypair.js';
 import { addPeer, getPeer, approvePeer, listPeers, updatePeer, updatePeerReceivedScopes, type Peer } from './peers.js';
 import { handleMessage, type FederationMessage } from './message-handler.js';
@@ -341,29 +341,59 @@ export function stopServer(): void {
   }
 }
 
-export function getDaemonStatus(): { running: boolean; pid?: number } {
-  if (!fs.existsSync(DAEMON_PID_FILE)) {
-    return { running: false };
-  }
+export async function getDaemonStatus(): Promise<{ running: boolean; pid?: number; portDetected?: boolean }> {
+  const config = loadConfig();
+  const port = config?.daemonPort ?? 18790;
 
-  try {
-    const pidStr = fs.readFileSync(DAEMON_PID_FILE, 'utf-8').trim();
-    const pid = parseInt(pidStr, 10);
+  // Check PID file first
+  let pidRunning = false;
+  let pid: number | undefined;
 
-    if (isNaN(pid)) {
-      fs.unlinkSync(DAEMON_PID_FILE);
-      return { running: false };
-    }
-
-    // Check if process is running
+  if (fs.existsSync(DAEMON_PID_FILE)) {
     try {
-      process.kill(pid, 0);
-      return { running: true, pid };
-    } catch (error) {
-      fs.unlinkSync(DAEMON_PID_FILE);
-      return { running: false };
+      const pidStr = fs.readFileSync(DAEMON_PID_FILE, 'utf-8').trim();
+      const parsedPid = parseInt(pidStr, 10);
+      if (!isNaN(parsedPid)) {
+        try {
+          process.kill(parsedPid, 0);
+          pidRunning = true;
+          pid = parsedPid;
+        } catch {
+          fs.unlinkSync(DAEMON_PID_FILE);
+        }
+      } else {
+        fs.unlinkSync(DAEMON_PID_FILE);
+      }
+    } catch {
+      // ignore
     }
-  } catch (error) {
-    return { running: false };
   }
+
+  if (pidRunning) {
+    return { running: true, pid };
+  }
+
+  // PID file absent or stale — check if something is actually listening on the port
+  // Use net.createServer to attempt binding; if it fails with EADDRINUSE the port is taken
+  try {
+    const net = await import('node:net');
+    const portInUse = await new Promise<boolean>((resolve) => {
+      const server = net.createServer();
+      server.once('error', (err: NodeJS.ErrnoException) => {
+        resolve(err.code === 'EADDRINUSE');
+      });
+      server.once('listening', () => {
+        server.close();
+        resolve(false);
+      });
+      server.listen(port);
+    });
+    if (portInUse) {
+      return { running: true, portDetected: true };
+    }
+  } catch {
+    // ignore detection errors
+  }
+
+  return { running: false };
 }

@@ -37,10 +37,15 @@ program
 program
     .command('status')
     .description('Show daemon status')
-    .action(() => {
-    const status = getDaemonStatus();
+    .action(async () => {
+    const status = await getDaemonStatus();
     if (status.running) {
-        console.log(`Status: Running (PID: ${status.pid})`);
+        if (status.portDetected) {
+            console.log(`Status: Running (detected on port — started externally)`);
+        }
+        else {
+            console.log(`Status: Running (PID: ${status.pid})`);
+        }
     }
     else {
         console.log('Status: Stopped');

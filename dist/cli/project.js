@@ -164,10 +164,18 @@ export async function projectQuery(projectId, options = {}) {
         console.log(`Contributions by '${options.author}' in project '${project.name}':`);
     }
     else {
-        // Get all recent contributions
+        // Get all recent contributions - handle both data formats
         contributions = [];
-        for (const topic of project.topics) {
-            contributions.push(...topic.contributions);
+        // Check if this project uses the new nested format (topics as objects)
+        if (project.topics.length > 0 && typeof project.topics[0] === 'object') {
+            // New nested format: topics are objects with contributions
+            for (const topic of project.topics) {
+                contributions.push(...topic.contributions);
+            }
+        }
+        else {
+            // Old flat format: contributions are in flat array
+            contributions = project.contributions || [];
         }
         contributions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         contributions = contributions.slice(0, limit);

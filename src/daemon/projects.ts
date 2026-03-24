@@ -230,11 +230,23 @@ export function getTopicContributions(
   const project = getProject(projectId);
   if (!project) return [];
 
-  const topic = project.topics.find(t => t.name === topicName);
-  if (!topic) return [];
+  let topicContributions: any[] = [];
+
+  // Handle both data formats: old flat format and new nested format
+  if ((project as any).topics.length > 0 && typeof (project as any).topics[0] === 'object') {
+    // New nested format: topics are objects with contributions
+    const topic = ((project as any).topics as any[]).find(t => t.name === topicName);
+    if (!topic) return [];
+    topicContributions = topic.contributions;
+  } else {
+    // Old flat format: check if topic exists and filter contributions
+    const topicExists = ((project as any).topics as string[]).includes(topicName);
+    if (!topicExists) return [];
+    topicContributions = ((project as any).contributions || []).filter((c: any) => c.topic === topicName);
+  }
 
   // Sort by timestamp descending (newest first)
-  const sorted = [...topic.contributions].sort(
+  const sorted = [...topicContributions].sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
@@ -252,14 +264,26 @@ export function getAuthorContributions(
   const project = getProject(projectId);
   if (!project) return [];
 
-  const contributions: ProjectContribution[] = [];
-  for (const topic of project.topics) {
-    contributions.push(...topic.contributions.filter(c => c.authorId === authorId));
+  let authorContributions: any[] = [];
+
+  // Handle both data formats: old flat format and new nested format
+  if ((project as any).topics.length > 0 && typeof (project as any).topics[0] === 'object') {
+    // New nested format: topics are objects with contributions
+    for (const topic of (project as any).topics) {
+      authorContributions.push(...topic.contributions.filter((c: any) =>
+        c.peerId === authorId || c.authorId === authorId  // Support both field names
+      ));
+    }
+  } else {
+    // Old flat format: filter contributions from the flat array by author
+    authorContributions = ((project as any).contributions || []).filter((c: any) =>
+      c.peerId === authorId || c.authorId === authorId  // Support both field names
+    );
   }
 
   // Sort by timestamp descending (newest first)
-  const sorted = contributions.sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  const sorted = authorContributions.sort(
+    (a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
   return limit ? sorted.slice(0, limit) : sorted;
@@ -276,21 +300,30 @@ export function searchContributions(
   const project = getProject(projectId);
   if (!project) return [];
 
-  const contributions: ProjectContribution[] = [];
   const lowerQuery = query.toLowerCase();
 
-  for (const topic of project.topics) {
-    contributions.push(
-      ...topic.contributions.filter(c =>
+  let contributions: any[] = [];
+
+  // Handle both data formats: old flat format and new nested format
+  if ((project as any).topics.length > 0 && typeof (project as any).topics[0] === 'object') {
+    // New nested format: topics are objects with contributions
+    for (const topic of (project as any).topics) {
+      contributions.push(...topic.contributions.filter((c: any) =>
         c.summary.toLowerCase().includes(lowerQuery) ||
         c.topic.toLowerCase().includes(lowerQuery)
-      )
+      ));
+    }
+  } else {
+    // Old flat format: search through the flat contributions array
+    contributions = ((project as any).contributions || []).filter((c: any) =>
+      c.summary.toLowerCase().includes(lowerQuery) ||
+      c.topic.toLowerCase().includes(lowerQuery)
     );
   }
 
   // Sort by timestamp descending (newest first)
   const sorted = contributions.sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    (a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
   return limit ? sorted.slice(0, limit) : sorted;
@@ -300,33 +333,60 @@ export function searchContributions(
  * Get project status summary (topics with recent activity)
  */
 export function getProjectStatus(projectId: string): {
-  project: Project;
+  project: any; // Use actual stored format instead of interface
   topics: Array<{
     name: string;
     description?: string;
     contributionCount: number;
-    lastContribution?: ProjectContribution;
+    lastContribution?: any;
     contributors: string[];
   }>;
 } | null {
   const project = getProject(projectId);
   if (!project) return null;
 
-  const topics = project.topics.map(topic => {
-    const sortedContributions = [...topic.contributions].sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
+  // Handle both data formats: old flat format and new nested format
+  let topics;
 
-    const contributors = [...new Set(topic.contributions.map(c => c.authorId))];
+  // Check if this project uses the new nested format (topics as objects)
+  if ((project as any).topics.length > 0 && typeof (project as any).topics[0] === 'object') {
+    // New nested format: topics are objects with contributions
+    topics = ((project as any).topics as any[]).map(topic => {
+      const sortedContributions = [...topic.contributions].sort(
+        (a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
 
-    return {
-      name: topic.name,
-      description: topic.description,
-      contributionCount: topic.contributions.length,
-      lastContribution: sortedContributions[0],
-      contributors
-    };
-  });
+      const contributors = [...new Set(topic.contributions.map((c: any) => c.authorId || c.peerId))] as string[];
+
+      return {
+        name: topic.name,
+        description: topic.description,
+        contributionCount: topic.contributions.length,
+        lastContribution: sortedContributions[0],
+        contributors
+      };
+    });
+  } else {
+    // Old flat format: topics are strings, contributions are flat
+    topics = ((project as any).topics as string[]).map(topicName => {
+      // Filter contributions for this topic from the flat contributions array
+      const topicContributions = (project as any).contributions.filter((c: any) => c.topic === topicName);
+
+      const sortedContributions = [...topicContributions].sort(
+        (a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+
+      // Use peerId instead of authorId based on actual data format
+      const contributors = [...new Set(topicContributions.map((c: any) => c.peerId || c.authorId))] as string[];
+
+      return {
+        name: topicName,
+        contributionCount: topicContributions.length,
+        lastContribution: sortedContributions[0],
+        contributors
+      };
+    });
+  }
 
   return { project, topics };
 }

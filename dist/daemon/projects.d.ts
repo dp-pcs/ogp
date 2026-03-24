@@ -65,12 +65,12 @@ export declare function searchContributions(projectId: string, query: string, li
  * Get project status summary (topics with recent activity)
  */
 export declare function getProjectStatus(projectId: string): {
-    project: Project;
+    project: any;
     topics: Array<{
         name: string;
         description?: string;
         contributionCount: number;
-        lastContribution?: ProjectContribution;
+        lastContribution?: any;
         contributors: string[];
     }>;
 } | null;
