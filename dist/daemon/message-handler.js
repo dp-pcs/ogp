@@ -4,6 +4,8 @@ import { getIntent } from './intent-registry.js';
 import { notifyOpenClaw } from './notify.js';
 import { checkAccess } from './doorman.js';
 import { logActivity, getEffectivePolicy } from './agent-comms.js';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 export async function handleMessage(message, signature) {
     // 1. Verify sender exists and is approved
     const peer = getPeer(message.from);
@@ -61,7 +63,20 @@ export async function handleMessage(message, signature) {
     if (message.intent === 'agent-comms') {
         return handleAgentComms(message, peer.displayName);
     }
-    // 6. Standard intent handling: Notify OpenClaw
+    // 6. Execute intent handler if one is registered
+    if (intent.handler) {
+        try {
+            const handlerResult = await executeIntentHandler(intent.handler, message, peer.displayName);
+            console.log(`[OGP] Intent handler executed for ${message.intent}: ${handlerResult.success ? 'success' : 'failed'}`);
+            if (!handlerResult.success) {
+                console.error(`[OGP] Handler error: ${handlerResult.error}`);
+            }
+        }
+        catch (error) {
+            console.error(`[OGP] Handler execution failed: ${error}`);
+        }
+    }
+    // 7. Standard intent handling: Notify OpenClaw
     const notificationText = formatNotification(message, peer.displayName);
     await notifyOpenClaw({
         text: notificationText,
@@ -76,7 +91,7 @@ export async function handleMessage(message, signature) {
             }
         }
     });
-    // 7. Return success
+    // 8. Return success
     return {
         success: true,
         nonce: message.nonce,
@@ -155,5 +170,70 @@ function formatNotification(message, displayName) {
         default:
             return `[OGP] ${intent} from ${displayName}`;
     }
+}
+/**
+ * Execute an intent handler script with the message data
+ */
+async function executeIntentHandler(handlerPath, message, peerDisplayName) {
+    return new Promise((resolve) => {
+        // Check if handler script exists
+        if (!fs.existsSync(handlerPath)) {
+            resolve({ success: false, error: `Handler script not found: ${handlerPath}` });
+            return;
+        }
+        // Prepare environment variables for the script
+        const env = {
+            ...process.env,
+            OGP_INTENT: message.intent,
+            OGP_FROM: message.from,
+            OGP_TO: message.to,
+            OGP_NONCE: message.nonce,
+            OGP_TIMESTAMP: message.timestamp,
+            OGP_PAYLOAD: JSON.stringify(message.payload || {}),
+            OGP_PEER_NAME: peerDisplayName,
+            OGP_REPLY_TO: message.replyTo || '',
+            OGP_CONVERSATION_ID: message.conversationId || ''
+        };
+        const child = spawn(handlerPath, [], {
+            env,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            timeout: 30000 // 30 second timeout
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout?.on('data', (data) => {
+            stdout += data.toString();
+        });
+        child.stderr?.on('data', (data) => {
+            stderr += data.toString();
+        });
+        child.on('close', (code) => {
+            if (code === 0) {
+                resolve({ success: true, output: stdout.trim() });
+            }
+            else {
+                resolve({
+                    success: false,
+                    error: `Handler exited with code ${code}${stderr ? `: ${stderr.trim()}` : ''}`
+                });
+            }
+        });
+        child.on('error', (error) => {
+            resolve({ success: false, error: `Failed to execute handler: ${error.message}` });
+        });
+        // Send message data to handler via stdin
+        child.stdin?.write(JSON.stringify({
+            intent: message.intent,
+            from: message.from,
+            to: message.to,
+            nonce: message.nonce,
+            timestamp: message.timestamp,
+            payload: message.payload || {},
+            peerDisplayName,
+            replyTo: message.replyTo,
+            conversationId: message.conversationId
+        }));
+        child.stdin?.end();
+    });
 }
 //# sourceMappingURL=message-handler.js.map

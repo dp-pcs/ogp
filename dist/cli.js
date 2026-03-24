@@ -7,6 +7,7 @@ import { federationList, federationRequest, federationApprove, federationReject,
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, showActivity, clearActivity, setDefault, setLogging } from './cli/agent-comms.js';
+import { registerNewIntent, listRegisteredIntents, removeIntent } from './cli/intent-registry.js';
 const program = new Command();
 program
     .name('ogp')
@@ -300,6 +301,39 @@ agentComms
     .argument('<state>', 'on or off')
     .action((state) => {
     setLogging(state === 'on' || state === 'true' || state === 'enable');
+});
+// Intent registry management commands
+const intent = program
+    .command('intent')
+    .description('Manage custom intents');
+intent
+    .command('register')
+    .description('Register a new intent handler')
+    .argument('<name>', 'Intent name')
+    .option('--script <path>', 'Path to handler script')
+    .option('--description <text>', 'Description of the intent')
+    .action((name, options) => {
+    if (!options.description) {
+        console.error('Error: --description is required');
+        process.exit(1);
+    }
+    registerNewIntent(name, {
+        script: options.script,
+        description: options.description
+    });
+});
+intent
+    .command('list')
+    .description('List all registered intents')
+    .action(() => {
+    listRegisteredIntents();
+});
+intent
+    .command('remove')
+    .description('Remove a registered intent')
+    .argument('<name>', 'Intent name')
+    .action((name) => {
+    removeIntent(name);
 });
 program.parse();
 //# sourceMappingURL=cli.js.map

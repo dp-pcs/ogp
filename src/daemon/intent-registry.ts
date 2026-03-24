@@ -6,10 +6,10 @@ export interface Intent {
   name: string;
   description: string;
   schema?: Record<string, any>;  // JSON schema for parameters
-  handler?: string;              // handler function name or path
+  handler?: string;              // handler script path or command
 }
 
-const INTENTS_FILE = path.join(getConfigDir(), 'intents.json');
+const INTENTS_FILE = path.join(getConfigDir(), 'intent-registry.json');
 
 const DEFAULT_INTENTS: Intent[] = [
   {
@@ -113,4 +113,19 @@ export function registerIntent(intent: Intent): void {
 export function getIntent(name: string): Intent | null {
   const intents = loadIntents();
   return intents.find(i => i.name === name) || null;
+}
+
+export function removeIntent(name: string): boolean {
+  const intents = loadIntents();
+  const index = intents.findIndex(i => i.name === name);
+  if (index >= 0) {
+    intents.splice(index, 1);
+    saveIntents(intents);
+    return true;
+  }
+  return false;
+}
+
+export function listIntents(): Intent[] {
+  return loadIntents();
 }

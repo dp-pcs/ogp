@@ -6,6 +6,7 @@ import { requireConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
 import { addPeer, getPeer, approvePeer, listPeers, updatePeer } from './peers.js';
 import { handleMessage } from './message-handler.js';
+import { notifyOpenClaw } from './notify.js';
 import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
 import { startReplyCleanup, stopReplyCleanup, getPendingReply, deletePendingReply, storePendingReply } from './reply-handler.js';
 import { loadIntents } from './intent-registry.js';
@@ -70,6 +71,46 @@ export function startServer(config, background = false) {
             };
             addPeer(peerData);
             console.log(`[OGP] Federation request from ${peer.displayName} (${peer.id})`);
+            // BUILD-77: Fire immediate OpenClaw notification to agent session
+            const notificationText = `[OGP Federation Request] ${peer.displayName} (${peer.id}) requests federation approval\n` +
+                `Gateway: ${peer.gatewayUrl}\n` +
+                `Email: ${peer.email}\n` +
+                `Type: Bidirectional (two-way) federation\n` +
+                `Scopes: Pending negotiation during approval\n` +
+                `Action: Review and approve/reject using: ogp federation approve ${peer.id}`;
+            // Send notification with metadata for agent processing
+            const notificationPayload = {
+                text: notificationText,
+                sessionKey: 'agent:main:main', // Default main agent session
+                metadata: {
+                    ogp: {
+                        type: 'federation_request',
+                        peer: {
+                            id: peer.id,
+                            displayName: peer.displayName,
+                            email: peer.email,
+                            gatewayUrl: peer.gatewayUrl
+                        },
+                        requestedAt: peerData.requestedAt,
+                        federationType: 'bidirectional',
+                        scopeStatus: 'pending_negotiation',
+                        approvalCommand: `ogp federation approve ${peer.id}`
+                    }
+                }
+            };
+            // Fire notification immediately (not via heartbeat)
+            try {
+                const notified = await notifyOpenClaw(notificationPayload);
+                if (notified) {
+                    console.log(`[OGP] Agent session notified of federation request from ${peer.displayName}`);
+                }
+                else {
+                    console.warn(`[OGP] Failed to notify agent session of federation request from ${peer.displayName}`);
+                }
+            }
+            catch (error) {
+                console.error(`[OGP] Error notifying agent session:`, error);
+            }
             res.json({
                 received: true,
                 status: 'pending',

@@ -27,6 +27,11 @@ import {
   setDefault,
   setLogging
 } from './cli/agent-comms.js';
+import {
+  registerNewIntent,
+  listRegisteredIntents,
+  removeIntent
+} from './cli/intent-registry.js';
 import type { ResponseLevel } from './daemon/peers.js';
 
 const program = new Command();
@@ -348,6 +353,43 @@ agentComms
   .argument('<state>', 'on or off')
   .action((state) => {
     setLogging(state === 'on' || state === 'true' || state === 'enable');
+  });
+
+// Intent registry management commands
+const intent = program
+  .command('intent')
+  .description('Manage custom intents');
+
+intent
+  .command('register')
+  .description('Register a new intent handler')
+  .argument('<name>', 'Intent name')
+  .option('--script <path>', 'Path to handler script')
+  .option('--description <text>', 'Description of the intent')
+  .action((name, options) => {
+    if (!options.description) {
+      console.error('Error: --description is required');
+      process.exit(1);
+    }
+    registerNewIntent(name, {
+      script: options.script,
+      description: options.description
+    });
+  });
+
+intent
+  .command('list')
+  .description('List all registered intents')
+  .action(() => {
+    listRegisteredIntents();
+  });
+
+intent
+  .command('remove')
+  .description('Remove a registered intent')
+  .argument('<name>', 'Intent name')
+  .action((name) => {
+    removeIntent(name);
   });
 
 program.parse();

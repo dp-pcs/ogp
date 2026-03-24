@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getConfigDir, ensureConfigDir } from '../shared/config.js';
-const INTENTS_FILE = path.join(getConfigDir(), 'intents.json');
+const INTENTS_FILE = path.join(getConfigDir(), 'intent-registry.json');
 const DEFAULT_INTENTS = [
     {
         name: 'message',
@@ -97,5 +97,18 @@ export function registerIntent(intent) {
 export function getIntent(name) {
     const intents = loadIntents();
     return intents.find(i => i.name === name) || null;
+}
+export function removeIntent(name) {
+    const intents = loadIntents();
+    const index = intents.findIndex(i => i.name === name);
+    if (index >= 0) {
+        intents.splice(index, 1);
+        saveIntents(intents);
+        return true;
+    }
+    return false;
+}
+export function listIntents() {
+    return loadIntents();
 }
 //# sourceMappingURL=intent-registry.js.map
