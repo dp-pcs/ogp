@@ -1,9 +1,26 @@
 import { requireConfig } from '../shared/config.js';
 export async function notifyOpenClaw(payload) {
     const config = requireConfig();
-    // Method 1: openclaw CLI with --mode now (immediate wake, routes to Telegram)
-    // OpenClaw uses WebSocket internally so HTTP POST to /tools/invoke doesn't work.
-    // The CLI handles the WebSocket connection and --mode now triggers immediate delivery.
+    // Method 1: openclaw message send --channel telegram (direct Telegram delivery)
+    // Requires notifyTarget set in OGP config: ogp config --set notifyTarget=<telegram-chat-id>
+    // The notifyTarget is the Telegram user/chat ID to deliver notifications to.
+    const notifyTarget = config.notifyTarget;
+    if (notifyTarget) {
+        try {
+            const { execSync } = await import('node:child_process');
+            const escaped = payload.text.replace(/'/g, "'\\''");
+            execSync(`openclaw message send --channel telegram --target '${notifyTarget}' --message '${escaped}' 2>/dev/null`, {
+                timeout: 10000,
+                env: { ...process.env }
+            });
+            console.log('[OGP] Notified via Telegram to', notifyTarget, ':', payload.text);
+            return true;
+        }
+        catch (err) {
+            console.error('[OGP] Telegram notification failed:', err);
+        }
+    }
+    // Method 2: openclaw system event --mode now (wakes agent, appears as System: context)
     try {
         const { execSync } = await import('node:child_process');
         const escaped = payload.text.replace(/'/g, "'\\''");
@@ -11,11 +28,11 @@ export async function notifyOpenClaw(payload) {
             timeout: 10000,
             env: { ...process.env }
         });
-        console.log('[OGP] Notified OpenClaw via CLI (--mode now):', payload.text);
+        console.log('[OGP] Notified OpenClaw via system event (--mode now):', payload.text);
         return true;
     }
     catch (err) {
-        console.error('[OGP] CLI notification failed:', err);
+        console.error('[OGP] System event notification failed:', err);
     }
     // Method 2: HTTP fallback (for non-localhost or when CLI unavailable)
     if (config.openclawToken) {
