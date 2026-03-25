@@ -43,7 +43,7 @@ export interface OGPConfig {
   agentComms?: AgentCommsConfig;
 }
 
-const DEFAULT_CONFIG_DIR = path.join(os.homedir(), '.ogp');
+const DEFAULT_CONFIG_DIR = process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');
 const CONFIG_FILE = path.join(DEFAULT_CONFIG_DIR, 'config.json');
 
 export function getConfigPath(): string {
