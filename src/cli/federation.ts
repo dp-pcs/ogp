@@ -213,7 +213,8 @@ export async function federationReject(peerId: string): Promise<void> {
 export async function federationSend(
   peerId: string,
   intent: string,
-  payloadJson: string
+  payloadJson: string,
+  timeoutMs?: number
 ): Promise<any | null> {
   const config = requireConfig();
   const peer = getPeer(peerId);
@@ -245,14 +246,20 @@ export async function federationSend(
   const { payload: signedPayload, signature } = signObject(message, getPrivateKey());
 
   try {
+    const controller = new AbortController();
+    const timeoutId = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
     const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: signedPayload,
         signature
-      })
+      }),
+      signal: controller.signal
     });
+
+    if (timeoutId) clearTimeout(timeoutId);
 
     if (!response.ok) {
       console.error(`Send failed: ${response.status} ${response.statusText}`);
@@ -260,11 +267,13 @@ export async function federationSend(
     }
 
     const result = await response.json();
-    console.log('✓ Message sent');
-    console.log('  Response:', JSON.stringify(result, null, 2));
     return result;
-  } catch (error) {
-    console.error('Failed to send message:', error);
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error(`Request timed out after ${timeoutMs}ms`);
+    } else {
+      console.error('Failed to send message:', error);
+    }
     return null;
   }
 }

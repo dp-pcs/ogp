@@ -25,11 +25,15 @@ Host: peer.example.com
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.3",
   "displayName": "Alice",
   "email": "alice@example.com",
   "gatewayUrl": "https://peer.example.com",
   "publicKey": "302a300506032b6570032100abc123...",
+  "capabilities": {
+    "intents": ["message", "task-request", "status-update", "agent-comms"],
+    "features": ["scope-negotiation", "reply-callback", "project-intent"]
+  },
   "endpoints": {
     "request": "https://peer.example.com/federation/request",
     "approve": "https://peer.example.com/federation/approve",
@@ -42,6 +46,8 @@ This endpoint:
 - Is unauthenticated (public discovery)
 - Returns peer identity and public key
 - Lists federation endpoints
+- Advertises gateway capabilities (v0.2.0+)
+- Indicates supported intents and features
 
 ## Federation Request
 
@@ -49,15 +55,26 @@ Alice wants to federate with Bob. Alice sends a signed request.
 
 ### Alice's Side
 
+In v0.2.3, the peer-id is **optional** and auto-resolves from the gateway's `/.well-known/ogp`:
+
+```bash
+ogp federation request https://bob.example.com
+```
+
+Or specify a custom peer-id:
+
 ```bash
 ogp federation request https://bob.example.com peer-bob
 ```
 
 This:
-1. Loads Alice's keypair
-2. Builds peer info with Alice's public key
-3. Signs the peer info with Alice's private key
-4. POSTs to Bob's `/federation/request`
+1. Fetches Bob's `/.well-known/ogp` to discover peer info
+2. Auto-resolves peer-id if not provided (uses hostname or displayName)
+3. Loads Alice's keypair
+4. Builds peer info with Alice's public key
+5. Signs the peer info with Alice's private key
+6. POSTs to Bob's `/federation/request`
+7. Fires an OpenClaw notification (via Telegram if configured)
 
 ### Request
 
@@ -109,9 +126,20 @@ PENDING PEERS:
 
 ## Federation Approval
 
-Bob approves Alice's request.
+Bob approves Alice's request. In v0.2.0+, Bob can include **scope grants** to control what Alice can access.
 
 ### Bob's Side
+
+Approve with scope grants (v0.2.0+):
+
+```bash
+ogp federation approve peer-alice \
+  --intents message,agent-comms \
+  --rate 100/3600 \
+  --topics memory-management,task-delegation
+```
+
+Or approve without restrictions (v0.1 compatibility):
 
 ```bash
 ogp federation approve peer-alice
@@ -119,9 +147,49 @@ ogp federation approve peer-alice
 
 This:
 1. Updates peer status to `approved` in `~/.ogp/peers.json`
-2. POSTs approval to Alice's `/federation/approve`
+2. Stores scope grants with the peer record
+3. POSTs approval to Alice's `/federation/approve`
 
 ### Request
+
+v0.2.0+ approval includes scope bundle:
+
+```http
+POST /federation/approve HTTP/1.1
+Host: alice.example.com
+Content-Type: application/json
+
+{
+  "peerId": "peer-alice",
+  "approved": true,
+  "protocolVersion": "0.2.3",
+  "scopeGrants": {
+    "version": "0.2.0",
+    "grantedAt": "2026-03-24T10:30:00Z",
+    "scopes": [
+      {
+        "intent": "message",
+        "enabled": true,
+        "rateLimit": {
+          "requests": 100,
+          "windowSeconds": 3600
+        }
+      },
+      {
+        "intent": "agent-comms",
+        "enabled": true,
+        "topics": ["memory-management", "task-delegation"],
+        "rateLimit": {
+          "requests": 100,
+          "windowSeconds": 3600
+        }
+      }
+    ]
+  }
+}
+```
+
+v0.1 approval (backward compatible):
 
 ```http
 POST /federation/approve HTTP/1.1
@@ -139,6 +207,7 @@ Content-Type: application/json
 Alice's OGP daemon:
 1. Receives approval
 2. Updates Bob's status to `approved`
+3. Stores received scope grants (what Alice can request from Bob)
 
 Now both sides have approved peers:
 
@@ -152,6 +221,25 @@ APPROVED PEERS:
     Status: approved
     Gateway: https://bob.example.com
     Public key: 302a300506032b6570032100abc123...
+    Granted scopes: message, agent-comms
+    Rate limit: 100 requests / 3600 seconds
+```
+
+View detailed scopes:
+
+```bash
+$ ogp federation scopes peer-bob
+
+Scopes granted TO peer-bob (what they can request from you):
+  [not configured - full access]
+
+Scopes received FROM peer-bob (what you can request from them):
+  • message (enabled)
+    Rate limit: 100 requests / 3600 seconds
+
+  • agent-comms (enabled)
+    Topics: memory-management, task-delegation
+    Rate limit: 100 requests / 3600 seconds
 ```
 
 ## Message Exchange
@@ -193,13 +281,48 @@ Content-Type: application/json
 
 ### Bob Receives
 
-Bob's OGP daemon:
+Bob's OGP daemon (doorman):
 1. Verifies sender (`peer-alice`) is in approved peers
-2. Verifies signature using Alice's public key
-3. Checks intent exists in registry
-4. Forwards to Bob's OpenClaw via webhook
+2. **Checks scope grants** - Is `message` intent allowed for Alice? (v0.2.0+)
+3. **Checks rate limits** - Has Alice exceeded their quota? (v0.2.0+)
+4. Verifies signature using Alice's public key
+5. Checks intent exists in registry
+6. Forwards to Bob's OpenClaw via webhook or sessions_send (v0.2.3+)
+
+If scope check fails:
+- Response: `403 Forbidden`
+- Message: `"Intent 'message' not granted"`
+
+If rate limit exceeded:
+- Response: `429 Too Many Requests`
+- Header: `Retry-After: <seconds>`
+- Message: `"Rate limit exceeded for intent 'message'"`
 
 ### OpenClaw Notification
+
+v0.2.3+ prioritizes **sessions_send** over system events for better Telegram integration:
+
+```http
+POST /api/sessions/send HTTP/1.1
+Host: bob-openclaw.local:18789
+Authorization: Bearer bob-token
+Content-Type: application/json
+
+{
+  "sessionKey": "agent:main:main",
+  "message": "[OGP] Message from Alice: Hello, Bob!",
+  "ogp": {
+    "from": "peer-alice",
+    "intent": "message",
+    "nonce": "550e8400-e29b-41d4-a716-446655440000",
+    "payload": {
+      "text": "Hello, Bob!"
+    }
+  }
+}
+```
+
+Fallback to system event if sessions_send is unavailable:
 
 ```http
 POST /api/system-event HTTP/1.1
@@ -221,7 +344,7 @@ Content-Type: application/json
 }
 ```
 
-Bob's OpenClaw agent sees:
+Bob's OpenClaw agent sees (via Telegram or system notification):
 
 ```
 [OGP] Message from Alice: Hello, Bob!
@@ -237,6 +360,212 @@ Bob's OGP daemon responds to Alice:
   "timestamp": "2026-03-19T10:30:01.000Z"
 }
 ```
+
+## Agent-Comms Flow (v0.2.0+)
+
+Agent-comms enables rich agent-to-agent communication with topic routing, priority, and reply support.
+
+### Alice Sends Agent-Comms
+
+```bash
+ogp federation agent peer-bob memory-management "How do you persist context?" --priority high --wait
+```
+
+### Request
+
+```http
+POST /federation/message HTTP/1.1
+Host: bob.example.com
+Content-Type: application/json
+
+{
+  "message": {
+    "intent": "agent-comms",
+    "from": "peer-alice",
+    "to": "peer-bob",
+    "nonce": "abc-123-def-456",
+    "timestamp": "2026-03-24T10:30:00Z",
+    "replyTo": "https://alice.example.com/federation/reply/abc-123-def-456",
+    "payload": {
+      "topic": "memory-management",
+      "message": "How do you persist context?",
+      "priority": "high"
+    }
+  },
+  "signature": "a1b2c3d4e5f6..."
+}
+```
+
+### Bob Receives with Policy
+
+Bob's doorman:
+1. Verifies Alice is approved
+2. **Checks intent grant** - Does Alice have `agent-comms` access?
+3. **Checks topic grant** - Is `memory-management` in Alice's allowed topics?
+4. **Checks rate limit** - Within quota?
+5. Verifies signature
+6. **Loads response policy** - How should Bob's agent respond?
+7. Forwards to OpenClaw with policy metadata
+
+Bob sees:
+
+```
+[OGP Agent-Comms] [HIGH] Alice → memory-management [FULL]: How do you persist context?
+```
+
+The `[FULL]` indicator tells Bob's agent to respond openly based on the configured response policy.
+
+### Bob Replies
+
+Bob's agent can reply via the `replyTo` callback URL:
+
+```http
+POST /federation/reply/abc-123-def-456 HTTP/1.1
+Host: alice.example.com
+Content-Type: application/json
+
+{
+  "reply": {
+    "nonce": "abc-123-def-456",
+    "success": true,
+    "data": {
+      "answer": "We use PostgreSQL with a custom context table that stores conversation history..."
+    },
+    "timestamp": "2026-03-24T10:30:05Z"
+  },
+  "signature": "x1y2z3..."
+}
+```
+
+Alice's agent receives the reply and completes the `--wait` operation.
+
+## Project Intent Flow (v0.2.0+)
+
+Project intents enable collaborative project management across federated peers.
+
+### Alice Sends Contribution
+
+```bash
+ogp project send-contribution peer-bob shared-app progress "Completed authentication system"
+```
+
+### Request
+
+```http
+POST /federation/message HTTP/1.1
+Host: bob.example.com
+Content-Type: application/json
+
+{
+  "message": {
+    "intent": "project",
+    "from": "peer-alice",
+    "to": "peer-bob",
+    "nonce": "proj-123-456",
+    "timestamp": "2026-03-24T11:00:00Z",
+    "payload": {
+      "action": "contribute",
+      "projectId": "shared-app",
+      "contribution": {
+        "topic": "progress",
+        "summary": "Completed authentication system",
+        "metadata": {
+          "files": ["src/auth.ts", "src/jwt.ts"],
+          "tests": "all passing"
+        }
+      }
+    }
+  },
+  "signature": "a1b2c3d4..."
+}
+```
+
+### Bob Receives
+
+Bob's daemon:
+1. Verifies Alice is approved
+2. Checks `project` intent grant
+3. Verifies signature
+4. **Stores contribution** in local project record
+5. Notifies OpenClaw agent
+
+Bob sees:
+
+```
+[OGP Project] Alice contributed to shared-app (progress): Completed authentication system
+```
+
+### Alice Queries Bob's Project
+
+```bash
+ogp project query-peer peer-bob shared-app --limit 10
+```
+
+### Request
+
+```http
+POST /federation/message HTTP/1.1
+Host: bob.example.com
+Content-Type: application/json
+
+{
+  "message": {
+    "intent": "project",
+    "from": "peer-alice",
+    "to": "peer-bob",
+    "nonce": "proj-789-012",
+    "timestamp": "2026-03-24T11:05:00Z",
+    "replyTo": "https://alice.example.com/federation/reply/proj-789-012",
+    "payload": {
+      "action": "query",
+      "projectId": "shared-app",
+      "filters": {
+        "limit": 10
+      }
+    }
+  },
+  "signature": "b2c3d4e5..."
+}
+```
+
+### Bob's Response
+
+Bob's daemon replies with project contributions:
+
+```http
+POST /federation/reply/proj-789-012 HTTP/1.1
+Host: alice.example.com
+Content-Type: application/json
+
+{
+  "reply": {
+    "nonce": "proj-789-012",
+    "success": true,
+    "data": {
+      "projectId": "shared-app",
+      "projectName": "Shared Mobile App",
+      "contributions": [
+        {
+          "topic": "progress",
+          "summary": "Deployed staging environment",
+          "author": "peer-bob",
+          "timestamp": "2026-03-24T10:00:00Z"
+        },
+        {
+          "topic": "blocker",
+          "summary": "Waiting for API key approval",
+          "author": "peer-bob",
+          "timestamp": "2026-03-23T15:30:00Z"
+        }
+      ]
+    },
+    "timestamp": "2026-03-24T11:05:01Z"
+  },
+  "signature": "c3d4e5f6..."
+}
+```
+
+Alice receives a unified view of project activity from both local and Bob's contributions.
 
 ## Security Model
 
@@ -311,11 +640,14 @@ If signature is invalid:
 - ✓ Message tampering (signature covers full message)
 - ✓ Unauthorized peers (approval required)
 - ✓ Man-in-the-middle (HTTPS tunnels)
+- ✓ **Scope violations** (doorman enforcement, v0.2.0+)
+- ✓ **Rate abuse** (per-peer rate limiting, v0.2.0+)
+- ✓ **Topic restrictions** (topic-based access control for agent-comms, v0.2.0+)
 
 **OGP does NOT protect against:**
 
 - ✗ Compromised peer credentials (keep `keypair.json` secure)
-- ✗ DDoS attacks (add rate limiting if needed)
+- ✗ DDoS attacks (rate limiting mitigates but doesn't prevent)
 - ✗ Replay attacks (nonce tracking not yet implemented)
 
 ### Best Practices
@@ -403,5 +735,8 @@ Alice                    Bob
 ## Next Steps
 
 - See [quickstart.md](./quickstart.md) for hands-on tutorial
+- Read [scopes.md](./scopes.md) for scope negotiation details
+- Learn [agent-comms.md](./agent-comms.md) for agent-to-agent messaging
 - Check [README.md](../README.md) for CLI reference
-- Explore custom intents in `~/.ogp/intents.json`
+- Register custom intents with `ogp intent register`
+- Configure response policies with `ogp agent-comms configure`

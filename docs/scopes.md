@@ -16,16 +16,21 @@ Your gateway advertises its capabilities in the federation card at `/.well-known
 
 ```json
 {
-  "version": "0.2.0",
+  "version": "0.2.3",
   "displayName": "David's Gateway",
   "capabilities": {
-    "intents": ["message", "task-request", "status-update", "agent-comms"],
-    "features": ["scope-negotiation", "reply-callback"]
+    "intents": ["message", "task-request", "status-update", "agent-comms", "project"],
+    "features": ["scope-negotiation", "reply-callback", "project-intent"]
   }
 }
 ```
 
 This tells other gateways what you **can** support, not what you **will** grant.
+
+Capabilities are automatically populated from:
+- **Built-in intents**: `message`, `task-request`, `status-update`, `agent-comms`, `project`
+- **Custom intents**: Registered via `ogp intent register`
+- **Features**: Protocol features your gateway supports
 
 ### Layer 2: Peer Negotiation
 
@@ -169,12 +174,67 @@ Protocol version is detected automatically from:
 - **Use topic restrictions**: Especially for agent-comms
 - **Set expiration**: For temporary access, use `expiresAt` in code
 
+## Custom Intents
+
+Register custom intent handlers for specialized workflows:
+
+```bash
+# Register a deployment intent
+ogp intent register deployment \
+  --session-key "agent:main:main" \
+  --description "Deployment notifications"
+
+# Register a monitoring intent
+ogp intent register monitoring \
+  --session-key "agent:ops:alerts" \
+  --description "System monitoring and alerts"
+
+# List all registered intents
+ogp intent list
+
+# Remove an intent
+ogp intent remove deployment
+```
+
+Custom intents appear in your gateway capabilities and can be granted to peers:
+
+```bash
+# Grant peer access to custom intent
+ogp federation approve alice \
+  --intents message,deployment \
+  --rate 50/3600
+```
+
+## Project Intent
+
+The `project` intent enables collaborative project management across federated peers.
+
+### Project Actions
+
+| Action | Description | Rate Limit Recommended |
+|--------|-------------|------------------------|
+| `contribute` | Send contribution to peer's project | 100/hour |
+| `query` | Query peer's project contributions | 50/hour |
+| `request-join` | Request to join peer's project | 10/hour |
+| `status` | Get project status from peer | 20/hour |
+
+### Grant Project Access
+
+```bash
+# Grant project collaboration access
+ogp federation approve alice \
+  --intents project \
+  --rate 100/3600
+```
+
+Project scope grants don't require topic restrictions - access is controlled at the project membership level. Peers can only contribute to projects they're members of.
+
 ## Examples
 
 ### Minimal Access
 
 ```bash
-# Grant only ping intent
+# Grant only message intent
 ogp federation approve stan --intents message --rate 10/3600
 ```
 
@@ -190,9 +250,28 @@ ogp federation approve alice \
 ### Scoped Agent Access
 
 ```bash
-# Grant agent-comms for specific project
+# Grant agent-comms for specific topics
 ogp federation approve bob \
   --intents agent-comms \
-  --topics project-alpha,planning \
+  --topics memory-management,planning \
   --rate 50/3600
+```
+
+### Project Collaboration
+
+```bash
+# Grant project and agent-comms for team collaboration
+ogp federation approve charlie \
+  --intents agent-comms,project \
+  --topics project-updates,planning \
+  --rate 200/3600
+```
+
+### Custom Intent Access
+
+```bash
+# Grant custom deployment intent
+ogp federation approve deploy-bot \
+  --intents deployment,monitoring \
+  --rate 500/3600
 ```

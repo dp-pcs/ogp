@@ -10,6 +10,7 @@ interface ProjectQueryOptions {
     author?: string;
     limit?: number;
     search?: string;
+    timeout?: number;
 }
 /**
  * Create a new project locally

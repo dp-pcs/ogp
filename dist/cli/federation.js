@@ -174,7 +174,7 @@ export async function federationReject(peerId) {
         console.error('Failed to notify peer:', error);
     }
 }
-export async function federationSend(peerId, intent, payloadJson) {
+export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
     const config = requireConfig();
     const peer = getPeer(peerId);
     if (!peer) {
@@ -198,25 +198,33 @@ export async function federationSend(peerId, intent, payloadJson) {
     };
     const { payload: signedPayload, signature } = signObject(message, getPrivateKey());
     try {
+        const controller = new AbortController();
+        const timeoutId = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
         const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message: signedPayload,
                 signature
-            })
+            }),
+            signal: controller.signal
         });
+        if (timeoutId)
+            clearTimeout(timeoutId);
         if (!response.ok) {
             console.error(`Send failed: ${response.status} ${response.statusText}`);
             return null;
         }
         const result = await response.json();
-        console.log('✓ Message sent');
-        console.log('  Response:', JSON.stringify(result, null, 2));
         return result;
     }
     catch (error) {
-        console.error('Failed to send message:', error);
+        if (error instanceof Error && error.name === 'AbortError') {
+            console.error(`Request timed out after ${timeoutMs}ms`);
+        }
+        else {
+            console.error('Failed to send message:', error);
+        }
         return null;
     }
 }

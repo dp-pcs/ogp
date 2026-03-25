@@ -7,7 +7,7 @@ export interface ApproveOptions {
 }
 export declare function federationApprove(peerId: string, options?: ApproveOptions): Promise<void>;
 export declare function federationReject(peerId: string): Promise<void>;
-export declare function federationSend(peerId: string, intent: string, payloadJson: string): Promise<any | null>;
+export declare function federationSend(peerId: string, intent: string, payloadJson: string, timeoutMs?: number): Promise<any | null>;
 /**
  * Show scope grants for a peer
  */

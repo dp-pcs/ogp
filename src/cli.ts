@@ -525,10 +525,12 @@ project
   .option('--topic <name>', 'Filter by topic')
   .option('--author <id>', 'Filter by author')
   .option('--limit <n>', 'Maximum results to return', '20')
+  .option('--timeout <ms>', 'Response timeout in milliseconds', '10000')
   .action(async (peerId, projectId, options) => {
     const queryOptions = {
       ...options,
-      limit: parseInt(options.limit, 10)
+      limit: parseInt(options.limit, 10),
+      timeout: parseInt(options.timeout, 10)
     };
     await projectQueryPeer(peerId, projectId, queryOptions);
   });

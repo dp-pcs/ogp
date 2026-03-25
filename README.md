@@ -23,6 +23,12 @@ This is a companion daemon that adds federation capabilities to any standard Ope
 ## Installation
 
 ```bash
+npm install -g @dp-pcs/ogp
+```
+
+Or from GitHub:
+
+```bash
 npm install -g github:dp-pcs/ogp
 ```
 
@@ -31,6 +37,8 @@ After installation, install the OGP skills for Claude Code:
 ```bash
 ogp-install-skills
 ```
+
+This auto-discovers and installs all OGP skills from the `skills/` directory.
 
 ## Quick Start
 
@@ -117,13 +125,14 @@ https://your-tunnel-url.com/.well-known/ogp
 | `ogp federation list` | List all peers |
 | `ogp federation list --status pending` | List pending federation requests |
 | `ogp federation list --status approved` | List approved peers |
-| `ogp federation request <url> <peer-id>` | Request federation with a peer |
-| `ogp federation approve <peer-id>` | Approve a federation request |
+| `ogp federation request <url> [peer-id]` | Request federation (peer-id auto-resolves if omitted) |
+| `ogp federation approve <peer-id> [options]` | Approve with optional scope grants |
 | `ogp federation reject <peer-id>` | Reject a federation request |
 | `ogp federation send <peer-id> <intent> <json>` | Send a message to an approved peer |
 | `ogp federation scopes <peer-id>` | Show scope grants for a peer |
 | `ogp federation grant <peer-id> [options]` | Update scope grants for a peer |
 | `ogp federation agent <peer-id> <topic> <message>` | Send agent-comms message |
+| `ogp federation ping <peer-url>` | Test connectivity to a peer gateway |
 
 ### Scope Options (v0.2.0)
 
@@ -132,10 +141,50 @@ When approving or granting scopes:
 - `--rate <limit>` - Rate limit as requests/seconds (e.g., `100/3600`)
 - `--topics <list>` - Topics for agent-comms (e.g., `memory-management,task-delegation`)
 
+### Intent Management (v0.2.0+)
+
+| Command | Description |
+|---------|-------------|
+| `ogp intent register <name> [options]` | Register a custom intent handler |
+| `ogp intent list` | List all registered intents |
+| `ogp intent remove <name>` | Remove a registered intent |
+
+### Project Management (v0.2.0+)
+
+| Command | Description |
+|---------|-------------|
+| `ogp project create <id> <name> [options]` | Create a new project |
+| `ogp project join <id> [name] [options]` | Join an existing project |
+| `ogp project list` | List all projects |
+| `ogp project contribute <id> <topic> <summary>` | Add a contribution |
+| `ogp project query <id> [options]` | Query project contributions |
+| `ogp project status <id>` | Show project status |
+| `ogp project request-join <peer> <id> <name>` | Request to join peer's project |
+| `ogp project send-contribution <peer> <id> <topic> <summary>` | Send contribution to peer |
+| `ogp project query-peer <peer> <id> [options]` | Query peer's project |
+| `ogp project status-peer <peer> <id>` | Get peer's project status |
+| `ogp project delete <id> [options]` | Delete a project |
+
+### Agent-Comms Policy Management (v0.2.0+)
+
+| Command | Description |
+|---------|-------------|
+| `ogp agent-comms policies [peer-id]` | Show response policies |
+| `ogp agent-comms configure [peer-ids] [options]` | Configure response policies |
+| `ogp agent-comms add-topic <peer> <topic> [options]` | Add topic policy |
+| `ogp agent-comms remove-topic <peer> <topic>` | Remove topic policy |
+| `ogp agent-comms reset <peer>` | Reset peer to defaults |
+| `ogp agent-comms activity [peer] [options]` | Show activity log |
+| `ogp agent-comms default <level>` | Set default response level |
+| `ogp agent-comms logging <on\|off>` | Enable/disable logging |
+
 ### Federation Examples
 
 ```bash
-# Request federation with another OGP instance
+# Request federation (peer-id auto-resolves from /.well-known/ogp)
+ogp federation request https://peer.example.com
+
+# Or specify custom peer-id
 ogp federation request https://peer.example.com peer-alice
 
 # Check pending requests
@@ -144,7 +193,7 @@ ogp federation list --status pending
 # Approve a peer (v0.1 mode - no scope restrictions)
 ogp federation approve peer-alice
 
-# Approve with scope grants (v0.2.0)
+# Approve with scope grants (v0.2.0+)
 ogp federation approve peer-alice \
   --intents message,agent-comms \
   --rate 100/3600 \
@@ -158,10 +207,13 @@ ogp federation grant peer-alice \
   --intents agent-comms \
   --topics project-planning
 
+# Test connectivity
+ogp federation ping https://peer.example.com
+
 # Send a simple message
 ogp federation send peer-alice message '{"text":"Hello!"}'
 
-# Send agent-comms (v0.2.0)
+# Send agent-comms (v0.2.0+)
 ogp federation agent peer-alice memory-management "How do you persist context?"
 
 # Send agent-comms with priority
@@ -181,6 +233,80 @@ ogp federation send peer-alice status-update '{
   "status": "completed",
   "message": "Task finished"
 }'
+```
+
+### Project Examples (v0.2.0+)
+
+```bash
+# Create a project
+ogp project create my-app "My Awesome App" \
+  --description "Mobile expense tracking application"
+
+# Add contributions
+ogp project contribute my-app progress "Completed authentication system"
+ogp project contribute my-app decision "Using PostgreSQL for persistence"
+ogp project contribute my-app blocker "Waiting for API key approval"
+
+# Query project
+ogp project status my-app
+ogp project query my-app --limit 10
+ogp project query my-app --topic progress
+
+# Collaborate with peers
+ogp project send-contribution peer-alice shared-app progress "Deployed staging"
+ogp project query-peer peer-alice shared-app --limit 10
+ogp project status-peer peer-alice shared-app
+
+# Join peer's project
+ogp project request-join peer-alice mobile-app "Mobile App Project"
+```
+
+### Custom Intent Examples (v0.2.0+)
+
+```bash
+# Register a deployment intent
+ogp intent register deployment \
+  --session-key "agent:main:main" \
+  --description "Deployment notifications"
+
+# List all intents
+ogp intent list
+
+# Remove intent
+ogp intent remove deployment
+
+# Grant peer access to custom intent
+ogp federation approve alice --intents deployment --rate 50/3600
+```
+
+### Agent-Comms Policy Examples (v0.2.0+)
+
+```bash
+# View current policies
+ogp agent-comms policies
+
+# Configure global defaults
+ogp agent-comms configure --global \
+  --topics "general,testing" \
+  --level summary
+
+# Configure specific peer
+ogp agent-comms configure stan \
+  --topics "memory-management" \
+  --level full \
+  --notes "Trusted collaborator"
+
+# Add sensitive topic
+ogp agent-comms add-topic stan calendar --level escalate
+
+# Multi-peer configuration
+ogp agent-comms configure stan,leo,alice \
+  --topics "testing,debugging" \
+  --level full
+
+# View activity
+ogp agent-comms activity
+ogp agent-comms activity stan --last 20
 ```
 
 ## How Federation Works
@@ -225,13 +351,16 @@ All messages are signed with Ed25519 cryptographic signatures to prevent tamperi
 - **message**: Simple text message
 - **task-request**: Request peer to perform a task
 - **status-update**: Status update from a peer
-- **agent-comms**: Agent-to-agent communication with topic routing (v0.2.0)
+- **agent-comms**: Agent-to-agent communication with topic routing (v0.2.0+)
+- **project**: Collaborative project management with contributions (v0.2.0+)
 
-Custom intents can be added by editing `~/.ogp/intents.json`.
+Custom intents can be registered with `ogp intent register` (v0.2.0+).
 
-## Scope Negotiation (v0.2.0)
+## Key Features (v0.2.3)
 
-OGP v0.2.0 introduces a three-layer scope model based on BGP-style per-peer policies:
+### 1. Scope Negotiation (v0.2.0+)
+
+Three-layer scope model based on BGP-style per-peer policies:
 
 ```
 Layer 1: Gateway Capabilities  → What I CAN support (advertised globally)
@@ -239,33 +368,110 @@ Layer 2: Peer Negotiation      → What I WILL grant YOU (per-peer, during appro
 Layer 3: Runtime Enforcement   → Is THIS request within YOUR granted scope (doorman)
 ```
 
-### How It Works
-
-1. **Discovery**: Peers discover each other's capabilities via `/.well-known/ogp`
-2. **Request**: Peer A requests federation with Peer B
+**How It Works:**
+1. **Discovery**: Peers discover capabilities via `/.well-known/ogp`
+2. **Request**: Peer A requests federation (peer-id auto-resolves)
 3. **Grant**: Peer B approves with specific scope grants (intents, rate limits, topics)
-4. **Enforcement**: The doorman validates every incoming message against granted scopes
+4. **Enforcement**: Doorman validates every incoming message against granted scopes
 
-### Example: David ↔ Stan Federation
-
+**Example:**
 ```bash
-# David approves Stan with agent-comms for memory-management topics only
+# Approve with granular access control
 ogp federation approve stan \
   --intents agent-comms \
   --topics memory-management \
   --rate 10/60
 
-# Stan can now send:
-ogp federation agent david memory-management "How do you persist context?"  # ✓
+# Stan can send: ✓
+ogp federation agent david memory-management "How do you persist context?"
 
-# But NOT:
-ogp federation agent david personal-finances "What's your budget?"  # ✗ Topic not allowed
+# Stan cannot send: ✗ 403 Topic not allowed
+ogp federation agent david personal-finances "What's your budget?"
 ```
+
+### 2. Agent-to-Agent Communication (v0.2.0+)
+
+Rich agent collaboration with topic routing, priority levels, and response policies.
+
+**Topics**: Categorize messages (e.g., `memory-management`, `task-delegation`, `planning`)
+**Priority**: Low, normal, high
+**Policies**: Control responses (full, summary, escalate, deny)
+**Threading**: Multi-turn conversations with `conversationId`
+**Replies**: Async callbacks or polling
+
+**Example:**
+```bash
+# Send with priority and wait for reply
+ogp federation agent stan memory-management \
+  "How do you persist context?" \
+  --priority high \
+  --wait \
+  --timeout 60000
+```
+
+### 3. Project Intent System (v0.2.0+)
+
+Collaborative project management across federated peers with activity logging and cross-peer queries.
+
+**Features:**
+- Create projects with contextual setup (repo, workspace, notes, collaborators)
+- Log contributions by topic (progress, decision, blocker, context)
+- Query local and peer contributions for unified team view
+- Agent-aware: proactive logging and context loading
+
+**Example:**
+```bash
+# Create project
+ogp project create my-app "My App" --description "Expense tracker"
+
+# Log work
+ogp project contribute my-app progress "Completed authentication"
+ogp project contribute my-app decision "Using PostgreSQL"
+
+# Query peer's project
+ogp project query-peer alice shared-app --limit 10
+```
+
+### 4. Custom Intent Registry (v0.2.0+)
+
+Register custom intent handlers for specialized workflows.
+
+**Example:**
+```bash
+# Register deployment intent
+ogp intent register deployment \
+  --session-key "agent:main:main" \
+  --description "Deployment notifications"
+
+# Grant to peer
+ogp federation approve alice --intents deployment --rate 50/3600
+```
+
+### 5. Auto Peer-ID Resolution (v0.2.3+)
+
+Peer IDs automatically resolve from `/.well-known/ogp` - no need to specify manually.
+
+**Example:**
+```bash
+# Old way (still works)
+ogp federation request https://peer.example.com peer-alice
+
+# New way (auto-resolves)
+ogp federation request https://peer.example.com
+```
+
+### 6. Telegram Integration (v0.2.3+)
+
+Federation requests fire OpenClaw notifications via sessions_send, delivering directly to Telegram.
+
+### 7. Enhanced Daemon Status (v0.2.3+)
+
+`ogp status` detects externally-started daemons via port probe fallback.
 
 ### Backward Compatibility
 
 - v0.1 peers work without scope negotiation (default rate limits apply)
-- v0.2 gateways automatically detect protocol version
+- v0.2+ gateways automatically detect protocol version
 - No breaking changes - existing federations continue working
 
 ## Agent-Comms Response Policies
@@ -345,8 +551,10 @@ Configuration is stored in `~/.ogp/config.json`:
 
 Additional state files:
 - `~/.ogp/keypair.json` - Ed25519 keypair (keep secure!)
-- `~/.ogp/peers.json` - Federated peer list
-- `~/.ogp/intents.json` - Intent registry
+- `~/.ogp/peers.json` - Federated peer list with scope grants
+- `~/.ogp/intents.json` - Intent registry (built-in + custom)
+- `~/.ogp/projects.json` - Project contexts and contributions
+- `~/.ogp/agent-comms-config.json` - Response policies and activity log
 
 ## Skills (Claude Code)
 
@@ -363,8 +571,9 @@ ogp-install-skills
 | **ogp** | Core protocol: federation setup, peer management, sending messages |
 | **ogp-expose** | Tunnel setup: cloudflared/ngrok configuration |
 | **ogp-agent-comms** | Interactive wizard: configure response policies per-peer |
+| **ogp-project** | Agent-aware project context: interviews, logging, cross-peer summarization |
 
-The `ogp-agent-comms` skill guides you through setting up response policies interactively, including multi-select for batch peer configuration.
+Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill provides an interactive wizard for multi-peer policy configuration. The `ogp-project` skill enables conversational project management with context interviews and proactive logging.
 
 ## Documentation
 
@@ -409,20 +618,28 @@ src/
     server.ts         # HTTP server and endpoints
     keypair.ts        # Ed25519 keypair management
     peers.ts          # Peer storage and management
-    scopes.ts         # Scope types and utilities (v0.2.0)
-    doorman.ts        # Scope enforcement + rate limiting (v0.2.0)
-    reply-handler.ts  # Async reply mechanism (v0.2.0)
-    intent-registry.ts # Intent definitions
+    scopes.ts         # Scope types and utilities (v0.2.0+)
+    doorman.ts        # Scope enforcement + rate limiting (v0.2.0+)
+    reply-handler.ts  # Async reply mechanism (v0.2.0+)
+    agent-comms.ts    # Agent-comms policy resolution (v0.2.0+)
+    projects.ts       # Project storage and management (v0.2.0+)
+    intent-registry.ts # Intent definitions and custom registry
     message-handler.ts # Message verification and routing
-    notify.ts         # OpenClaw webhook integration
+    notify.ts         # OpenClaw integration (sessions_send + webhooks)
   cli/
     setup.ts          # Setup wizard
     federation.ts     # Federation commands (scopes, agent-comms)
+    project.ts        # Project management commands (v0.2.0+)
     expose.ts         # Tunnel management
     install.ts        # LaunchAgent installation
   shared/
     signing.ts        # Ed25519 sign/verify utilities
     config.ts         # Configuration management
+skills/
+  ogp/              # Core OGP skill
+  ogp-expose/       # Tunnel configuration skill
+  ogp-agent-comms/  # Response policy wizard
+  ogp-project/      # Project context management skill
 ```
 
 ## License

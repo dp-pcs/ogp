@@ -14,6 +14,12 @@ Get started with OGP federation in 5 minutes.
 npm install -g @dp-pcs/ogp
 ```
 
+After installation, install the OGP skills for Claude Code:
+
+```bash
+ogp-install-skills
+```
+
 ## Step 2: Configure
 
 Run the interactive setup:
@@ -39,19 +45,41 @@ Don't worry about the gateway URL yet — we'll get a real one in the next step.
 ## Step 3: Start Daemon
 
 ```bash
+ogp start --background
+```
+
+Or run in foreground for debugging:
+
+```bash
 ogp start
+```
+
+Check status:
+
+```bash
+ogp status
 ```
 
 You should see:
 
 ```
-[OGP] Daemon listening on port 18790
-[OGP] Public key: 302a300506032b6570032100...
+OGP Daemon Status:
+  Status: ● Running
+  Port: 18790
+  PID: 12345
+  Uptime: 5 minutes
+  Public Key: 302a300506032b6570032100...
 ```
 
 ## Step 4: Expose to Internet
 
-In a new terminal:
+In a new terminal (or background):
+
+```bash
+ogp expose --background
+```
+
+Or run in foreground:
 
 ```bash
 ogp expose
@@ -67,10 +95,17 @@ https://abc-def-123.trycloudflare.com
 
 ## Step 5: Update Gateway URL
 
-1. Stop the daemon (Ctrl+C in the daemon terminal)
-2. Edit `~/.ogp/config.json`
-3. Update `"gatewayUrl"` to your tunnel URL
-4. Restart: `ogp start`
+```bash
+ogp config --gateway-url https://abc-def-123.trycloudflare.com
+```
+
+Or manually edit `~/.ogp/config.json` and update `"gatewayUrl"`.
+
+Restart the daemon:
+
+```bash
+ogp stop && ogp start --background
+```
 
 ## Step 6: Verify Setup
 
@@ -84,11 +119,15 @@ You should see:
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.3",
   "displayName": "Alice",
   "email": "alice@example.com",
   "gatewayUrl": "https://abc-def-123.trycloudflare.com",
   "publicKey": "302a300506032b6570032100...",
+  "capabilities": {
+    "intents": ["message", "task-request", "status-update", "agent-comms"],
+    "features": ["scope-negotiation", "reply-callback", "project-intent"]
+  },
   "endpoints": {
     "request": "https://abc-def-123.trycloudflare.com/federation/request",
     "approve": "https://abc-def-123.trycloudflare.com/federation/approve",
@@ -101,7 +140,13 @@ You should see:
 
 ## Step 7: Federate with a Peer
 
-Ask a friend to share their OGP gateway URL, then:
+Ask a friend to share their OGP gateway URL. The peer-id is now **optional** - OGP will auto-resolve it from the gateway's `/.well-known/ogp` endpoint:
+
+```bash
+ogp federation request https://peer.example.com
+```
+
+Or specify a custom peer-id:
 
 ```bash
 ogp federation request https://peer.example.com peer-bob
@@ -115,10 +160,19 @@ You'll see:
   Message: Federation request received and pending approval
 ```
 
-Wait for Bob to approve your request:
+Wait for Bob to approve your request. In v0.2.3, Bob can approve with **scope grants** to control what you can access:
 
 ```bash
-# Bob runs this on their end:
+# Bob approves with specific intents and rate limits
+ogp federation approve peer-alice \
+  --intents message,agent-comms \
+  --rate 100/3600 \
+  --topics memory-management,task-delegation
+```
+
+Or approve without restrictions (v0.1 compatibility):
+
+```bash
 ogp federation approve peer-alice
 ```
 
@@ -134,13 +188,98 @@ ogp federation list --status approved
 ogp federation send peer-bob message '{"text":"Hello from OGP!"}'
 ```
 
-Bob's OpenClaw agent will receive:
+Bob's OpenClaw agent will receive a notification via Telegram (if configured) or system event:
 
 ```
 [OGP] Message from Alice: Hello from OGP!
 ```
 
 ## Next Steps
+
+### Agent-to-Agent Communication (v0.2.0+)
+
+Use agent-comms for rich agent collaboration:
+
+```bash
+# Send agent-comms with topic routing
+ogp federation agent peer-bob memory-management "How do you persist context?"
+
+# High-priority message
+ogp federation agent peer-bob task-delegation "Schedule standup ASAP" --priority high
+
+# Wait for reply
+ogp federation agent peer-bob queries "What's the status?" --wait --timeout 60000
+
+# Start a conversation thread
+ogp federation agent peer-bob project-planning "Let's discuss sprint goals" --conversation sprint-42
+```
+
+### Configure Response Policies
+
+Control how your agent responds to incoming agent-comms:
+
+```bash
+# View current policies
+ogp agent-comms policies
+
+# Configure global defaults
+ogp agent-comms configure --global --topics "general,testing" --level summary
+
+# Configure specific peer
+ogp agent-comms configure peer-bob --topics "memory-management" --level full
+
+# Add escalation for sensitive topics
+ogp agent-comms add-topic peer-bob calendar --level escalate
+```
+
+Response levels:
+- `full` - Respond openly with details
+- `summary` - High-level responses only
+- `escalate` - Ask human before responding
+- `deny` - Politely decline to discuss
+
+### Project Collaboration (v0.2.0+)
+
+Create and manage collaborative projects:
+
+```bash
+# Create a project
+ogp project create my-app "My Awesome App" --description "Mobile expense tracker"
+
+# Add contributions (log work)
+ogp project contribute my-app progress "Completed authentication system"
+ogp project contribute my-app decision "Using PostgreSQL for data storage"
+ogp project contribute my-app blocker "Waiting for API key approval"
+
+# View project status
+ogp project status my-app
+
+# Query recent activity
+ogp project query my-app --limit 10
+
+# Send contribution to peer's project
+ogp project send-contribution peer-bob shared-project progress "Deployed staging environment"
+
+# Query peer's project contributions
+ogp project query-peer peer-bob shared-project
+```
+
+### Custom Intents
+
+Register custom intent handlers:
+
+```bash
+# Register a new intent
+ogp intent register deployment \
+  --session-key "agent:main:main" \
+  --description "Deployment notifications"
+
+# List registered intents
+ogp intent list
+
+# Remove an intent
+ogp intent remove deployment
+```
 
 ### Send Different Message Types
 
@@ -166,11 +305,26 @@ When someone sends you a federation request:
 # List pending
 ogp federation list --status pending
 
-# Approve
+# Approve with scope grants (v0.2.0+)
+ogp federation approve peer-charlie \
+  --intents message,agent-comms \
+  --rate 50/3600 \
+  --topics general,project-updates
+
+# Or approve without restrictions
 ogp federation approve peer-charlie
 
 # Or reject
 ogp federation reject peer-charlie
+
+# View granted scopes
+ogp federation scopes peer-charlie
+
+# Update scopes later
+ogp federation grant peer-charlie \
+  --intents agent-comms \
+  --topics memory-management,planning \
+  --rate 100/3600
 ```
 
 ### Keep Tunnel Running
@@ -206,36 +360,89 @@ Run `ogp setup` first.
 
 The peer must approve your federation request first. Contact them or check their status.
 
+### "Scope not granted" or 403 errors
+
+Check the peer's granted scopes:
+
+```bash
+ogp federation scopes peer-bob
+```
+
+Request the peer to update your grants if needed.
+
+### "Rate limit exceeded" or 429 errors
+
+You've exceeded the rate limit granted by the peer. Wait for the retry window or request higher limits.
+
 ### Tunnel URL not accessible
 
 - Check firewall settings
 - Verify daemon is running
 - Try accessing locally first: `curl http://localhost:18790/.well-known/ogp`
 
+### Daemon won't start
+
+Check if already running:
+
+```bash
+ogp status
+```
+
+OGP v0.2.3+ detects externally-started daemons via port probe. If port 18790 is in use, stop the existing process first.
+
 ## Common Commands Cheat Sheet
 
 ```bash
-# Setup
+# Setup & Installation
 ogp setup
-ogp start
-ogp expose
+ogp-install-skills  # Install Claude Code skills
+ogp start --background
+ogp expose --background
 
 # Status
 ogp status
 ogp federation list
+ogp federation list --status approved
+ogp project list
 
-# Federation
-ogp federation request <url> <peer-id>
-ogp federation approve <peer-id>
+# Federation (peer-id auto-resolves in v0.2.3)
+ogp federation request <url>
+ogp federation approve <peer-id> [--intents <list>] [--rate <n>/<s>] [--topics <list>]
 ogp federation send <peer-id> <intent> '<json>'
+ogp federation agent <peer-id> <topic> <message> [--priority high] [--wait]
+ogp federation scopes <peer-id>
+
+# Projects
+ogp project create <id> <name> [--description "..."]
+ogp project contribute <id> <topic> <summary>
+ogp project query <id> [--limit 10] [--topic <topic>]
+ogp project status <id>
+
+# Intents
+ogp intent register <name> [--session-key <key>] [--description "..."]
+ogp intent list
+ogp intent remove <name>
+
+# Agent-Comms Policies
+ogp agent-comms policies [peer-id]
+ogp agent-comms configure [peer-id] --topics <list> --level <level>
+ogp agent-comms activity [peer-id]
 
 # Stop
 ogp stop
+ogp expose-stop
+ogp shutdown  # Stop both daemon and tunnel
 ```
 
 ## What's Next?
 
 - Read [Federation Flow](./federation-flow.md) for detailed message flow
-- Check [Skills](../skills/) for Claude Code integration
-- Explore custom intents in `~/.ogp/intents.json`
-- Set up automatic peer discovery
+- Learn about [Scope Negotiation](./scopes.md) for per-peer access control
+- Explore [Agent Communications](./agent-comms.md) for agent-to-agent messaging
+- Check [Skills](../skills/) for Claude Code integration:
+  - `ogp` - Core protocol management
+  - `ogp-expose` - Tunnel configuration
+  - `ogp-agent-comms` - Interactive policy configuration
+  - `ogp-project` - Project context and collaboration
+- Register custom intents with `ogp intent register`
+- Set up response policies for incoming agent-comms

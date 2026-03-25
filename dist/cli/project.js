@@ -370,11 +370,44 @@ export async function projectQueryPeer(peerId, projectId, options = {}) {
         payload.limit = options.limit;
     console.log(`Querying project '${projectId}' from peer '${peerId}'...`);
     try {
-        await federationSend(peerId, 'project.query', JSON.stringify(payload));
-        console.log(`✓ Query sent to peer '${peerId}' - check for async response`);
+        const response = await federationSend(peerId, 'project.query', JSON.stringify(payload), options.timeout);
+        if (!response) {
+            console.error('Failed to get response from peer');
+            process.exit(1);
+        }
+        if (!response.success) {
+            console.error(`Query failed: ${response.error || 'Unknown error'}`);
+            process.exit(1);
+        }
+        // Format and display the response
+        const { projectName, contributions } = response.response;
+        if (contributions && contributions.length > 0) {
+            console.log(`\n✓ Found ${contributions.length} contributions in project '${projectName}':\n`);
+            contributions.forEach((contribution, index) => {
+                const timestamp = new Date(contribution.timestamp).toLocaleString();
+                console.log(`${index + 1}. [${contribution.topic}] by ${contribution.authorId} (${timestamp})`);
+                console.log(`   ${contribution.summary}`);
+                if (contribution.metadata) {
+                    console.log(`   Metadata: ${JSON.stringify(contribution.metadata, null, 2)}`);
+                }
+                console.log('');
+            });
+        }
+        else {
+            console.log(`\n✓ No contributions found in project '${projectName}'`);
+            // Check if filters were applied
+            const filters = [];
+            if (options.topic)
+                filters.push(`topic: ${options.topic}`);
+            if (options.author)
+                filters.push(`author: ${options.author}`);
+            if (filters.length > 0) {
+                console.log(`   (with filters: ${filters.join(', ')})`);
+            }
+        }
     }
     catch (err) {
-        console.error('Error sending query:', err);
+        console.error('Error querying peer:', err);
         process.exit(1);
     }
 }
