@@ -214,18 +214,18 @@ export async function federationSend(
   peerId: string,
   intent: string,
   payloadJson: string
-): Promise<void> {
+): Promise<any | null> {
   const config = requireConfig();
   const peer = getPeer(peerId);
 
   if (!peer) {
     console.error(`Peer not found: ${peerId}`);
-    return;
+    return null;
   }
 
   if (peer.status !== 'approved') {
     console.error(`Peer ${peerId} is not approved`);
-    return;
+    return null;
   }
 
   const payload = JSON.parse(payloadJson);
@@ -256,14 +256,16 @@ export async function federationSend(
 
     if (!response.ok) {
       console.error(`Send failed: ${response.status} ${response.statusText}`);
-      return;
+      return null;
     }
 
     const result = await response.json();
     console.log('✓ Message sent');
     console.log('  Response:', JSON.stringify(result, null, 2));
+    return result;
   } catch (error) {
     console.error('Failed to send message:', error);
+    return null;
   }
 }
 

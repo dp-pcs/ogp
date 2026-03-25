@@ -355,8 +355,44 @@ export async function projectRequestJoin(
   console.log(`Requesting to join project '${projectName}' from peer '${peerId}'...`);
 
   try {
-    await federationSend(peerId, 'project.join', JSON.stringify(payload));
+    const response = await federationSend(peerId, 'project.join', JSON.stringify(payload));
+
+    if (!response) {
+      console.error('Failed to get response from peer');
+      process.exit(1);
+    }
+
     console.log(`✓ Join request sent to peer '${peerId}'`);
+
+    // Handle successful join response
+    if (response.success && response.response?.joined) {
+      const { projectId, projectName: responseProjectName } = response.response;
+
+      // Check if project already exists locally
+      let project = getProject(projectId);
+
+      if (!project) {
+        // Create the project locally with information from the response
+        project = createProject(projectId, responseProjectName || projectName, options.description);
+        addProject(project);
+        console.log(`✓ Project '${responseProjectName || projectName}' created locally`);
+      }
+
+      // Add ourselves as a member (we successfully joined)
+      if (!isProjectMember(projectId, config.email)) {
+        joinProject(projectId, config.email);
+        console.log(`✓ Added to project members`);
+      }
+
+      console.log(`✓ Successfully joined project '${responseProjectName || projectName}'`);
+      console.log(`  Run 'ogp project list' to see your projects`);
+    } else if (response.success === false) {
+      console.error(`Join request rejected: ${response.error || 'Unknown error'}`);
+      process.exit(1);
+    } else {
+      console.error('Unexpected response format from peer');
+      process.exit(1);
+    }
   } catch (err) {
     console.error('Error sending join request:', err);
     process.exit(1);

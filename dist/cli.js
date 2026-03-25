@@ -76,8 +76,28 @@ federation
     .command('request')
     .description('Send federation request to a peer')
     .argument('<peer-url>', 'Peer gateway URL')
-    .argument('<peer-id>', 'Peer ID')
+    .argument('[peer-id]', 'Peer ID (optional — auto-resolved from /.well-known/ogp)')
     .action(async (peerUrl, peerId) => {
+    // Auto-resolve peer ID from /.well-known/ogp if not provided
+    if (!peerId) {
+        try {
+            const wellKnownUrl = `${peerUrl.replace(/\/$/, '')}/.well-known/ogp`;
+            console.log(`Resolving peer ID from ${wellKnownUrl}...`);
+            const res = await fetch(wellKnownUrl, { signal: AbortSignal.timeout(10000) });
+            if (!res.ok)
+                throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (!data.publicKey)
+                throw new Error('No publicKey in response');
+            peerId = data.publicKey;
+            console.log(`✓ Resolved peer: ${data.displayName || 'Unknown'} (${peerId.slice(0, 16)}...)`);
+        }
+        catch (err) {
+            console.error(`✗ Could not resolve peer ID from ${peerUrl}/.well-known/ogp: ${err.message}`);
+            console.error(`  Provide it manually: ogp federation request <peer-url> <peer-id>`);
+            process.exit(1);
+        }
+    }
     await federationRequest(peerUrl, peerId);
 });
 federation
@@ -446,6 +466,31 @@ project
     .argument('<project-id>', 'Project identifier')
     .action(async (peerId, projectId) => {
     await projectStatusPeer(peerId, projectId);
+});
+project
+    .command('delete')
+    .description('Delete a local project and all its contributions')
+    .argument('<project-id>', 'Project to delete')
+    .option('--force', 'Skip confirmation prompt')
+    .action(async (projectId, options) => {
+    const { getProject, deleteProject } = await import('./daemon/projects.js');
+    const proj = getProject(projectId);
+    if (!proj) {
+        console.error(`Project '${projectId}' not found`);
+        process.exit(1);
+    }
+    if (!options.force) {
+        const readline = await import('node:readline');
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await new Promise(resolve => rl.question(`Delete project '${proj.name}' (${projectId})? This cannot be undone. [y/N] `, resolve));
+        rl.close();
+        if (answer.toLowerCase() !== 'y') {
+            console.log('Aborted.');
+            process.exit(0);
+        }
+    }
+    deleteProject(projectId);
+    console.log(`✓ Deleted project '${proj.name}' (${projectId})`);
 });
 program.parse();
 //# sourceMappingURL=cli.js.map
