@@ -1,22 +1,30 @@
 import { requireConfig } from '../shared/config.js';
 export async function notifyOpenClaw(payload) {
     const config = requireConfig();
-    // Method 1: openclaw agent --deliver via most recent active session
+    // Method 1: openclaw agent --deliver via main session
+    // Reads session store directly to find the sessionId for agent:main:main
     // Channel-agnostic: delivers through whatever channel the session is on (Telegram, Signal, etc.)
     try {
         const { execSync } = await import('node:child_process');
+        const fs = await import('node:fs');
+        const os = await import('node:os');
+        const path = await import('node:path');
         const escaped = payload.text.replace(/'/g, "'\\''");
-        // Find most recent direct session ID
+        // Read sessions.json directly (avoid --json flag which mixes plugin logs)
         let sessionId = null;
         try {
-            const sessionsOut = execSync('openclaw sessions --json 2>/dev/null', { timeout: 5000, env: { ...process.env } }).toString();
-            const sessions = JSON.parse(sessionsOut);
-            const direct = sessions.find((s) => s.kind === 'direct' || s.key?.includes(':main:main'));
-            if (direct?.id)
-                sessionId = direct.id;
+            const sessionsPath = path.join(os.homedir(), '.openclaw', 'agents', 'main', 'sessions', 'sessions.json');
+            if (fs.existsSync(sessionsPath)) {
+                const data = JSON.parse(fs.readFileSync(sessionsPath, 'utf-8'));
+                // sessions.json is a dict keyed by sessionKey, value has sessionId
+                const mainSession = data['agent:main:main'];
+                if (mainSession?.sessionId) {
+                    sessionId = mainSession.sessionId;
+                }
+            }
         }
         catch {
-            // Can't get session list — fall through
+            // Can't read sessions — fall through
         }
         if (sessionId) {
             execSync(`openclaw agent --message '${escaped}' --deliver --session-id '${sessionId}' 2>/dev/null`, {
