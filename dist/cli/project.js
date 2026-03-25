@@ -136,6 +136,27 @@ export async function projectContribute(projectId, topic, summary, options = {})
         console.error('Error: Failed to add contribution');
         process.exit(1);
     }
+    // BUILD-93: Auto-push to all approved peers who are project members
+    if (!options.localOnly) {
+        const { listPeers } = await import('../daemon/peers.js');
+        const peers = listPeers().filter(p => p.status === 'approved');
+        if (peers.length > 0) {
+            const payload = JSON.stringify({ projectId, topic, summary, ...(metadata && { metadata }) });
+            let pushed = 0;
+            for (const peer of peers) {
+                try {
+                    await federationSend(peer.id, 'project.contribute', payload, 5000);
+                    pushed++;
+                }
+                catch {
+                    // Peer unreachable — skip silently, contribution saved locally
+                }
+            }
+            if (pushed > 0) {
+                console.log(`  ↗ Synced to ${pushed} peer${pushed > 1 ? 's' : ''}`);
+            }
+        }
+    }
 }
 /**
  * Query project contributions

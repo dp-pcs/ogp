@@ -397,8 +397,9 @@ project
     .argument('<topic>', 'Topic area for this contribution')
     .argument('<summary>', 'Summary of the contribution')
     .option('--metadata <json>', 'Additional structured data as JSON')
+    .option('--local-only', 'Skip auto-push to federated peers')
     .action(async (projectId, topic, summary, options) => {
-    await projectContribute(projectId, topic, summary, options);
+    await projectContribute(projectId, topic, summary, { ...options, localOnly: options.localOnly });
 });
 project
     .command('query')

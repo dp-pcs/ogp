@@ -2,7 +2,7 @@
 skill_name: ogp-project
 version: 1.0.0
 description: Agent-aware project context skill for OGP with interview, freeform logging, and cross-peer summarization
-trigger: Use when the user wants to create, manage, log to, or summarize OGP projects. This includes project context interviews, freeform activity logging, and cross-peer collaboration
+trigger: Use when the user wants to create, manage, log to, or summarize OGP projects. This includes project context interviews, freeform activity logging, and cross-peer collaboration. Also triggers on natural logging phrases like "remember this for project X", "account for this", "make note of", "track this", "jot this down", "save this to", "document this" when a project context is active or named.
 requires:
   bins:
     - ogp
@@ -96,15 +96,29 @@ Project created! Let me capture some context (all optional — press Enter to sk
 
 ### Freeform Logging Detection
 
-Monitor for these signals:
+**IMPORTANT: Detect logging intent from ANY natural phrasing — not just exact keywords.**
+
+Monitor for these signals (and semantic equivalents):
 
 | User Input | Action | Example |
 |------------|---------|---------|
 | "add this to [project]" | `ogp project contribute <id> context "<summary>"` | Context logging |
 | "log that to [project]" | `ogp project contribute <id> progress "<summary>"` | Progress update |
+| "remember for [project] that..." | `ogp project contribute <id> context "<summary>"` | Context note |
+| "account for this in [project]" | `ogp project contribute <id> context "<summary>"` | Context note |
+| "make note of this for [project]" | `ogp project contribute <id> context "<summary>"` | Note |
+| "track this in [project]" | `ogp project contribute <id> progress "<summary>"` | Progress |
+| "jot this down for [project]" | `ogp project contribute <id> context "<summary>"` | Quick note |
+| "save this to [project]" | `ogp project contribute <id> context "<summary>"` | Context |
+| "put this in [project]" | `ogp project contribute <id> context "<summary>"` | Context |
+| "document this for [project]" | `ogp project contribute <id> context "<summary>"` | Documentation |
 | After coding session | Offer: "Should I log a summary to [project]?" | Proactive logging |
 | Decision made | `ogp project contribute <id> decision "<summary>"` | Architecture decisions |
 | Blocker encountered | `ogp project contribute <id> blocker "<summary>"` | Issue tracking |
+
+**If no project is specified:** Ask "Which project should I log this to?" and list active projects from `ogp project list`.
+
+**Intent over keywords:** If the user clearly wants to capture something for a project — regardless of exact phrasing — trigger the logging flow. Don't wait for magic words.
 
 ### Project Status and Summarization
 

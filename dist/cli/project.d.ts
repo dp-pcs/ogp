@@ -4,6 +4,7 @@ interface ProjectJoinOptions {
 }
 interface ProjectContributeOptions {
     metadata?: string;
+    localOnly?: boolean;
 }
 interface ProjectQueryOptions {
     topic?: string;
