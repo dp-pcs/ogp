@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import fs from 'node:fs';
 import { runSetup } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig } from './shared/config.js';
@@ -51,7 +52,7 @@ const program = new Command();
 program
   .name('ogp')
   .description('OGP (Open Gateway Protocol) federation daemon for OpenClaw')
-  .version('0.2.0');
+  .version(JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8')).version);
 
 program
   .command('setup')
