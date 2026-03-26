@@ -2,6 +2,9 @@ import express from 'express';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+const OGP_VERSION = _require('../../package.json').version;
 import { requireConfig, loadConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
 import { addPeer, getPeer, approvePeer, listPeers, updatePeer } from './peers.js';
@@ -36,7 +39,7 @@ export function startServer(config, background = false) {
         const intents = loadIntents();
         const intentNames = intents.map(i => i.name);
         res.json({
-            version: '0.2.0',
+            version: OGP_VERSION,
             displayName: cfg.displayName,
             email: cfg.email,
             gatewayUrl: cfg.gatewayUrl,
