@@ -2,6 +2,10 @@ import express, { type Express, type Request, type Response } from 'express';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const _require = createRequire(import.meta.url);
+const OGP_VERSION: string = _require('../../package.json').version;
 import { requireConfig, loadConfig, type OGPConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey, getPrivateKey } from './keypair.js';
 import { addPeer, getPeer, approvePeer, listPeers, updatePeer, updatePeerReceivedScopes, type Peer } from './peers.js';
@@ -47,7 +51,7 @@ export function startServer(config?: OGPConfig, background = false): void {
     const intentNames = intents.map(i => i.name);
 
     res.json({
-      version: '0.2.0',
+      version: OGP_VERSION,
       displayName: cfg.displayName,
       email: cfg.email,
       gatewayUrl: cfg.gatewayUrl,
