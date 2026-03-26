@@ -34,7 +34,7 @@ export declare function removeGlobalTopicPolicy(topic: string): void;
 export declare function setDefaultLevel(level: ResponseLevel): void;
 /**
  * Get effective policy for a peer and topic
- * Priority: peer-specific > global > default
+ * Priority: peer-topic > global-topic > peer-default > global-default
  */
 export declare function getEffectivePolicy(peerId: string, topic: string): TopicPolicy;
 /**

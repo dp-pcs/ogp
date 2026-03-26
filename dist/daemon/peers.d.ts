@@ -15,6 +15,7 @@ export interface Peer {
     grantedScopes?: ScopeBundle;
     receivedScopes?: ScopeBundle;
     responsePolicy?: ResponsePolicy;
+    defaultLevel?: ResponseLevel;
 }
 export declare function loadPeers(): Peer[];
 export declare function savePeers(peers: Peer[]): void;
@@ -63,4 +64,12 @@ export declare function getPeerResponsePolicy(peerId: string): ResponsePolicy | 
  * Clear response policy for a peer (reset to global defaults)
  */
 export declare function clearPeerResponsePolicy(peerId: string): boolean;
+/**
+ * Set the default response level for a peer (used when no topic-specific policy exists)
+ */
+export declare function setPeerDefaultLevel(peerId: string, level: ResponseLevel): boolean;
+/**
+ * Get a peer's default level (or null if not set)
+ */
+export declare function getPeerDefaultLevel(peerId: string): ResponseLevel | null;
 //# sourceMappingURL=peers.d.ts.map

@@ -2,7 +2,7 @@
  * CLI commands for agent-comms configuration
  */
 import { loadAgentCommsConfig, setGlobalTopicPolicy, setDefaultLevel, getAllEffectivePolicies, readActivityLog, clearActivityLog, setActivityLogging } from '../daemon/agent-comms.js';
-import { listPeers, getPeer, setPeerTopicPolicy, removePeerTopicPolicy, clearPeerResponsePolicy } from '../daemon/peers.js';
+import { listPeers, getPeer, setPeerTopicPolicy, removePeerTopicPolicy, clearPeerResponsePolicy, setPeerDefaultLevel } from '../daemon/peers.js';
 /**
  * Show all policies (global + per-peer)
  */
@@ -28,7 +28,8 @@ export function showPolicies(peerId) {
                 console.log(`  ${topic}: ${policy.level} ${source}${notes}`);
             }
         }
-        console.log(`\n  Default level: ${config.defaultLevel}`);
+        const peerDefaultNote = peer.defaultLevel ? ` (peer override: ${peer.defaultLevel})` : '';
+        console.log(`\n  Default level: ${config.defaultLevel}${peerDefaultNote}`);
     }
     else {
         // Show global policies and summary of per-peer
@@ -44,15 +45,20 @@ export function showPolicies(peerId) {
         }
         console.log(`\n  Default level: ${config.defaultLevel}`);
         console.log(`  Activity logging: ${config.activityLog ? 'enabled' : 'disabled'}`);
-        // Show peers with custom policies
+        // Show peers with custom policies or custom default levels
         const peers = listPeers('approved');
-        const peersWithPolicies = peers.filter(p => p.responsePolicy && Object.keys(p.responsePolicy).length > 0);
+        const peersWithPolicies = peers.filter(p => (p.responsePolicy && Object.keys(p.responsePolicy).length > 0) || p.defaultLevel);
         if (peersWithPolicies.length > 0) {
             console.log('\nPEER-SPECIFIC POLICIES:\n');
             for (const peer of peersWithPolicies) {
                 console.log(`  ${peer.displayName} (${peer.id}):`);
-                for (const [topic, policy] of Object.entries(peer.responsePolicy)) {
-                    console.log(`    ${topic}: ${policy.level}`);
+                if (peer.defaultLevel) {
+                    console.log(`    [default]: ${peer.defaultLevel}`);
+                }
+                if (peer.responsePolicy) {
+                    for (const [topic, policy] of Object.entries(peer.responsePolicy)) {
+                        console.log(`    ${topic}: ${policy.level}`);
+                    }
                 }
             }
         }
@@ -136,6 +142,32 @@ export function removeTopic(peerId, topic) {
     }
     removePeerTopicPolicy(peer.id, topic);
     console.log(`\nRemoved topic '${topic}' from ${peer.displayName}'s policy\n`);
+}
+/**
+ * Set a topic policy for a peer (upsert: create or update)
+ */
+export function setTopic(peerId, topic, level, notes) {
+    const peer = findPeerByIdOrName(peerId);
+    if (!peer) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    const existing = peer.responsePolicy?.[topic];
+    setPeerTopicPolicy(peer.id, topic, level, notes);
+    const action = existing ? 'Updated' : 'Added';
+    console.log(`\n${action} topic '${topic}' with level '${level}' for ${peer.displayName}\n`);
+}
+/**
+ * Set the per-peer default level for a specific peer
+ */
+export function setPeerDefault(peerId, level) {
+    const peer = findPeerByIdOrName(peerId);
+    if (!peer) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    setPeerDefaultLevel(peer.id, level);
+    console.log(`\nSet default level '${level}' for ${peer.displayName}\n`);
 }
 /**
  * Reset a peer's policy to global defaults

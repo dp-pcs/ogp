@@ -25,6 +25,14 @@ export declare function addTopic(peerId: string, topic: string, level: ResponseL
  */
 export declare function removeTopic(peerId: string, topic: string): void;
 /**
+ * Set a topic policy for a peer (upsert: create or update)
+ */
+export declare function setTopic(peerId: string, topic: string, level: ResponseLevel, notes?: string): void;
+/**
+ * Set the per-peer default level for a specific peer
+ */
+export declare function setPeerDefault(peerId: string, level: ResponseLevel): void;
+/**
  * Reset a peer's policy to global defaults
  */
 export declare function resetPolicy(peerId: string): void;

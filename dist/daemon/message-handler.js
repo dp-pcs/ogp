@@ -8,6 +8,11 @@ import { getProject, joinProject, isProjectMember, contributeToProject, getTopic
 import { loadConfig } from '../shared/config.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+/**
+ * Witty rejection message for "off" policy level.
+ * Intentionally does NOT confirm or deny topic existence.
+ */
+const WITTY_REJECTION_MESSAGE = "I appreciate the curiosity, but I'm not in a position to engage on that one. Some things are just between me and my diary. 🔒";
 export async function handleMessage(message, signature, messageStr // raw JSON string used to sign — avoids key-order drift
 ) {
     // 1. Verify sender exists and is approved
@@ -127,21 +132,22 @@ async function handleAgentComms(message, displayName) {
         message: messageText,
         level: policy.level
     });
-    // BUILD-101: If policy is 'off', send signed rejection
+    // BUILD-101: If policy is 'off', send signed rejection with witty message
+    // Intentionally does NOT confirm or deny topic existence
     if (policy.level === 'off') {
         const { loadOrGenerateKeyPair } = await import('./keypair.js');
         const { signObject } = await import('../shared/signing.js');
         const keypair = loadOrGenerateKeyPair();
         const rejection = {
             status: 'rejected',
-            reason: 'topic-not-permitted',
-            topic
+            reason: 'not-available',
+            message: WITTY_REJECTION_MESSAGE
         };
         const { signature } = signObject(rejection, keypair.privateKey);
         return {
             success: false,
             nonce: message.nonce,
-            error: 'Topic not permitted',
+            error: WITTY_REJECTION_MESSAGE,
             statusCode: 403,
             response: {
                 ...rejection,

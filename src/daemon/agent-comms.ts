@@ -97,23 +97,28 @@ export function setDefaultLevel(level: ResponseLevel): void {
 
 /**
  * Get effective policy for a peer and topic
- * Priority: peer-specific > global > default
+ * Priority: peer-topic > global-topic > peer-default > global-default
  */
 export function getEffectivePolicy(peerId: string, topic: string): TopicPolicy {
   const config = loadAgentCommsConfig();
   const peer = getPeer(peerId);
 
-  // Check peer-specific policy first
+  // 1. Check peer-specific topic policy first
   if (peer?.responsePolicy?.[topic]) {
     return peer.responsePolicy[topic];
   }
 
-  // Fall back to global policy
+  // 2. Fall back to global topic policy
   if (config.globalPolicy[topic]) {
     return config.globalPolicy[topic];
   }
 
-  // Fall back to default level
+  // 3. Fall back to peer-specific default level
+  if (peer?.defaultLevel) {
+    return { level: peer.defaultLevel };
+  }
+
+  // 4. Fall back to global default level
   return { level: config.defaultLevel };
 }
 

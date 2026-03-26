@@ -26,7 +26,9 @@ import {
   showActivity,
   clearActivity,
   setDefault,
-  setLogging
+  setLogging,
+  setTopic,
+  setPeerDefault
 } from './cli/agent-comms.js';
 import {
   registerNewIntent,
@@ -340,6 +342,26 @@ agentComms
   .option('--notes <text>', 'Notes about this topic')
   .action((peerId, topic, options) => {
     addTopic(peerId, topic, options.level as ResponseLevel, options.notes);
+  });
+
+agentComms
+  .command('set-topic')
+  .description('Set a topic policy for a peer (upsert: creates or updates)')
+  .argument('<peer-id>', 'Peer ID')
+  .argument('<topic>', 'Topic name')
+  .argument('<level>', 'Response level (full|summary|escalate|deny|off)')
+  .option('--notes <text>', 'Notes about this topic')
+  .action((peerId, topic, level, options) => {
+    setTopic(peerId, topic, level as ResponseLevel, options.notes);
+  });
+
+agentComms
+  .command('set-default')
+  .description('Set the per-peer default level for a specific peer')
+  .argument('<peer-id>', 'Peer ID')
+  .argument('<level>', 'Response level (full|summary|escalate|deny|off)')
+  .action((peerId, level) => {
+    setPeerDefault(peerId, level as ResponseLevel);
   });
 
 agentComms

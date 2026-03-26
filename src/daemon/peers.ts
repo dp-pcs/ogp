@@ -28,6 +28,7 @@ export interface Peer {
   receivedScopes?: ScopeBundle;      // what this peer grants TO me
   // Agent-comms response policy
   responsePolicy?: ResponsePolicy;   // how my agent responds to this peer
+  defaultLevel?: ResponseLevel;      // per-peer default for unknown topics
 }
 
 const PEERS_FILE = path.join(getConfigDir(), 'peers.json');
@@ -218,4 +219,25 @@ export function clearPeerResponsePolicy(peerId: string): boolean {
   delete peer.responsePolicy;
   savePeers(peers);
   return true;
+}
+
+/**
+ * Set the default response level for a peer (used when no topic-specific policy exists)
+ */
+export function setPeerDefaultLevel(peerId: string, level: ResponseLevel): boolean {
+  const peers = loadPeers();
+  const peer = peers.find(p => p.id === peerId);
+  if (!peer) return false;
+
+  peer.defaultLevel = level;
+  savePeers(peers);
+  return true;
+}
+
+/**
+ * Get a peer's default level (or null if not set)
+ */
+export function getPeerDefaultLevel(peerId: string): ResponseLevel | null {
+  const peer = getPeer(peerId);
+  return peer?.defaultLevel || null;
 }

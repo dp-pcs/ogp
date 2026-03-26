@@ -168,4 +168,23 @@ export function clearPeerResponsePolicy(peerId) {
     savePeers(peers);
     return true;
 }
+/**
+ * Set the default response level for a peer (used when no topic-specific policy exists)
+ */
+export function setPeerDefaultLevel(peerId, level) {
+    const peers = loadPeers();
+    const peer = peers.find(p => p.id === peerId);
+    if (!peer)
+        return false;
+    peer.defaultLevel = level;
+    savePeers(peers);
+    return true;
+}
+/**
+ * Get a peer's default level (or null if not set)
+ */
+export function getPeerDefaultLevel(peerId) {
+    const peer = getPeer(peerId);
+    return peer?.defaultLevel || null;
+}
 //# sourceMappingURL=peers.js.map
