@@ -66,6 +66,18 @@ export async function projectCreate(
     console.log(`  Description: ${options.description}`);
   }
   console.log(`  Members: ${project.members.join(', ')}`);
+
+  // BUILD-102: Auto-register project ID as agent-comms topic for all approved peers
+  const { listPeers, setPeerTopicPolicy } = await import('../daemon/peers.js');
+  const approvedPeers = listPeers('approved');
+  if (approvedPeers.length > 0) {
+    let registered = 0;
+    for (const peer of approvedPeers) {
+      setPeerTopicPolicy(peer.id, projectId, 'summary');
+      registered++;
+    }
+    console.log(`  ↗ Auto-registered as agent-comms topic for ${registered} peer${registered > 1 ? 's' : ''}`);
+  }
 }
 
 /**
@@ -141,7 +153,7 @@ export async function projectList(): Promise<void> {
       console.log(`  Description: ${project.description}`);
     }
     console.log(`  Members: ${project.members.length}`);
-    console.log(`  Topics: ${project.topics.length}`);
+    console.log(`  Entry types: ${project.topics.length}`);
     console.log(`  Created: ${new Date(project.createdAt).toLocaleString()}`);
     console.log(`  Updated: ${new Date(project.updatedAt).toLocaleString()}`);
     console.log();
@@ -198,7 +210,7 @@ export async function projectContribute(
   );
 
   if (contributionId) {
-    console.log(`✓ Contributed to project '${project.name}' topic '${topic}'`);
+    console.log(`✓ Contributed to project '${project.name}' [${topic}]`);
     console.log(`  Summary: ${summary}`);
     if (metadata) {
       console.log(`  Metadata: ${JSON.stringify(metadata, null, 2)}`);
@@ -252,9 +264,9 @@ export async function projectQuery(
     contributions = searchContributions(projectId, options.search, limit);
     console.log(`Search results for "${options.search}" in project '${project.name}':`);
   } else if (options.topic) {
-    // Query by topic
+    // Query by entry type
     contributions = getTopicContributions(projectId, options.topic, limit);
-    console.log(`Contributions to topic '${options.topic}' in project '${project.name}':`);
+    console.log(`Contributions [${options.topic}] in project '${project.name}':`);
   } else if (options.author) {
     // Query by author
     contributions = getAuthorContributions(projectId, options.author, limit);
@@ -289,7 +301,7 @@ export async function projectQuery(
   console.log();
   for (const contrib of contributions) {
     console.log(`[${new Date(contrib.timestamp).toLocaleString()}] ${contrib.authorId}`);
-    console.log(`  Topic: ${contrib.topic}`);
+    console.log(`  Type: ${contrib.topic}`);
     console.log(`  Summary: ${contrib.summary}`);
     if (contrib.metadata) {
       console.log(`  Metadata: ${JSON.stringify(contrib.metadata, null, 2)}`);
@@ -320,15 +332,15 @@ export async function projectStatus(projectId: string): Promise<void> {
   console.log();
 
   if (topics.length === 0) {
-    console.log('No topics found in this project');
+    console.log('No entry types found in this project');
     return;
   }
 
-  console.log(`Topics (${topics.length}):`);
+  console.log(`Entry types (${topics.length}):`);
   console.log();
 
   for (const topic of topics) {
-    console.log(`${topic.name}`);
+    console.log(`[${topic.name}]`);
     if (topic.description) {
       console.log(`  Description: ${topic.description}`);
     }
@@ -467,7 +479,7 @@ export async function projectSendContribution(
     ...(metadata && { metadata })
   };
 
-  console.log(`Sending contribution to project '${projectId}' topic '${topic}' to peer '${peerId}'...`);
+  console.log(`Sending contribution to project '${projectId}' [${topic}] to peer '${peerId}'...`);
 
   try {
     await federationSend(peerId, 'project.contribute', JSON.stringify(payload));

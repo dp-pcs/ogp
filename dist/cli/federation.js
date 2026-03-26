@@ -92,6 +92,13 @@ export async function federationApprove(peerId, options = {}) {
         console.log(`Peer ${peerId} is already approved.`);
         return;
     }
+    // BUILD-99/100: Default to full standard scopes if no intents specified
+    const DEFAULT_INTENTS = ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'];
+    if (!options.intents || options.intents.length === 0) {
+        options.intents = DEFAULT_INTENTS;
+        console.log(`ℹ Auto-granting default scopes: ${DEFAULT_INTENTS.join(', ')}`);
+        console.log(`  (Use --intents to specify custom scopes)`);
+    }
     // Build scope grants if provided
     let scopeGrants;
     if (options.intents && options.intents.length > 0) {
@@ -119,6 +126,16 @@ export async function federationApprove(peerId, options = {}) {
     }
     approvePeer(peerId);
     console.log(`✓ Approved peer: ${peerId}`);
+    // BUILD-102: Auto-register existing local projects as agent-comms topics for this peer
+    const { listProjects } = await import('../daemon/projects.js');
+    const { setPeerTopicPolicy } = await import('../daemon/peers.js');
+    const projects = listProjects();
+    if (projects.length > 0) {
+        for (const project of projects) {
+            setPeerTopicPolicy(peerId, project.id, 'summary');
+        }
+        console.log(`✓ Auto-registered ${projects.length} project${projects.length > 1 ? 's' : ''} as agent-comms topic${projects.length > 1 ? 's' : ''}`);
+    }
     // Notify the peer — send both formats for maximum compatibility
     try {
         const keypair = loadOrGenerateKeyPair();
@@ -196,7 +213,7 @@ export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
         timestamp: new Date().toISOString(),
         payload
     };
-    const { payload: signedPayload, signature } = signObject(message, getPrivateKey());
+    const { payload: signedPayload, payloadStr, signature } = signObject(message, getPrivateKey());
     try {
         const controller = new AbortController();
         const timeoutId = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
@@ -205,6 +222,7 @@ export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message: signedPayload,
+                messageStr: payloadStr, // raw signed string for exact verification
                 signature
             }),
             signal: controller.signal

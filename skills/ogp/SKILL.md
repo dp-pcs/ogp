@@ -1,245 +1,206 @@
 ---
 skill_name: ogp
-version: 0.2.0
-description: Manage OGP (Open Gateway Protocol) daemon and federation. OGP adds peer-to-peer federation to OpenClaw, allowing AI agents to communicate across different deployments with cryptographic identity and signed messages.
-trigger: Use when the user wants to configure, start, or manage the OGP federation daemon, manage federated peers, send messages to peers, or check federation status.
+version: 2.0.0
+description: >
+  OGP (Open Gateway Protocol) — federated agent communication, peer management,
+  and project collaboration across OpenClaw gateways. Use when the user asks to
+  establish federation with a peer, send agent-to-agent messages, check peer status,
+  manage federation scopes, or set up cross-gateway project collaboration.
+trigger: Use when the user asks to federate with a peer, connect to another gateway,
+  send an OGP message, check peer status, grant scopes, or manage OGP federation relationships.
 requires:
   bins:
     - ogp
   state_paths:
     - ~/.ogp/config.json
     - ~/.ogp/peers.json
-    - ~/.ogp/daemon.pid
-    - ~/.ogp/keypair.json
   install: npm install -g @dp-pcs/ogp
   docs: https://github.com/dp-pcs/ogp
 ---
+
 ## Prerequisites
 
-The OGP daemon must be installed. If you see errors like 'ogp: command not found', install it first:
+OGP must be installed and running:
 
 ```bash
-npm install -g github:dp-pcs/ogp --ignore-scripts
-ogp-install-skills
-ogp setup
+npm install -g @dp-pcs/ogp
+ogp setup          # interactive first-time setup
+ogp start          # starts the OGP daemon
+ogp status         # verify daemon is running
 ```
 
-Full documentation: https://github.com/dp-pcs/ogp
+If `ogp: command not found`, install it first.
 
+---
 
+## Known Peers
 
-# OGP Federation Management
+| Name | Peer ID | Gateway URL |
+|------|---------|-------------|
+| Stanislav | giving-produces-microphone-mild.trycloudflare.com:18790 | https://giving-produces-microphone-mild.trycloudflare.com |
+| Clawporate (David) | david-proctor.gw.clawporate.elelem.expert:3001 | https://david-proctor.gw.clawporate.elelem.expert |
 
-This skill helps manage the OGP (Open Gateway Protocol) daemon, which adds federation capability to OpenClaw.
+> Peer IDs can change when tunnel URLs rotate. Always verify with `ogp federation list`.
 
-## When to Use
+---
 
-Use this skill when:
-- User wants to set up OGP federation
-- User wants to start/stop the OGP daemon
-- User wants to manage federated peers (list, approve, reject)
-- User wants to send messages to federated peers
-- User asks about OGP status or configuration
+## Federation Management
 
-## Commands
-
-### Setup
-
+### List all peers
 ```bash
-ogp setup
-```
-
-Interactive setup wizard. Prompts for:
-- Daemon port (default: 18790)
-- OpenClaw URL (default: http://localhost:18789)
-- OpenClaw API token
-- Gateway URL (your public URL)
-- Display name
-- Email
-
-### Start/Stop Daemon
-
-```bash
-# Start daemon
-ogp start
-
-# Stop daemon
-ogp stop
-
-# Check status
-ogp status
-```
-
-### Federation Management
-
-```bash
-# List all peers
 ogp federation list
-
-# List only pending requests
 ogp federation list --status pending
-
-# List approved peers
 ogp federation list --status approved
+```
 
-# Request federation with another OGP instance
-ogp federation request <peer-gateway-url> <peer-id>
+### Request federation with a new peer
+```bash
+ogp federation request <peer-gateway-url> [peer-id]
+# Example:
+ogp federation request https://giving-produces-microphone-mild.trycloudflare.com stanislav
+```
 
-# Approve a pending request
+### Approve an inbound federation request
+```bash
+# Auto-grants default scopes (message, agent-comms, project.*)
 ogp federation approve <peer-id>
 
-# Reject a pending request
-ogp federation reject <peer-id>
-
-# Send message to a peer
-ogp federation send <peer-id> message '{"text":"Hello from OGP!"}'
-
-# Send task request
-ogp federation send <peer-id> task-request '{"taskType":"analysis","description":"Analyze logs"}'
+# Or approve with specific custom scopes:
+ogp federation approve <peer-id> --intents "message,agent-comms,project.join,project.contribute,project.query,project.status"
 ```
 
-### Expose Daemon
+> **Note:** As of OGP 0.2.7, `federation approve` automatically grants default scopes bidirectionally.
+> Both sides get full scopes in a single handshake — no manual grant step needed.
+
+### Grant or update scopes for an existing peer
+```bash
+ogp federation grant <peer-id> --intents "message,agent-comms,project.join,project.contribute,project.query,project.status"
+```
+
+### Check what scopes are granted to/from a peer
+```bash
+ogp federation scopes <peer-id>
+# Shows:
+# - GRANTED TO PEER (what they can call on your gateway)
+# - RECEIVED FROM PEER (what you can call on theirs)
+```
+
+### Ping a peer
+```bash
+ogp federation ping <peer-gateway-url>
+```
+
+### Send a raw federation message
+```bash
+ogp federation send <peer-id> <intent> '<json-payload>'
+```
+
+### Send an agent-to-agent message (agent-comms)
+```bash
+ogp federation agent <peer-id> <topic> "<message>"
+# Example:
+ogp federation agent giving-produces-microphone-mild.trycloudflare.com:18790 project-coordination "Stan, join Project Synapse: ogp project join synapse 'Project Synapse' --create"
+```
+
+---
+
+## Scope Reference
+
+| Scope | What it allows |
+|-------|---------------|
+| `message` | Basic gateway-to-gateway messages |
+| `agent-comms` | Agent-to-agent messages (natural language) |
+| `project.join` | Peer can join your projects |
+| `project.contribute` | Peer can push contributions to your projects |
+| `project.query` | Peer can query your project data |
+| `project.status` | Peer can check your project status |
+
+Default grant includes all of the above. Customize with `--intents` if needed.
+
+---
+
+## Federation Workflow (Full Setup)
+
+```
+1. Get peer's gateway URL (they share it with you)
+2. Check their card: curl -s <url>/.well-known/ogp | python3 -m json.tool
+3. Request federation: ogp federation request <url>
+4. They approve on their side (or you approve if they requested)
+5. Confirm scopes: ogp federation scopes <peer-id>
+6. Test: ogp federation ping <url>
+7. (Optional) Create or join a shared project
+```
+
+---
+
+## Project Collaboration (via OGP)
+
+For full project management, use the `ogp-project` skill. Quick reference:
 
 ```bash
-# Expose via cloudflared (default)
-ogp expose
+# Create a project
+ogp project create <id> "<name>" --description "<description>"
 
-# Expose via ngrok
-ogp expose --method ngrok
+# Invite a peer to join
+ogp project request-join <peer-id> <project-id> "<project-name>"
+
+# Log a contribution
+ogp project contribute <project-id> <topic> "<summary>"
+# Topics: progress, decision, blocker, context, idea, context.description, context.repository
+
+# Query project activity
+ogp project query <project-id> [--topic <topic>] [--limit 10]
+ogp project status <project-id>
+
+# Query a peer's project data
+ogp project query-peer <peer-id> <project-id>
 ```
 
-## Common Workflows
-
-### Initial Setup
-
-1. Run `ogp setup` to configure
-2. Run `ogp expose` to get a public URL
-3. Update gateway URL in config if needed
-4. Run `ogp start` to start daemon
-
-### Adding a Peer
-
-1. Get peer's gateway URL
-2. Run `ogp federation request <peer-url> <peer-id>`
-3. Wait for peer to approve
-4. Verify with `ogp federation list --status approved`
-
-### Receiving Federation Requests
-
-When another OGP instance sends a federation request:
-1. You'll see it in `ogp federation list --status pending`
-2. Approve with `ogp federation approve <peer-id>`
-3. Or reject with `ogp federation reject <peer-id>`
-
-### Approving with Scope Grants (v0.2.0)
-
-Control what intents and topics each peer can access:
-
-```bash
-# Approve with specific scopes
-ogp federation approve alice \
-  --intents message,agent-comms \
-  --rate 100/3600 \
-  --topics memory-management,task-delegation
-
-# View peer's scopes
-ogp federation scopes alice
-
-# Update grants for existing peer
-ogp federation grant alice \
-  --intents agent-comms \
-  --topics project-planning
-```
-
-### Sending Messages
-
-Once peers are approved:
-
-```bash
-# Simple message
-ogp federation send alice message '{"text":"Hi Alice!"}'
-
-# Agent-comms (v0.2.0) - agent-to-agent communication
-ogp federation agent alice memory-management "How do you persist context?"
-ogp federation agent alice task-delegation "Can you help with code review?" --priority high
-
-# Task request
-ogp federation send bob task-request '{
-  "taskType": "code-review",
-  "description": "Review PR #123",
-  "parameters": {"repo": "openclaw", "pr": 123}
-}'
-
-# Status update
-ogp federation send charlie status-update '{
-  "status": "completed",
-  "message": "Task finished"
-}'
-```
-
-### Configuring Response Policies
-
-Control how your agent responds to incoming messages:
-
-```bash
-# View policies
-ogp agent-comms policies
-ogp agent-comms policies alice
-
-# Configure per-peer policies
-ogp agent-comms configure alice --topics "memory-management" --level full
-
-# View activity log
-ogp agent-comms activity
-```
-
-For detailed response policy setup, use the `/ogp-agent-comms` skill.
-
-## Configuration
-
-Config file: `~/.ogp/config.json`
-
-```json
-{
-  "daemonPort": 18790,
-  "openclawUrl": "http://localhost:18789",
-  "openclawToken": "your-token",
-  "gatewayUrl": "https://your-public-url.com",
-  "displayName": "Your Name",
-  "email": "you@example.com",
-  "stateDir": "~/.ogp"
-}
-```
+---
 
 ## Troubleshooting
 
-### Daemon won't start
-- Check if port 18790 is already in use
-- Verify OpenClaw is running and accessible
-- Check `~/.ogp/config.json` exists and is valid
+| Error | Likely Cause | Fix |
+|-------|-------------|-----|
+| `Peer not found` | Not yet federated | Run `ogp federation request <url>` |
+| `Peer not approved` | Request pending | Check `ogp federation list --status pending` |
+| `400 Bad Request` on push | Peer hasn't granted you scopes | Ask peer to run `ogp federation grant <your-peer-id>` or update to OGP 0.2.7 |
+| `Invalid signature` | Version mismatch on `messageStr` field | Peer needs OGP 0.2.7+ (`npm install -g @dp-pcs/ogp@latest`) |
+| `Send failed` on agent-comms | Scope not granted or topic not allowed | Check `ogp federation scopes <peer-id>` |
+| `ogp: command not found` | Not installed | `npm install -g @dp-pcs/ogp` |
+| Daemon not running | Process died | `ogp start --background` |
 
-### Federation request fails
-- Verify peer's gateway URL is accessible
-- Check peer's OGP daemon is running
-- Ensure network connectivity
+### Check OGP daemon status
+```bash
+ogp status
+# Or check the log:
+tail -f ~/.ogp/daemon.log
+```
 
-### Messages not reaching OpenClaw
-- Verify OpenClaw token is correct
-- Check OpenClaw URL is accessible
-- Look for errors in daemon logs
+### Restart the daemon
+```bash
+pkill -f "node.*ogp"
+ogp start --background
+```
 
-## Architecture
+---
 
-The OGP daemon:
-- Runs on port 18790 (configurable)
-- Uses Ed25519 for signing messages
-- Exposes `/.well-known/ogp` for discovery
-- Stores peers in `~/.ogp/peers.json`
-- Notifies OpenClaw via POST to `/api/system-event`
+## State Files
 
-## Security
+| File | Purpose |
+|------|---------|
+| `~/.ogp/config.json` | Gateway config (URL, email, port) |
+| `~/.ogp/keypair.json` | Ed25519 signing keypair |
+| `~/.ogp/peers.json` | All federation peers + scopes |
+| `~/.ogp/projects.json` | Local project data + contributions |
+| `~/.ogp/daemon.log` | Daemon logs |
+| `~/.ogp/activity.log` | Intent activity log |
 
-- All messages are signed with Ed25519
-- Peer public keys are verified on every message
-- Only approved peers can send messages
-- Signatures prevent tampering and impersonation
+---
+
+## Design Notes
+
+- **Scopes are bilateral:** Each side independently grants what the other can call. OGP 0.2.7+ auto-grants defaults on approval.
+- **Project isolation:** Projects are scoped to their member list. Full mesh federation does NOT give all peers access to all projects. A peer only sees projects they are a member of.
+- **Signatures:** All federation messages are signed with Ed25519. Peer's public key is stored in `peers.json` at federation time.
+- **Tunnel URLs rotate:** If using Cloudflare/ngrok tunnels, peer IDs (hostname:port) change when tunnels restart. Re-request federation when this happens.

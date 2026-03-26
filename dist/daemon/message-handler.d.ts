@@ -17,5 +17,5 @@ export interface MessageResponse {
     statusCode?: number;
     retryAfter?: number;
 }
-export declare function handleMessage(message: FederationMessage, signature: string): Promise<MessageResponse>;
+export declare function handleMessage(message: FederationMessage, signature: string, messageStr?: string): Promise<MessageResponse>;
 //# sourceMappingURL=message-handler.d.ts.map

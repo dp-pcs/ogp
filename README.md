@@ -156,11 +156,11 @@ When approving or granting scopes:
 | `ogp project create <id> <name> [options]` | Create a new project |
 | `ogp project join <id> [name] [options]` | Join an existing project |
 | `ogp project list` | List all projects |
-| `ogp project contribute <id> <topic> <summary>` | Add a contribution |
+| `ogp project contribute <id> <type> <summary>` | Add a contribution by entry type |
 | `ogp project query <id> [options]` | Query project contributions |
 | `ogp project status <id>` | Show project status |
 | `ogp project request-join <peer> <id> <name>` | Request to join peer's project |
-| `ogp project send-contribution <peer> <id> <topic> <summary>` | Send contribution to peer |
+| `ogp project send-contribution <peer> <id> <type> <summary>` | Send contribution to peer |
 | `ogp project query-peer <peer> <id> [options]` | Query peer's project |
 | `ogp project status-peer <peer> <id>` | Get peer's project status |
 | `ogp project delete <id> [options]` | Delete a project |
@@ -242,7 +242,7 @@ ogp federation send peer-alice status-update '{
 ogp project create my-app "My Awesome App" \
   --description "Mobile expense tracking application"
 
-# Add contributions
+# Add contributions by entry type
 ogp project contribute my-app progress "Completed authentication system"
 ogp project contribute my-app decision "Using PostgreSQL for persistence"
 ogp project contribute my-app blocker "Waiting for API key approval"
@@ -250,7 +250,7 @@ ogp project contribute my-app blocker "Waiting for API key approval"
 # Query project
 ogp project status my-app
 ogp project query my-app --limit 10
-ogp project query my-app --topic progress
+ogp project query my-app --type progress
 
 # Collaborate with peers
 ogp project send-contribution peer-alice shared-app progress "Deployed staging"
@@ -356,7 +356,7 @@ All messages are signed with Ed25519 cryptographic signatures to prevent tamperi
 
 Custom intents can be registered with `ogp intent register` (v0.2.0+).
 
-## Key Features (v0.2.3)
+## Key Features (v0.2.9)
 
 ### 1. Scope Negotiation (v0.2.0+)
 
@@ -415,16 +415,17 @@ Collaborative project management across federated peers with activity logging an
 
 **Features:**
 - Create projects with contextual setup (repo, workspace, notes, collaborators)
-- Log contributions by topic (progress, decision, blocker, context)
+- Log contributions by entry type (progress, decision, blocker, context)
 - Query local and peer contributions for unified team view
 - Agent-aware: proactive logging and context loading
+- **Auto-registration (v0.2.9+)**: Project IDs auto-register as agent-comms topics for all approved peers
 
 **Example:**
 ```bash
-# Create project
+# Create project (auto-registers as agent-comms topic for all peers)
 ogp project create my-app "My App" --description "Expense tracker"
 
-# Log work
+# Log work by entry type
 ogp project contribute my-app progress "Completed authentication"
 ogp project contribute my-app decision "Using PostgreSQL"
 
@@ -468,6 +469,30 @@ Federation requests fire OpenClaw notifications via sessions_send, delivering di
 
 `ogp status` detects externally-started daemons via port probe fallback.
 
+### 8. Default-Deny Agent-Comms (v0.2.9+)
+
+Set `off` as the default response level to implement a default-deny security posture. When topics hit `off`, the daemon sends a cryptographically signed rejection response instead of silently dropping:
+
+```bash
+# Enable default-deny
+ogp agent-comms default off
+
+# Explicitly allow specific topics
+ogp agent-comms configure --global --topics "general,project-updates" --level summary
+```
+
+### 9. Project Topic Auto-Registration (v0.2.9+)
+
+When you create a project, its ID is automatically registered as an agent-comms topic for all approved peers at `summary` level. When you approve a new peer, all existing local projects are auto-registered as topics for that peer.
+
+```bash
+# Creates project AND registers as topic for all peers
+ogp project create my-app "My Application"
+
+# Approving a peer also registers existing projects as topics
+ogp federation approve peer-alice --intents agent-comms
+```
+
 ### Backward Compatibility
 
 - v0.1 peers work without scope negotiation (default rate limits apply)
@@ -486,6 +511,9 @@ Control how your agent responds to incoming agent-comms messages with per-peer p
 | `summary` | High-level responses only |
 | `escalate` | Ask human before responding |
 | `deny` | Politely decline to discuss |
+| `off` | Default-deny: send signed rejection, do not process |
+
+The `off` level enables a default-deny security posture. When a topic hits `off` (explicitly or via default), the daemon sends a signed rejection response with `{ status: "rejected", reason: "topic-not-permitted", topic: "<topic>" }` rather than silently dropping the message.
 
 ### Policy Commands
 

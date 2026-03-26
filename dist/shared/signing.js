@@ -35,12 +35,16 @@ export function verify(message, signatureHex, publicKeyHex) {
     }
 }
 export function signObject(obj, privateKeyHex) {
-    const payload = JSON.stringify(obj);
-    const signature = sign(payload, privateKeyHex);
-    return { payload: obj, signature };
+    const payloadStr = JSON.stringify(obj);
+    const signature = sign(payloadStr, privateKeyHex);
+    return { payload: obj, payloadStr, signature };
 }
-export function verifyObject(payload, signature, publicKeyHex) {
-    const message = JSON.stringify(payload);
+/**
+ * Verify a signed object. If payloadStr is provided (the original JSON string used to sign),
+ * use that directly to avoid JSON key-order drift across serialization boundaries.
+ */
+export function verifyObject(payload, signature, publicKeyHex, payloadStr) {
+    const message = payloadStr ?? JSON.stringify(payload);
     return verify(message, signature, publicKeyHex);
 }
 //# sourceMappingURL=signing.js.map

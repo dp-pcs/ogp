@@ -1,7 +1,7 @@
 /**
  * Response level for agent-comms
  */
-export type ResponseLevel = 'full' | 'summary' | 'escalate' | 'deny';
+export type ResponseLevel = 'full' | 'summary' | 'escalate' | 'deny' | 'off';
 /**
  * Topic policy configuration
  */

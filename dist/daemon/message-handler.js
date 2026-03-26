@@ -8,7 +8,8 @@ import { getProject, joinProject, isProjectMember, contributeToProject, getTopic
 import { loadConfig } from '../shared/config.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-export async function handleMessage(message, signature) {
+export async function handleMessage(message, signature, messageStr // raw JSON string used to sign — avoids key-order drift
+) {
     // 1. Verify sender exists and is approved
     const peer = getPeer(message.from);
     if (!peer) {
@@ -27,8 +28,8 @@ export async function handleMessage(message, signature) {
             statusCode: 403
         };
     }
-    // 2. Verify signature
-    if (!verifyObject(message, signature, peer.publicKey)) {
+    // 2. Verify signature (use raw messageStr if provided to avoid JSON key-order drift)
+    if (!verifyObject(message, signature, peer.publicKey, messageStr)) {
         return {
             success: false,
             nonce: message.nonce,
@@ -126,6 +127,28 @@ async function handleAgentComms(message, displayName) {
         message: messageText,
         level: policy.level
     });
+    // BUILD-101: If policy is 'off', send signed rejection
+    if (policy.level === 'off') {
+        const { loadOrGenerateKeyPair } = await import('./keypair.js');
+        const { signObject } = await import('../shared/signing.js');
+        const keypair = loadOrGenerateKeyPair();
+        const rejection = {
+            status: 'rejected',
+            reason: 'topic-not-permitted',
+            topic
+        };
+        const { signature } = signObject(rejection, keypair.privateKey);
+        return {
+            success: false,
+            nonce: message.nonce,
+            error: 'Topic not permitted',
+            statusCode: 403,
+            response: {
+                ...rejection,
+                signature
+            }
+        };
+    }
     // Build enhanced notification with policy info
     const priorityIndicator = priority === 'high' ? '[HIGH] ' : priority === 'low' ? '[low] ' : '';
     const policyTag = `[${policy.level.toUpperCase()}]`;

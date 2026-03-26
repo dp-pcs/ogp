@@ -51,7 +51,8 @@ Use this skill when:
 ### 2. Freeform Activity Logging
 - Monitors for logging signals ("add this to project X")
 - Agent-driven logging of decisions, progress, blockers
-- Flexible topic assignment (progress, decision, blocker, context, summary)
+- Flexible entry type assignment (progress, decision, blocker, context, summary)
+- **Auto-registration**: Project IDs auto-register as agent-comms topics for all approved peers
 
 ### 3. Project-Aware Agent Behavior
 - Auto-loads project context on first reference
@@ -164,7 +165,7 @@ When a project is mentioned:
 3. **Completion logging**: After significant work, offer: "Should I log a progress summary to [project]?"
 
 ### Logging Intelligence
-**Topic Selection Logic:**
+**Entry Type Selection Logic:**
 - `progress` — work completed, features implemented, milestones reached
 - `decision` — architectural choices, technology selections, product decisions
 - `blocker` — things preventing progress, issues encountered, dependencies
@@ -202,11 +203,12 @@ ogp project status <id>
 
 ### Contributions & Logging
 ```bash
-# Add contribution
-ogp project contribute <id> <topic> <summary> [--metadata '{"key":"value"}']
+# Add contribution by entry type
+ogp project contribute <id> <type> <summary> [--metadata '{"key":"value"}']
 
 # Query contributions
-ogp project query <id> [--topic <topic>] [--author <author>] [--search <text>] [--limit <n>]
+ogp project query <id> [--type <type>] [--author <author>] [--search <text>] [--limit <n>]
+# Note: --topic is a hidden alias for --type for backwards compatibility
 ```
 
 ### Cross-Peer Collaboration
@@ -246,7 +248,7 @@ You can now:
 ### Freeform Logging Confirmation
 ```
 📝 Logged to project "{project_name}":
-  Topic: {topic}
+  Type: {type}
   Summary: {summary}
 
 Recent activity: {recent_count} contributions in the last week
@@ -281,12 +283,12 @@ Peer Contributions ({peer_count}):
 {collaboration_patterns}
 ```
 
-## Context Topics Schema
+## Context Entry Types Schema
 
-Standard context topics for structured project information:
+Standard context entry types for structured project information:
 
-| Topic | Purpose | Example |
-|-------|---------|---------|
+| Entry Type | Purpose | Example |
+|------------|---------|---------|
 | `context.repository` | Code repository URL | `https://github.com/user/repo` |
 | `context.workspace` | Local development path | `/Users/name/projects/myapp` |
 | `context.notes` | Notes/documentation location | `Obsidian vault: ProjectNotes/MyApp` |

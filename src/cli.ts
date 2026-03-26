@@ -320,7 +320,7 @@ agentComms
   .argument('[peer-ids]', 'Comma-separated peer IDs (or use --global)')
   .option('--global', 'Configure global default policies')
   .option('--topics <list>', 'Comma-separated topics to configure')
-  .option('--level <level>', 'Response level (full|summary|escalate|deny)')
+  .option('--level <level>', 'Response level (full|summary|escalate|deny|off)')
   .option('--notes <text>', 'Notes about this policy')
   .action((peerIds, options) => {
     configurePolicies(peerIds, {
@@ -336,7 +336,7 @@ agentComms
   .description('Add a topic to a peer\'s response policy')
   .argument('<peer-id>', 'Peer ID')
   .argument('<topic>', 'Topic name')
-  .option('--level <level>', 'Response level (full|summary|escalate|deny)', 'summary')
+  .option('--level <level>', 'Response level (full|summary|escalate|deny|off)', 'summary')
   .option('--notes <text>', 'Notes about this topic')
   .action((peerId, topic, options) => {
     addTopic(peerId, topic, options.level as ResponseLevel, options.notes);
@@ -375,8 +375,8 @@ agentComms
 
 agentComms
   .command('default')
-  .description('Set default response level for unknown topics')
-  .argument('<level>', 'Response level (full|summary|escalate|deny)')
+  .description('Set default response level for unknown topics (use "off" for default-deny)')
+  .argument('<level>', 'Response level (full|summary|escalate|deny|off)')
   .action((level) => {
     setDefault(level as ResponseLevel);
   });
@@ -461,27 +461,29 @@ project
 
 project
   .command('contribute')
-  .description('Add a contribution to a project topic')
+  .description('Add a contribution to a project entry type')
   .argument('<project-id>', 'Project to contribute to')
-  .argument('<topic>', 'Topic area for this contribution')
+  .argument('<type>', 'Entry type for this contribution (e.g., decision, task, note)')
   .argument('<summary>', 'Summary of the contribution')
   .option('--metadata <json>', 'Additional structured data as JSON')
   .option('--local-only', 'Skip auto-push to federated peers')
-  .action(async (projectId, topic, summary, options) => {
-    await projectContribute(projectId, topic, summary, { ...options, localOnly: options.localOnly });
+  .action(async (projectId, entryType, summary, options) => {
+    await projectContribute(projectId, entryType, summary, { ...options, localOnly: options.localOnly });
   });
 
 project
   .command('query')
   .description('Query project contributions')
   .argument('<project-id>', 'Project to query')
-  .option('--topic <name>', 'Filter by topic')
+  .option('--type <name>', 'Filter by entry type')
+  .option('--topic <name>', 'Filter by entry type (alias for --type)')
   .option('--author <id>', 'Filter by author')
   .option('--search <text>', 'Search by text content')
   .option('--limit <n>', 'Maximum results to return', '20')
   .action(async (projectId, options) => {
     const queryOptions = {
       ...options,
+      topic: options.type || options.topic, // --type takes precedence
       limit: parseInt(options.limit, 10)
     };
     await projectQuery(projectId, queryOptions);
@@ -512,11 +514,11 @@ project
   .description('Send a contribution to a peer\'s project')
   .argument('<peer-id>', 'Peer to send to')
   .argument('<project-id>', 'Project identifier')
-  .argument('<topic>', 'Topic area')
+  .argument('<type>', 'Entry type (e.g., decision, task, note)')
   .argument('<summary>', 'Contribution summary')
   .option('--metadata <json>', 'Additional structured data as JSON')
-  .action(async (peerId, projectId, topic, summary, options) => {
-    await projectSendContribution(peerId, projectId, topic, summary, options);
+  .action(async (peerId, projectId, entryType, summary, options) => {
+    await projectSendContribution(peerId, projectId, entryType, summary, options);
   });
 
 project
@@ -524,13 +526,15 @@ project
   .description('Query a peer\'s project contributions')
   .argument('<peer-id>', 'Peer to query')
   .argument('<project-id>', 'Project identifier')
-  .option('--topic <name>', 'Filter by topic')
+  .option('--type <name>', 'Filter by entry type')
+  .option('--topic <name>', 'Filter by entry type (alias for --type)')
   .option('--author <id>', 'Filter by author')
   .option('--limit <n>', 'Maximum results to return', '20')
   .option('--timeout <ms>', 'Response timeout in milliseconds', '10000')
   .action(async (peerId, projectId, options) => {
     const queryOptions = {
       ...options,
+      topic: options.type || options.topic, // --type takes precedence
       limit: parseInt(options.limit, 10),
       timeout: parseInt(options.timeout, 10)
     };

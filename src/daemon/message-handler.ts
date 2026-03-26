@@ -46,7 +46,8 @@ export interface MessageResponse {
 
 export async function handleMessage(
   message: FederationMessage,
-  signature: string
+  signature: string,
+  messageStr?: string  // raw JSON string used to sign — avoids key-order drift
 ): Promise<MessageResponse> {
   // 1. Verify sender exists and is approved
   const peer = getPeer(message.from);
@@ -68,8 +69,8 @@ export async function handleMessage(
     };
   }
 
-  // 2. Verify signature
-  if (!verifyObject(message, signature, peer.publicKey)) {
+  // 2. Verify signature (use raw messageStr if provided to avoid JSON key-order drift)
+  if (!verifyObject(message, signature, peer.publicKey, messageStr)) {
     return {
       success: false,
       nonce: message.nonce,
@@ -181,6 +182,32 @@ async function handleAgentComms(
     message: messageText,
     level: policy.level
   });
+
+  // BUILD-101: If policy is 'off', send signed rejection
+  if (policy.level === 'off') {
+    const { loadOrGenerateKeyPair } = await import('./keypair.js');
+    const { signObject } = await import('../shared/signing.js');
+    const keypair = loadOrGenerateKeyPair();
+
+    const rejection = {
+      status: 'rejected',
+      reason: 'topic-not-permitted',
+      topic
+    };
+
+    const { signature } = signObject(rejection, keypair.privateKey);
+
+    return {
+      success: false,
+      nonce: message.nonce,
+      error: 'Topic not permitted',
+      statusCode: 403,
+      response: {
+        ...rejection,
+        signature
+      }
+    };
+  }
 
   // Build enhanced notification with policy info
   const priorityIndicator = priority === 'high' ? '[HIGH] ' : priority === 'low' ? '[low] ' : '';

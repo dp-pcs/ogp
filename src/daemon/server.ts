@@ -201,6 +201,45 @@ export function startServer(config?: OGPConfig, background = false): void {
       approvePeer(peer.id);
       console.log(`[OGP] Federation approved by ${peer.displayName} (v${protocolVersion})`);
 
+      // BUILD-99/100: Auto-grant default scopes back to the approving peer if they have none yet
+      // This ensures bidirectional scope negotiation happens in a single handshake
+      const { updatePeerGrantedScopes } = await import('./peers.js');
+      const { createScopeBundle, createScopeGrant, DEFAULT_RATE_LIMIT } = await import('./scopes.js');
+      const { getPrivateKey: _getPrivateKey } = await import('./keypair.js');
+      const { signObject: _signObject } = await import('../shared/signing.js');
+
+      const freshPeer = getPeer(peer.id);
+      if (freshPeer && !freshPeer.grantedScopes) {
+        const defaultIntents = ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'];
+        const scopes = defaultIntents.map(intent => createScopeGrant(intent, { rateLimit: DEFAULT_RATE_LIMIT }));
+        const bundle = createScopeBundle(scopes);
+        updatePeerGrantedScopes(peer.id, bundle);
+        console.log(`[OGP] Auto-granted default scopes to ${peer.displayName}: ${defaultIntents.join(', ')}`);
+
+        // Send our grants back to the approving peer
+        try {
+          const ourConfig = requireConfig();
+          const keypair = (await import('./keypair.js')).loadOrGenerateKeyPair();
+          await fetch(`${freshPeer.gatewayUrl}/federation/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fromGatewayId: `${new URL(ourConfig.gatewayUrl).hostname}:${ourConfig.daemonPort}`,
+              fromDisplayName: ourConfig.displayName,
+              fromGatewayUrl: ourConfig.gatewayUrl,
+              fromPublicKey: keypair.publicKey,
+              fromEmail: ourConfig.email,
+              timestamp: new Date().toISOString(),
+              protocolVersion: '0.2.0',
+              scopeGrants: bundle
+            })
+          });
+          console.log(`[OGP] Sent auto-grant confirmation back to ${peer.displayName}`);
+        } catch (e) {
+          console.warn(`[OGP] Could not send auto-grant back to ${peer.displayName}:`, e);
+        }
+      }
+
       res.json({ received: true });
     } catch (error) {
       console.error('[OGP] Error handling approval:', error);
@@ -221,13 +260,13 @@ export function startServer(config?: OGPConfig, background = false): void {
   // POST /federation/message - Receive federated message
   app.post('/federation/message', async (req: Request, res: Response) => {
     try {
-      const { message, signature } = req.body;
+      const { message, messageStr, signature } = req.body;
 
       if (!message || !signature) {
         return res.status(400).json({ error: 'Missing message or signature' });
       }
 
-      const result = await handleMessage(message as FederationMessage, signature);
+      const result = await handleMessage(message as FederationMessage, signature, messageStr);
 
       if (result.success) {
         res.json(result.response);
