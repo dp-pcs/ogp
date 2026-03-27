@@ -273,9 +273,10 @@ export function startServer(config?: OGPConfig, background = false): void {
       const result = await handleMessage(message as FederationMessage, signature, messageStr);
 
       if (result.success) {
-        res.json(result.response);
+        // Return full result including success flag so callers can check response.success
+        res.json({ success: true, nonce: result.nonce, response: result.response });
       } else {
-        res.status(400).json({ error: result.error });
+        res.status(result.statusCode || 400).json({ success: false, error: result.error });
       }
     } catch (error) {
       console.error('[OGP] Error handling message:', error);
