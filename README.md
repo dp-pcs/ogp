@@ -108,7 +108,7 @@ https://your-tunnel-url.com/.well-known/ogp
 |---------|-------------|
 | `ogp expose` | Start cloudflared tunnel in foreground |
 | `ogp expose --background` | Run tunnel as background process |
-| `ogp expose --provider ngrok` | Use ngrok instead of cloudflared |
+| `ogp expose --method ngrok` | Use ngrok instead of cloudflared |
 | `ogp expose stop` | Stop the tunnel |
 
 ### System Integration (macOS)
@@ -266,7 +266,6 @@ ogp project request-join peer-alice mobile-app "Mobile App Project"
 ```bash
 # Register a deployment intent
 ogp intent register deployment \
-  --session-key "agent:main:main" \
   --description "Deployment notifications"
 
 # List all intents
@@ -356,7 +355,7 @@ All messages are signed with Ed25519 cryptographic signatures to prevent tamperi
 
 Custom intents can be registered with `ogp intent register` (v0.2.0+).
 
-## Key Features (v0.2.9)
+## Key Features (v0.2.11)
 
 ### 1. Scope Negotiation (v0.2.0+)
 
