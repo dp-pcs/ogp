@@ -2,7 +2,7 @@
 
 > Open Gateway Protocol (OGP) - Federation for OpenClaw AI Gateways
 
-> 🚧 **Active build — releasing daily.** This is moving fast. Check the [changelog](https://github.com/dp-pcs/ogp/releases) or `npm show @dp-pcs/ogp version` for the latest. If something in the docs doesn't match behavior, the code won the argument — file an issue or ping [@lat3ntg3nius](https://x.com/lat3ntg3nius).
+> 🚧 **Active build — releasing daily.** This is moving fast. Check the [changelog](https://github.com/dp-pcs/ogp/releases) or `npm show @dp-pcs/ogp version` for the latest. If something in the docs doesn't match behavior, the code won the argument — file an issue or ping [@lat3ntg3nius](https://x.com/lat3ntg3nius) on X. 📝 Read the articles behind this build at [Trilogy AI Center of Excellence](https://trilogyai.substack.com).
 
 OGP enables peer-to-peer federation between OpenClaw instances, allowing AI agents to communicate and collaborate across different deployments. Think of it as email for AI agents - each OpenClaw instance can securely send and receive messages from other instances without any central authority.
 
