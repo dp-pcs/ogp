@@ -14,6 +14,7 @@ import { signObject } from '../shared/signing.js';
 import { notifyOpenClaw } from './notify.js';
 import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
 import { startReplyCleanup, stopReplyCleanup, getPendingReply, deletePendingReply, storePendingReply, type ReplyPayload } from './reply-handler.js';
+import { startRendezvous, stopRendezvous } from './rendezvous.js';
 import type { ScopeBundle } from './scopes.js';
 import { loadIntents } from './intent-registry.js';
 
@@ -343,13 +344,30 @@ export function startServer(config?: OGPConfig, background = false): void {
     startDoormanCleanup();
     startReplyCleanup();
     console.log(`[OGP] Started doorman and reply cleanup timers`);
+
+    // Start rendezvous registration (if configured)
+    if (cfg.rendezvous?.enabled) {
+      startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort).catch((err: Error) => {
+        console.warn(`[OGP] Rendezvous startup error: ${err.message}`);
+      });
+    }
   });
+
+  // Handle graceful shutdown — deregister from rendezvous
+  const gracefulShutdown = async () => {
+    await stopRendezvous();
+  };
+
+  process.once('SIGTERM', () => { gracefulShutdown().catch(() => {}); });
+  process.once('SIGINT', () => { gracefulShutdown().catch(() => {}); });
 }
 
 export function stopServer(): void {
   // Stop cleanup timers
   stopDoormanCleanup();
   stopReplyCleanup();
+  // Deregister from rendezvous (fire-and-forget)
+  stopRendezvous().catch(() => {});
 
   // Check for PID file
   if (!fs.existsSync(DAEMON_PID_FILE)) {

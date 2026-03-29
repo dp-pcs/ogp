@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { runSetup } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig } from './shared/config.js';
-import { federationList, federationRequest, federationApprove, federationReject, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms } from './cli/federation.js';
+import { federationList, federationRequest, federationApprove, federationReject, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, showActivity, clearActivity, setDefault, setLogging, setTopic, setPeerDefault } from './cli/agent-comms.js';
@@ -100,6 +100,13 @@ federation
         }
     }
     await federationRequest(peerUrl, peerId);
+});
+federation
+    .command('connect')
+    .description('Connect to a peer by public key using rendezvous server discovery')
+    .argument('<pubkey>', 'Peer public key (hex)')
+    .action(async (pubkey) => {
+    await federationConnect(pubkey);
 });
 federation
     .command('approve')

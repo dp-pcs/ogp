@@ -13,7 +13,8 @@ import {
   federationSend,
   federationShowScopes,
   federationUpdateGrants,
-  federationSendAgentComms
+  federationSendAgentComms,
+  federationConnect
 } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
@@ -144,6 +145,14 @@ federation
       }
     }
     await federationRequest(peerUrl, peerId);
+  });
+
+federation
+  .command('connect')
+  .description('Connect to a peer by public key using rendezvous server discovery')
+  .argument('<pubkey>', 'Peer public key (hex)')
+  .action(async (pubkey) => {
+    await federationConnect(pubkey);
   });
 
 federation

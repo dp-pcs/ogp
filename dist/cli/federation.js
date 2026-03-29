@@ -1,5 +1,6 @@
 import { listPeers, getPeer, approvePeer, rejectPeer, updatePeerGrantedScopes } from '../daemon/peers.js';
 import { requireConfig } from '../shared/config.js';
+import { lookupPeer } from '../daemon/rendezvous.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
@@ -433,5 +434,32 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
     catch (error) {
         console.error('Failed to send agent-comms:', error);
     }
+}
+/**
+ * Connect to a peer by public key using rendezvous server discovery.
+ *
+ * Usage: ogp federation connect <pubkey>
+ *
+ * Looks up the peer URL from the rendezvous server, then sends a
+ * federation request to that URL.
+ */
+export async function federationConnect(pubkey) {
+    const config = requireConfig();
+    if (!config.rendezvous?.enabled) {
+        console.error('Rendezvous is not enabled in your config.');
+        console.error('Add "rendezvous": { "enabled": true, "url": "https://rendezvous.elelem.expert" } to ~/.ogp/config.json');
+        process.exit(1);
+    }
+    console.log(`Looking up peer ${pubkey.slice(0, 16)}... in rendezvous at ${config.rendezvous.url}`);
+    const peerUrl = await lookupPeer(config.rendezvous, pubkey);
+    if (!peerUrl) {
+        console.error(`✗ Peer not found in rendezvous.`);
+        console.error(`  Ask them to enable rendezvous or share their URL directly.`);
+        console.error(`  Direct connect: ogp federation request <peer-url> ${pubkey}`);
+        process.exit(1);
+    }
+    console.log(`✓ Found peer at ${peerUrl}`);
+    console.log(`Sending federation request...`);
+    await federationRequest(peerUrl, pubkey);
 }
 //# sourceMappingURL=federation.js.map

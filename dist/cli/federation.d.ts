@@ -25,4 +25,13 @@ export declare function federationSendAgentComms(peerId: string, topic: string, 
     waitForReply?: boolean;
     replyTimeout?: number;
 }): Promise<void>;
+/**
+ * Connect to a peer by public key using rendezvous server discovery.
+ *
+ * Usage: ogp federation connect <pubkey>
+ *
+ * Looks up the peer URL from the rendezvous server, then sends a
+ * federation request to that URL.
+ */
+export declare function federationConnect(pubkey: string): Promise<void>;
 //# sourceMappingURL=federation.d.ts.map

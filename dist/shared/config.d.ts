@@ -23,6 +23,10 @@ export interface AgentCommsConfig {
     defaultLevel: ResponseLevel;
     activityLog: boolean;
 }
+export interface RendezvousConfig {
+    enabled: boolean;
+    url: string;
+}
 export interface OGPConfig {
     daemonPort: number;
     openclawUrl: string;
@@ -32,6 +36,7 @@ export interface OGPConfig {
     email: string;
     stateDir: string;
     agentComms?: AgentCommsConfig;
+    rendezvous?: RendezvousConfig;
 }
 export declare function getConfigPath(): string;
 export declare function getConfigDir(): string;

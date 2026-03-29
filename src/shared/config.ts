@@ -31,6 +31,11 @@ export interface AgentCommsConfig {
   activityLog: boolean;
 }
 
+export interface RendezvousConfig {
+  enabled: boolean;
+  url: string;
+}
+
 export interface OGPConfig {
   daemonPort: number;
   openclawUrl: string;
@@ -41,6 +46,8 @@ export interface OGPConfig {
   stateDir: string;
   // Agent-comms configuration (optional)
   agentComms?: AgentCommsConfig;
+  // Rendezvous configuration (optional)
+  rendezvous?: RendezvousConfig;
 }
 
 const DEFAULT_CONFIG_DIR = process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');
