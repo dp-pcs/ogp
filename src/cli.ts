@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import { runSetup } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
-import { requireConfig, loadConfig } from './shared/config.js';
+import { requireConfig, loadConfig, saveConfig } from './shared/config.js';
 import {
   federationList,
   federationRequest,
@@ -314,13 +314,12 @@ program
   .option('--set <key=value>', 'Set a config value (e.g. --set gatewayUrl=https://xyz.trycloudflare.com)')
   .option('--get <key>', 'Get a config value')
   .action((opts) => {
-    const config = loadConfig() || {};
+    const config = loadConfig() || {} as any;
     if (opts.set) {
       const [key, ...rest] = opts.set.split('=');
       const value = rest.join('=');
       (config as any)[key] = value;
-      const { saveConfig } = require('./shared/config.js');
-      saveConfig(config);
+      saveConfig(config as any);
       console.log(`✓ Set ${key} = ${value}`);
     } else if (opts.get) {
       console.log((config as any)[opts.get] ?? 'not set');

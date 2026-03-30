@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import { runSetup } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
-import { requireConfig, loadConfig } from './shared/config.js';
+import { requireConfig, loadConfig, saveConfig } from './shared/config.js';
 import { federationList, federationRequest, federationApprove, federationReject, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect, federationInvite, federationAccept } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
@@ -258,7 +258,6 @@ program
         const [key, ...rest] = opts.set.split('=');
         const value = rest.join('=');
         config[key] = value;
-        const { saveConfig } = require('./shared/config.js');
         saveConfig(config);
         console.log(`✓ Set ${key} = ${value}`);
     }
