@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { runSetup } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig } from './shared/config.js';
-import { federationList, federationRequest, federationApprove, federationReject, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect } from './cli/federation.js';
+import { federationList, federationRequest, federationApprove, federationReject, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect, federationInvite, federationAccept } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, showActivity, clearActivity, setDefault, setLogging, setTopic, setPeerDefault } from './cli/agent-comms.js';
@@ -107,6 +107,19 @@ federation
     .argument('<pubkey>', 'Peer public key (hex)')
     .action(async (pubkey) => {
     await federationConnect(pubkey);
+});
+federation
+    .command('invite')
+    .description('Generate a short invite token to share with a peer (requires rendezvous)')
+    .action(async () => {
+    await federationInvite();
+});
+federation
+    .command('accept')
+    .description('Accept a peer\'s invite token and auto-connect via rendezvous')
+    .argument('<token>', 'Invite token from peer (e.g. a3f7k2)')
+    .action(async (token) => {
+    await federationAccept(token);
 });
 federation
     .command('approve')

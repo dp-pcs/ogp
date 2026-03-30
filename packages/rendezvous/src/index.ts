@@ -6,6 +6,7 @@ app.use(express.json());
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const TTL_MS = 90_000; // 90 seconds
 const CLEANUP_INTERVAL_MS = 60_000; // cleanup every 60 seconds
+const INVITE_TTL_MS = 600_000; // 10 minutes
 
 interface PeerRecord {
   pubkey: string;
@@ -14,20 +15,50 @@ interface PeerRecord {
   lastSeen: number; // unix timestamp ms
 }
 
-const peers = new Map<string, PeerRecord>();
+interface InviteRecord {
+  token: string;
+  pubkey: string;
+  ip: string;
+  port: number;
+  createdAt: number; // unix timestamp ms
+}
 
-// Periodic cleanup of expired peers
+const peers = new Map<string, PeerRecord>();
+const invites = new Map<string, InviteRecord>();
+
+/** Generate a random 6-char alphanumeric token */
+function generateToken(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let token = '';
+  for (let i = 0; i < 6; i++) {
+    token += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return token;
+}
+
+// Periodic cleanup of expired peers and invites
 setInterval(() => {
   const now = Date.now();
-  let cleaned = 0;
+  let cleanedPeers = 0;
   for (const [key, peer] of peers.entries()) {
     if (now - peer.lastSeen > TTL_MS) {
       peers.delete(key);
-      cleaned++;
+      cleanedPeers++;
     }
   }
-  if (cleaned > 0) {
-    console.log(`[rendezvous] Cleaned up ${cleaned} expired peer(s). Active peers: ${peers.size}`);
+  if (cleanedPeers > 0) {
+    console.log(`[rendezvous] Cleaned up ${cleanedPeers} expired peer(s). Active peers: ${peers.size}`);
+  }
+
+  let cleanedInvites = 0;
+  for (const [token, invite] of invites.entries()) {
+    if (now - invite.createdAt > INVITE_TTL_MS) {
+      invites.delete(token);
+      cleanedInvites++;
+    }
+  }
+  if (cleanedInvites > 0) {
+    console.log(`[rendezvous] Cleaned up ${cleanedInvites} expired invite(s). Active invites: ${invites.size}`);
   }
 }, CLEANUP_INTERVAL_MS);
 
@@ -129,9 +160,69 @@ app.delete('/peer/:pubkey', (req: Request, res: Response) => {
 });
 
 // ─────────────────────────────────────────────
+// POST /invite — create a federation invite token
+// ─────────────────────────────────────────────
+app.post('/invite', (req: Request, res: Response) => {
+  const { pubkey, port } = req.body as { pubkey?: unknown; port?: unknown };
+
+  if (typeof pubkey !== 'string' || !pubkey) {
+    res.status(400).json({ error: 'pubkey is required and must be a string' });
+    return;
+  }
+  if (typeof port !== 'number' || port < 1 || port > 65535) {
+    res.status(400).json({ error: 'port is required and must be a number (1-65535)' });
+    return;
+  }
+
+  const ip = getCallerIp(req);
+  const createdAt = Date.now();
+
+  // Generate a unique token (retry on collision)
+  let token: string;
+  let attempts = 0;
+  do {
+    token = generateToken();
+    attempts++;
+  } while (invites.has(token) && attempts < 10);
+
+  invites.set(token, { token, pubkey, ip, port, createdAt });
+
+  console.log(`[rendezvous] Invite created: ${token} for ${pubkey.slice(0, 8)}... from ${ip}:${port}`);
+
+  res.json({ ok: true, token, expiresIn: 600 });
+});
+
+// ─────────────────────────────────────────────
+// GET /invite/:token — look up an invite token
+// ─────────────────────────────────────────────
+app.get('/invite/:token', (req: Request, res: Response) => {
+  const { token } = req.params;
+  const invite = invites.get(token);
+
+  if (!invite) {
+    res.status(404).json({ error: 'Invite not found or expired' });
+    return;
+  }
+
+  const age = Date.now() - invite.createdAt;
+  if (age > INVITE_TTL_MS) {
+    invites.delete(token);
+    res.status(404).json({ error: 'Invite not found or expired' });
+    return;
+  }
+
+  // Does NOT consume the token — allow multiple accepts
+  res.json({
+    pubkey: invite.pubkey,
+    ip: invite.ip,
+    port: invite.port,
+  });
+});
+
+// ─────────────────────────────────────────────
 // Start server
 // ─────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[rendezvous] OGP Rendezvous Server listening on port ${PORT}`);
-  console.log(`[rendezvous] Peer TTL: ${TTL_MS / 1000}s | Cleanup interval: ${CLEANUP_INTERVAL_MS / 1000}s`);
+  console.log(`[rendezvous] Peer TTL: ${TTL_MS / 1000}s | Invite TTL: ${INVITE_TTL_MS / 1000}s | Cleanup interval: ${CLEANUP_INTERVAL_MS / 1000}s`);
 });

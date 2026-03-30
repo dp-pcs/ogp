@@ -436,6 +436,89 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
     }
 }
 /**
+ * Generate a federation invite token via the rendezvous server.
+ *
+ * Usage: ogp federation invite
+ *
+ * POSTs our pubkey + port to {rendezvous.url}/invite and prints the
+ * resulting short token so we can share it with a peer.
+ */
+export async function federationInvite() {
+    const config = requireConfig();
+    if (!config.rendezvous?.enabled || !config.rendezvous?.url) {
+        console.error('Rendezvous is not enabled in your config.');
+        console.error('Add "rendezvous": { "enabled": true, "url": "https://rendezvous.elelem.expert" } to ~/.ogp/config.json');
+        process.exit(1);
+    }
+    const pubkey = getPublicKey();
+    const port = config.daemonPort ?? 18790;
+    try {
+        const res = await fetch(`${config.rendezvous.url}/invite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pubkey, port }),
+            signal: AbortSignal.timeout(10000),
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            console.error(`✗ Rendezvous invite failed: ${res.status} ${text}`);
+            process.exit(1);
+        }
+        const data = await res.json();
+        console.log(`\nYour invite code: ${data.token}  (expires in 10 minutes)`);
+        console.log(`\nShare this with your peer — they run: ogp federation accept ${data.token}\n`);
+    }
+    catch (err) {
+        console.error('✗ Failed to create invite:', err.message);
+        process.exit(1);
+    }
+}
+/**
+ * Accept a federation invite token from a peer.
+ *
+ * Usage: ogp federation accept <token>
+ *
+ * Looks up the token on the rendezvous server, then auto-connects using
+ * the returned ip:port + pubkey.
+ */
+export async function federationAccept(token) {
+    const config = requireConfig();
+    if (!config.rendezvous?.enabled || !config.rendezvous?.url) {
+        console.error('Rendezvous is not enabled in your config.');
+        console.error('Add "rendezvous": { "enabled": true, "url": "https://rendezvous.elelem.expert" } to ~/.ogp/config.json');
+        process.exit(1);
+    }
+    try {
+        const res = await fetch(`${config.rendezvous.url}/invite/${encodeURIComponent(token)}`, {
+            signal: AbortSignal.timeout(10000),
+        });
+        if (res.status === 404) {
+            console.error('Invite code not found or expired. Ask your peer to generate a new one.');
+            process.exit(1);
+        }
+        if (!res.ok) {
+            const text = await res.text();
+            console.error(`✗ Rendezvous lookup failed: ${res.status} ${text}`);
+            process.exit(1);
+        }
+        const data = await res.json();
+        const peerUrl = `http://${data.ip}:${data.port}`;
+        console.log(`✓ Resolved peer via rendezvous: ${data.pubkey.slice(0, 8)}... at ${peerUrl}`);
+        console.log(`Sending federation request...`);
+        await federationRequest(peerUrl, data.pubkey);
+        console.log(`\nConnected to ${data.pubkey.slice(0, 8)}... via rendezvous ✅`);
+    }
+    catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+            console.error('✗ Rendezvous lookup timed out');
+        }
+        else {
+            console.error('✗ Failed to accept invite:', err.message);
+        }
+        process.exit(1);
+    }
+}
+/**
  * Connect to a peer by public key using rendezvous server discovery.
  *
  * Usage: ogp federation connect <pubkey>
