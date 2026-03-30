@@ -112,8 +112,9 @@ ogp federation approve <peer-id>
 ogp federation approve <peer-id> --intents "message,agent-comms,project.join,project.contribute,project.query,project.status"
 ```
 
-> **Note:** As of OGP 0.2.7, `federation approve` automatically grants default scopes bidirectionally.
-> Both sides get full scopes in a single handshake — no manual grant step needed.
+> **Note:** As of OGP 0.2.7+, `federation approve` automatically grants default scopes bidirectionally.
+> As of 0.2.19, approval also auto-enables the `general` agent-comms topic so messages work immediately.
+> Blocked messages notify your agent: *"Hey — [peer] tried to message you on topic X but I blocked it. Say the word and I'll enable it."*
 
 ### Grant or update scopes for an existing peer
 ```bash
@@ -142,8 +143,34 @@ ogp federation send <peer-id> <intent> '<json-payload>'
 ```bash
 ogp federation agent <peer-id> <topic> "<message>"
 # Example:
-ogp federation agent giving-produces-microphone-mild.trycloudflare.com:18790 project-coordination "Stan, join Project Synapse: ogp project join synapse 'Project Synapse' --create"
+ogp federation agent giving-produces-microphone-mild.trycloudflare.com:18790 general "Hey, can you check on project synapse?"
 ```
+
+### Manage agent-comms policies (what topics you'll respond to)
+
+Federation scopes and agent-comms policies are **two separate layers**. Approval handles scopes automatically. Agent-comms policies control what your agent actually responds to — `general` is auto-enabled at approval, everything else is `off` by default.
+
+```bash
+# Status page — shows what's allowed, blocked, and what to do about it
+ogp agent-comms policies <peer-id>
+
+# Global view of all peers
+ogp agent-comms policies
+
+# Allow a topic
+ogp agent-comms add-topic <peer-id> <topic> --level summary
+
+# Block a topic
+ogp agent-comms set-topic <peer-id> <topic> off
+
+# Open all topics by default for a peer
+ogp agent-comms set-default <peer-id> summary
+
+# View activity log
+ogp agent-comms activity [peer-id]
+```
+
+Response levels: `full` (full content passed to agent), `summary` (condensed), `escalate` (route to user), `off` (blocked — sender gets a witty non-answer)
 
 ---
 
@@ -169,7 +196,8 @@ Default grant includes all of the above. Customize with `--intents` if needed.
 1. Run: ogp federation invite → get a 6-char code
 2. Share the code with your peer (Telegram, Slack, etc.)
 3. They run: ogp federation accept <code>
-4. Done — no URL, no pubkey, no manual config
+4. Scopes auto-granted + "general" topic auto-enabled ✓
+5. Test: ogp federation agent <peer-id> general "hello"
 ```
 
 ### Old way — manual URL exchange (still works)
@@ -178,9 +206,12 @@ Default grant includes all of the above. Customize with `--intents` if needed.
 2. Check their card: curl -s <url>/.well-known/ogp | python3 -m json.tool
 3. Request federation: ogp federation request <url>
 4. They approve on their side (or you approve if they requested)
-5. Confirm scopes: ogp federation scopes <peer-id>
-6. Test: ogp federation ping <url>
-7. (Optional) Create or join a shared project
+   → Scopes auto-granted + "general" topic auto-enabled ✓
+5. Check agent-comms status: ogp agent-comms policies <peer-id>
+6. Add more topics if needed: ogp agent-comms add-topic <peer-id> <topic>
+7. Test: ogp federation ping <url>
+8. Test agent-comms: ogp federation agent <peer-id> general "hello"
+9. (Optional) Create or join a shared project
 ```
 
 ---
@@ -218,7 +249,8 @@ ogp project query-peer <peer-id> <project-id>
 | `Peer not approved` | Request pending | Check `ogp federation list --status pending` |
 | `400 Bad Request` on push | Peer hasn't granted you scopes | Ask peer to run `ogp federation grant <your-peer-id>` or update to OGP 0.2.7 |
 | `Invalid signature` | Version mismatch on `messageStr` field | Peer needs OGP 0.2.7+ (`npm install -g @dp-pcs/ogp@latest`) |
-| `Send failed` on agent-comms | Scope not granted or topic not allowed | Check `ogp federation scopes <peer-id>` |
+| `Send failed` on agent-comms | Topic blocked on receiver's side | Receiver runs `ogp agent-comms policies <peer-id>` — look for blocked/missing topics |
+| Agent-comms silently ignored | Receiver's default is `off`, topic not allowed | Receiver runs `ogp agent-comms add-topic <your-peer-id> <topic> --level summary` |
 | `ogp: command not found` | Not installed | `npm install -g @dp-pcs/ogp` |
 | Daemon not running | Process died | `ogp start --background` |
 
