@@ -24,11 +24,19 @@ async function detectPublicIp() {
     const data = await res.json();
     return data.ip;
 }
-async function doRegister(config, pubkey, port) {
+async function doRegister(config, pubkey, port, publicUrl) {
+    const body = {
+        pubkey,
+        port,
+        timestamp: Date.now()
+    };
+    if (publicUrl) {
+        body.publicUrl = publicUrl;
+    }
     const res = await fetch(`${config.url}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pubkey, port, timestamp: Date.now() }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(8000)
     });
     if (!res.ok) {
@@ -47,6 +55,8 @@ export async function startRendezvous(config, pubkey, port) {
         return;
     activeConfig = config;
     registeredPubkey = pubkey;
+    // Check for OGP_PUBLIC_URL env var or config.publicUrl
+    const publicUrl = process.env.OGP_PUBLIC_URL || config.publicUrl;
     // Detect public IP (informational — rendezvous server auto-detects from socket)
     let publicIp = 'unknown';
     try {
@@ -57,8 +67,13 @@ export async function startRendezvous(config, pubkey, port) {
     }
     // Initial registration
     try {
-        await doRegister(config, pubkey, port);
-        console.log(`[OGP] Registered with rendezvous at ${config.url} as ${pubkey.slice(0, 8)}... (IP: ${publicIp})`);
+        await doRegister(config, pubkey, port, publicUrl);
+        if (publicUrl) {
+            console.log(`[OGP] Registered with rendezvous at ${config.url} as ${pubkey.slice(0, 8)}... (publicUrl: ${publicUrl})`);
+        }
+        else {
+            console.log(`[OGP] Registered with rendezvous at ${config.url} as ${pubkey.slice(0, 8)}... (IP: ${publicIp})`);
+        }
     }
     catch (err) {
         console.warn(`[OGP] Rendezvous registration failed: ${err.message}`);
@@ -69,7 +84,7 @@ export async function startRendezvous(config, pubkey, port) {
         if (!activeConfig)
             return;
         try {
-            await doRegister(activeConfig, pubkey, port);
+            await doRegister(activeConfig, pubkey, port, publicUrl);
         }
         catch (err) {
             console.warn(`[OGP] Rendezvous heartbeat failed: ${err.message}`);
@@ -102,7 +117,7 @@ export async function stopRendezvous() {
 }
 /**
  * Look up a peer by public key in the rendezvous server.
- * Returns the peer URL (http://ip:port) or null if not found.
+ * Returns the peer URL (http://ip:port or publicUrl) or null if not found.
  */
 export async function lookupPeer(config, pubkey) {
     if (!config.enabled)
@@ -116,7 +131,15 @@ export async function lookupPeer(config, pubkey) {
         if (!res.ok)
             throw new Error(`Rendezvous lookup returned ${res.status}`);
         const data = await res.json();
-        return `http://${data.ip}:${data.port}`;
+        // If publicUrl is present, use it directly
+        if (data.publicUrl) {
+            return data.publicUrl;
+        }
+        // Otherwise, construct from ip and port (legacy behavior)
+        if (data.ip && data.port) {
+            return `http://${data.ip}:${data.port}`;
+        }
+        throw new Error('Invalid response from rendezvous server: missing both publicUrl and ip/port');
     }
     catch (err) {
         console.warn(`[OGP] Rendezvous lookup failed: ${err.message}`);

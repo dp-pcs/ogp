@@ -21,7 +21,7 @@ export declare function startRendezvous(config: RendezvousConfig, pubkey: string
 export declare function stopRendezvous(): Promise<void>;
 /**
  * Look up a peer by public key in the rendezvous server.
- * Returns the peer URL (http://ip:port) or null if not found.
+ * Returns the peer URL (http://ip:port or publicUrl) or null if not found.
  */
 export declare function lookupPeer(config: RendezvousConfig, pubkey: string): Promise<string | null>;
 //# sourceMappingURL=rendezvous.d.ts.map

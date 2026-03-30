@@ -1,5 +1,5 @@
 export declare function federationList(status?: 'pending' | 'approved' | 'rejected'): Promise<void>;
-export declare function federationRequest(peerUrl: string, peerId: string): Promise<void>;
+export declare function federationRequest(peerUrl: string, peerId: string): Promise<boolean>;
 export interface ApproveOptions {
     intents?: string[];
     rate?: string;

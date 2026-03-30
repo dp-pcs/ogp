@@ -34,6 +34,7 @@ export interface AgentCommsConfig {
 export interface RendezvousConfig {
   enabled: boolean;
   url: string;
+  publicUrl?: string;
 }
 
 export interface OGPConfig {

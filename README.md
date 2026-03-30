@@ -364,7 +364,7 @@ All messages are signed with Ed25519 cryptographic signatures to prevent tamperi
 
 Custom intents can be registered with `ogp intent register` (v0.2.0+).
 
-## Key Features (v0.2.11)
+## Key Features (v0.2.17)
 
 ### 1. Scope Negotiation (v0.2.0+)
 

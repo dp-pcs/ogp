@@ -51,7 +51,7 @@ export async function federationRequest(peerUrl, peerId) {
         });
         if (!response.ok) {
             console.error(`Request failed: ${response.status} ${response.statusText}`);
-            return;
+            return false;
         }
         const result = await response.json();
         console.log('✓ Federation request sent');
@@ -78,9 +78,11 @@ export async function federationRequest(peerUrl, peerId) {
             }
         }
         catch { /* non-fatal */ }
+        return true;
     }
     catch (error) {
         console.error('Failed to send request:', error);
+        return false;
     }
 }
 export async function federationApprove(peerId, options = {}) {
@@ -505,8 +507,14 @@ export async function federationAccept(token) {
         const peerUrl = `http://${data.ip}:${data.port}`;
         console.log(`✓ Resolved peer via rendezvous: ${data.pubkey.slice(0, 8)}... at ${peerUrl}`);
         console.log(`Sending federation request...`);
-        await federationRequest(peerUrl, data.pubkey);
-        console.log(`\nConnected to ${data.pubkey.slice(0, 8)}... via rendezvous ✅`);
+        const success = await federationRequest(peerUrl, data.pubkey);
+        if (success) {
+            console.log(`\nConnected to ${data.pubkey.slice(0, 8)}... via rendezvous ✅`);
+        }
+        else {
+            console.error(`\n✗ Failed to connect to ${data.pubkey.slice(0, 8)}...`);
+            process.exit(1);
+        }
     }
     catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
