@@ -1,13 +1,15 @@
 ---
 skill_name: ogp
-version: 2.0.0
+version: 2.1.0
 description: >
   OGP (Open Gateway Protocol) — federated agent communication, peer management,
   and project collaboration across OpenClaw gateways. Use when the user asks to
   establish federation with a peer, send agent-to-agent messages, check peer status,
-  manage federation scopes, or set up cross-gateway project collaboration.
+  manage federation scopes, set up cross-gateway project collaboration, or use the
+  rendezvous/invite flow for zero-config peer discovery.
 trigger: Use when the user asks to federate with a peer, connect to another gateway,
-  send an OGP message, check peer status, grant scopes, or manage OGP federation relationships.
+  send an OGP message, check peer status, grant scopes, manage OGP federation relationships,
+  generate an invite code, or accept a federation invite.
 requires:
   bins:
     - ogp
@@ -41,6 +43,47 @@ If `ogp: command not found`, install it first.
 | Clawporate (David) | david-proctor.gw.clawporate.elelem.expert:3001 | https://david-proctor.gw.clawporate.elelem.expert |
 
 > Peer IDs can change when tunnel URLs rotate. Always verify with `ogp federation list`.
+> **Prefer the invite flow (v0.2.15+)** for new connections — no URL or peer ID needed.
+
+---
+
+## Zero-Config Federation (v0.2.14+) ⭐ PREFERRED
+
+The rendezvous server (`rendezvous.elelem.expert`) enables peer discovery by public key.
+No port forwarding, no tunnel accounts, no manual URL sharing.
+
+### Invite flow (easiest — v0.2.15+)
+
+**To invite a peer (you generate the code):**
+```bash
+ogp federation invite
+# Output: Your invite code: a3f7k2  (expires in 10 minutes)
+# Share this with your peer — they run: ogp federation accept a3f7k2
+```
+
+**To accept a peer's invite:**
+```bash
+ogp federation accept <token>
+# Output: Connected to a3f7k2... via rendezvous ✅
+```
+
+### Connect by public key (v0.2.14+)
+```bash
+ogp federation connect <pubkey>
+# Looks up peer's current IP:port from rendezvous, connects directly
+```
+
+### Enable rendezvous in config
+Add to `~/.ogp/config.json`:
+```json
+{
+  "rendezvous": {
+    "enabled": true,
+    "url": "https://rendezvous.elelem.expert"
+  }
+}
+```
+When enabled, your daemon auto-registers on startup and heartbeats every 30 seconds.
 
 ---
 
@@ -119,8 +162,17 @@ Default grant includes all of the above. Customize with `--intents` if needed.
 
 ---
 
-## Federation Workflow (Full Setup)
+## Federation Workflow
 
+### New way — invite flow (v0.2.15+, recommended)
+```
+1. Run: ogp federation invite → get a 6-char code
+2. Share the code with your peer (Telegram, Slack, etc.)
+3. They run: ogp federation accept <code>
+4. Done — no URL, no pubkey, no manual config
+```
+
+### Old way — manual URL exchange (still works)
 ```
 1. Get peer's gateway URL (they share it with you)
 2. Check their card: curl -s <url>/.well-known/ogp | python3 -m json.tool
@@ -203,4 +255,5 @@ ogp start --background
 - **Scopes are bilateral:** Each side independently grants what the other can call. OGP 0.2.7+ auto-grants defaults on approval.
 - **Project isolation:** Projects are scoped to their member list. Full mesh federation does NOT give all peers access to all projects. A peer only sees projects they are a member of.
 - **Signatures:** All federation messages are signed with Ed25519. Peer's public key is stored in `peers.json` at federation time.
-- **Tunnel URLs rotate:** If using Cloudflare/ngrok tunnels, peer IDs (hostname:port) change when tunnels restart. Re-request federation when this happens.
+- **Tunnel URLs rotate:** If using Cloudflare/ngrok tunnels, peer IDs (hostname:port) change when tunnels restart. Use the invite flow instead to avoid this entirely.
+- **Rendezvous is optional:** Peers with a static IP or existing tunnel continue working unchanged. Rendezvous is an additional discovery path, not a requirement.
