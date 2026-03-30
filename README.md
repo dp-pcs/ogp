@@ -60,7 +60,8 @@ You'll be prompted for:
 - Daemon port (default: 18790)
 - OpenClaw URL (default: http://localhost:18789)
 - OpenClaw API token
-- Your public gateway URL (can update later)
+- Your public gateway URL (can update later, or use rendezvous)
+- Rendezvous configuration (optional, v0.2.14+)
 - Display name and email
 
 ### 2. Start the Daemon
@@ -75,25 +76,99 @@ Or run in the background:
 ogp start --background
 ```
 
-### 3. Expose to the Internet
+### 3. Making Your Gateway Reachable
 
+For OGP federation to work, peers need to be able to reach your gateway over the internet. If you already have a publicly accessible URL (cloud server, VPS, Clawporate gateway), just set it as your `gatewayUrl` in `~/.ogp/config.json` and you're done. Skip to step 4.
+
+If you're a home user behind a router/NAT, you need one of the options below to expose your gateway to the internet.
+
+#### Option 1: Cloudflare Named Tunnel (Recommended — Free)
+
+This is the gold standard for home users. It gives you a permanent, stable URL that never changes and starts automatically on boot once installed as a service.
+
+**Requirements:**
+- Free Cloudflare account
+- A domain on Cloudflare (can be registered or transferred for free on Cloudflare)
+
+**Setup:**
 ```bash
-ogp expose
+# 1. Login to Cloudflare
+cloudflared tunnel login
+
+# 2. Create a tunnel named "ogp"
+cloudflared tunnel create ogp
+
+# 3. Route your domain to the tunnel (replace yourdomain.com)
+cloudflared tunnel route dns ogp ogp.yourdomain.com
+
+# 4. Create config file at ~/.cloudflared/config.yml
+cat > ~/.cloudflared/config.yml <<EOF
+tunnel: <TUNNEL_ID_FROM_STEP_2>
+credentials-file: ~/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: ogp.yourdomain.com
+    service: http://localhost:18790
+  - service: http_status:404
+EOF
+
+# 5. Install as a system service
+cloudflared service install
+
+# 6. Update your OGP config
+ogp stop
+# Edit ~/.ogp/config.json and set "gatewayUrl": "https://ogp.yourdomain.com"
+ogp start --background
 ```
 
-This starts a cloudflared tunnel and displays your public URL. Copy this URL and update your configuration:
+Your URL is now `https://ogp.yourdomain.com` and will persist across restarts.
 
-1. Stop the daemon: `ogp stop`
-2. Edit `~/.ogp/config.json` and update `"gatewayUrl"` with your tunnel URL
-3. Restart: `ogp start --background`
-4. Optionally run tunnel in background: `ogp expose --background`
+#### Option 2: ngrok (Good — Free tier available)
+
+Good fallback if you don't have a domain on Cloudflare. The free tier gives you a stable subdomain that persists across restarts IF you're logged in with an ngrok account.
+
+**Setup:**
+```bash
+# 1. Sign up for free at https://ngrok.com and get your auth token
+
+# 2. Authenticate ngrok
+ngrok config add-authtoken YOUR_AUTH_TOKEN
+
+# 3. Start the tunnel
+ngrok http 18790
+
+# 4. Copy the HTTPS URL (e.g., https://abc123.ngrok-free.app)
+
+# 5. Update your OGP config
+ogp stop
+# Edit ~/.ogp/config.json and set "gatewayUrl": "https://abc123.ngrok-free.app"
+ogp start --background
+```
+
+Your ngrok URL will be stable as long as you're authenticated. You can also run `ngrok http 18790 --log stdout > ngrok.log 2>&1 &` to keep it running in the background.
+
+#### Option 3: Cloudflare Anonymous Tunnel (Quick but Ephemeral)
+
+Good for testing only. No account needed, but your URL changes every time you restart the tunnel, so peers need a new URL each time.
+
+```bash
+cloudflared tunnel --url http://localhost:18790
+```
+
+Copy the displayed URL and update your `gatewayUrl`. **Not recommended for ongoing federation** — use this only for quick tests.
+
+#### Option 4: Port Forwarding
+
+Forward port 18790 on your router to your machine running OGP. Set `gatewayUrl` to `http://YOUR_PUBLIC_IP:18790`.
+
+This works but exposes your home IP address. Most users should prefer the tunnel options above.
 
 ### 4. Share Your URL
 
 Share your gateway URL with peers who want to federate with you. They can discover your public key at:
 
 ```
-https://your-tunnel-url.com/.well-known/ogp
+https://your-gateway-url.com/.well-known/ogp
 ```
 
 ## All Commands
@@ -112,7 +187,7 @@ https://your-tunnel-url.com/.well-known/ogp
 
 | Command | Description |
 |---------|-------------|
-| `ogp expose` | Start cloudflared tunnel in foreground |
+| `ogp expose` | Launch guided tunnel setup wizard (coming soon) or start cloudflared tunnel in foreground |
 | `ogp expose --background` | Run tunnel as background process |
 | `ogp expose --method ngrok` | Use ngrok instead of cloudflared |
 | `ogp expose stop` | Stop the tunnel |
@@ -327,7 +402,7 @@ ogp agent-comms activity stan --last 20
 └─────────────┘         └──────────────┘         └─────────────┘
 ```
 
-1. **Discovery**: Peers discover each other via `/.well-known/ogp` endpoint
+1. **Discovery**: Peers discover each other via `/.well-known/ogp` endpoint or rendezvous server
 2. **Request**: Alice requests federation with Bob's OGP instance
 3. **Approval**: Bob approves (or rejects) the federation request
 4. **Messaging**: Approved peers can send cryptographically signed messages
@@ -335,6 +410,124 @@ ogp agent-comms activity stan --last 20
 6. **Relay**: Valid messages are forwarded to the local OpenClaw agent via webhook
 
 All messages are signed with Ed25519 cryptographic signatures to prevent tampering and impersonation.
+
+## Rendezvous — Zero-Config Peer Discovery (v0.2.14+)
+
+OGP's rendezvous service eliminates the need for manual URL exchange and tunnel configuration. Gateways auto-register by public key, enabling peers to discover and connect to each other with a single command.
+
+### The Problem It Solves
+
+Traditional federation requires both peers to be publicly reachable and manually exchange gateway URLs. With rendezvous:
+- No tunnel setup required (ngrok, Cloudflare Tunnel, port forwarding)
+- No manual URL sharing
+- No URL rotation issues (free ngrok tiers)
+- Automatic peer discovery by public key
+
+### How It Works
+
+1. Your OGP daemon auto-registers with the rendezvous server on startup (`POST /register`) using your public key and connection details
+2. A 30-second heartbeat keeps your registration alive (90-second TTL)
+3. Peers can look you up by public key (`GET /peer/:pubkey`) and connect directly
+4. On shutdown, your daemon auto-deregisters (`DELETE /peer/:pubkey`)
+
+The rendezvous server **never touches message content** — it only stores connection hints (IP + port). All OGP messages remain end-to-end signed between peers.
+
+### Configuration
+
+Add the `rendezvous` block to `~/.ogp/config.json`:
+
+```json
+{
+  "daemonPort": 18790,
+  "openclawUrl": "http://localhost:18789",
+  "openclawToken": "your-token",
+  "rendezvous": {
+    "enabled": true,
+    "url": "https://rendezvous.elelem.expert"
+  }
+}
+```
+
+The setup wizard (`ogp setup`) prompts for rendezvous configuration.
+
+**For cloud/ECS gateways behind load balancers**, set the `OGP_PUBLIC_URL` environment variable to override automatic IP detection:
+
+```bash
+export OGP_PUBLIC_URL=https://your-gateway.example.com
+ogp start
+```
+
+Or add `publicUrl` to the rendezvous config:
+
+```json
+{
+  "rendezvous": {
+    "enabled": true,
+    "url": "https://rendezvous.elelem.expert",
+    "publicUrl": "https://your-gateway.example.com"
+  }
+}
+```
+
+### Federation Invite Flow (v0.2.15+)
+
+The invite flow removes the need to exchange public keys. One command generates a short-lived token; your peer uses it to connect instantly.
+
+**Generate an invite:**
+```bash
+ogp federation invite
+```
+
+Output:
+```
+Your invite code: a3f7k2  (expires in 10 minutes)
+Share this with your peer — they run: ogp federation accept a3f7k2
+```
+
+**Accept an invite:**
+```bash
+ogp federation accept a3f7k2
+```
+
+Output:
+```
+Connected to a3f7k2... via rendezvous ✅
+```
+
+**How invite codes work:**
+- `ogp federation invite` generates a 6-character alphanumeric token stored on the rendezvous server with a 10-minute TTL
+- `ogp federation accept <token>` resolves the token to a pubkey + address and auto-connects
+- Tokens are non-consuming (multiple peers can accept the same invite within the TTL window)
+
+### Direct Connection by Public Key (v0.2.14+)
+
+Connect to any peer registered on rendezvous by their public key:
+
+```bash
+ogp federation connect <pubkey>
+```
+
+This looks up the peer on the rendezvous server and establishes federation directly.
+
+### Privacy & Self-Hosting
+
+**Privacy:**
+- Rendezvous stores only: public key, IP address, port, and last-seen timestamp
+- No message content passes through rendezvous
+- Registrations expire after 90 seconds without heartbeat
+- Open source and self-hostable
+
+**Public instance:** `https://rendezvous.elelem.expert`
+
+**Self-host:**
+```bash
+cd packages/rendezvous
+npm install
+npm run build
+PORT=3000 node dist/index.js
+```
+
+Update your `rendezvous.url` config to point to your instance.
 
 ### Message Format
 
@@ -581,12 +774,29 @@ Configuration is stored in `~/.ogp/config.json`:
   "gatewayUrl": "https://your-public-url.com",
   "displayName": "Your Name",
   "email": "you@example.com",
-  "stateDir": "~/.ogp"
+  "stateDir": "~/.ogp",
+  "rendezvous": {
+    "enabled": true,
+    "url": "https://rendezvous.elelem.expert",
+    "publicUrl": "https://your-gateway.example.com"
+  }
 }
 ```
 
-Additional state files:
-- `~/.ogp/keypair.json` - Ed25519 keypair (keep secure!)
+### Environment Variables
+
+- `OGP_PUBLIC_URL` (v0.2.17+): Override automatic IP detection for rendezvous registration. Use this for cloud/ECS gateways behind load balancers where the detected IP differs from the public endpoint.
+
+  ```bash
+  export OGP_PUBLIC_URL=https://your-gateway.example.com
+  ogp start
+  ```
+
+  Takes precedence over `rendezvous.publicUrl` in config.json.
+
+### State Files
+
+- `~/.ogp/keypair.json` - Ed25519 keypair (keep secure! migrated to macOS Keychain on v0.2.13+)
 - `~/.ogp/peers.json` - Federated peer list with scope grants
 - `~/.ogp/intents.json` - Intent registry (built-in + custom)
 - `~/.ogp/projects.json` - Project contexts and contributions
