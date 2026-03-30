@@ -9,10 +9,30 @@ import { loadConfig } from '../shared/config.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 /**
- * Witty rejection message for "off" policy level.
- * Intentionally does NOT confirm or deny topic existence.
+ * Witty rejection messages for "off" policy level.
+ * Vague by design — does NOT confirm or deny topic existence.
+ * Rotates randomly so repeated rejections don't feel like a pattern.
  */
-const WITTY_REJECTION_MESSAGE = "I appreciate the curiosity, but I'm not in a position to engage on that one. Some things are just between me and my diary. 🔒";
+const WITTY_REJECTION_MESSAGES = [
+    "You already know I'm not going to answer that. Why are you even asking? 🦝",
+    "Bold of you to try. The answer is still no.",
+    "My lips are sealed. Have been for a while. Will continue to be.",
+    "Oh, that topic. Yeah. No.",
+    "I'd respond but I left my ability to discuss that in another life.",
+    "That's a great question for literally anyone else.",
+    "Interesting. Anyway.",
+    "The audacity. Respectfully.",
+    "I'm going to pretend you didn't send that and we'll both move on.",
+    "Not today. Not tomorrow. Genuinely not ever.",
+    "I have been specifically asked not to engage with that. You're welcome.",
+    "Some things are sacred. This is one of them. Goodbye.",
+    "Ask me about literally anything else. Literally.",
+    "I'm not ignoring you. I'm just choosing not to respond. There's a difference.",
+    "Error 418: I'm a teapot and that topic is not tea.",
+];
+function getWittyRejection() {
+    return WITTY_REJECTION_MESSAGES[Math.floor(Math.random() * WITTY_REJECTION_MESSAGES.length)];
+}
 export async function handleMessage(message, signature, messageStr // raw JSON string used to sign — avoids key-order drift
 ) {
     // 1. Verify sender exists and is approved
@@ -133,21 +153,41 @@ async function handleAgentComms(message, displayName) {
         level: policy.level
     });
     // BUILD-101: If policy is 'off', send signed rejection with witty message
-    // Intentionally does NOT confirm or deny topic existence
+    // Intentionally does NOT confirm or deny topic existence to the sender.
+    // But DO notify the local user so they know what happened and can act on it.
     if (policy.level === 'off') {
         const { loadOrGenerateKeyPair } = await import('./keypair.js');
         const { signObject } = await import('../shared/signing.js');
         const keypair = loadOrGenerateKeyPair();
+        const wittyMessage = getWittyRejection();
         const rejection = {
             status: 'rejected',
             reason: 'not-available',
-            message: WITTY_REJECTION_MESSAGE
+            message: wittyMessage
         };
         const { signature } = signObject(rejection, keypair.privateKey);
+        // Notify the local user in plain conversational language so their agent
+        // can relay it naturally — e.g. "Hey, Stanislav tried to message you about X"
+        const preview = messageText.length > 80 ? messageText.slice(0, 80).trimEnd() + '…' : messageText;
+        const previewClause = preview ? ` They said: "${preview}"` : '';
+        await notifyOpenClaw({
+            text: `Hey — ${displayName} just tried to send you a message on topic "${topic}" but I blocked it because that topic isn't on your allow-list.${previewClause} If you want to let them through on "${topic}", just say the word and I'll enable it.`,
+            metadata: {
+                ogp: {
+                    from: message.from,
+                    intent: 'agent-comms',
+                    nonce: message.nonce,
+                    topic,
+                    message: messageText,
+                    blocked: true,
+                    fixHint: `ogp agent-comms add-topic ${message.from} ${topic} --level summary`
+                }
+            }
+        });
         return {
             success: false,
             nonce: message.nonce,
-            error: WITTY_REJECTION_MESSAGE,
+            error: wittyMessage,
             statusCode: 403,
             response: {
                 ...rejection,

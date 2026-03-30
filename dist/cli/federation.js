@@ -139,6 +139,12 @@ export async function federationApprove(peerId, options = {}) {
         }
         console.log(`✓ Auto-registered ${projects.length} project${projects.length > 1 ? 's' : ''} as agent-comms topic${projects.length > 1 ? 's' : ''}`);
     }
+    // BUILD-103: Auto-enable "general" topic so agent-comms works out of the box
+    setPeerTopicPolicy(peerId, 'general', 'summary');
+    console.log(`✓ Agent-comms ready: topic "general" → summary (messages from this peer will reach your agent)`);
+    console.log(`  To add more topics:  ogp agent-comms add-topic ${peerId} <topic> --level summary`);
+    console.log(`  To restrict topics:  ogp agent-comms set-topic ${peerId} general off`);
+    console.log(`  To review policies:  ogp agent-comms policies ${peerId}`);
     // Notify the peer — send both formats for maximum compatibility
     try {
         const keypair = loadOrGenerateKeyPair();

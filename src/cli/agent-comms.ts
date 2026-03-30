@@ -33,30 +33,64 @@ export function showPolicies(peerId?: string): void {
   const config = loadAgentCommsConfig();
 
   if (peerId) {
-    // Show specific peer's effective policies
+    // Show specific peer's effective policies as a readable status page
     const peer = findPeerByIdOrName(peerId);
     if (!peer) {
       console.error(`Peer not found: ${peerId}`);
       return;
     }
 
-    console.log(`\nPOLICIES FOR ${peer.displayName} (${peer.id}):\n`);
+    console.log(`\nAGENT-COMMS STATUS FOR ${peer.displayName} (${peer.id}):\n`);
 
     const effective = getAllEffectivePolicies(peer.id);
     const peerSpecific = peer.responsePolicy || {};
+    const effectiveDefault = peer.defaultLevel || config.defaultLevel;
 
-    if (Object.keys(effective).length === 0) {
-      console.log('  No policies configured (will use default level)');
-    } else {
-      for (const [topic, policy] of Object.entries(effective)) {
-        const source = peerSpecific[topic] ? '(peer-specific)' : '(global)';
-        const notes = policy.notes ? ` - ${policy.notes}` : '';
-        console.log(`  ${topic}: ${policy.level} ${source}${notes}`);
+    // Partition into allowed and blocked
+    const allowed: string[] = [];
+    const blocked: string[] = [];
+
+    for (const [topic, policy] of Object.entries(effective)) {
+      if (policy.level === 'off') {
+        blocked.push(topic);
+      } else {
+        const source = peerSpecific[topic] ? '' : ' (global)';
+        const notes = policy.notes ? ` — ${policy.notes}` : '';
+        allowed.push(`  ✓ ${topic}: ${policy.level}${source}${notes}`);
       }
     }
 
-    const peerDefaultNote = peer.defaultLevel ? ` (peer override: ${peer.defaultLevel})` : '';
-    console.log(`\n  Default level: ${config.defaultLevel}${peerDefaultNote}`);
+    if (allowed.length > 0) {
+      console.log('  ALLOWED TOPICS (messages will reach your agent):');
+      allowed.forEach(l => console.log(l));
+    } else {
+      console.log('  ⚠  No topics currently allowed for this peer.');
+    }
+
+    if (blocked.length > 0) {
+      console.log('\n  BLOCKED TOPICS (messages are rejected silently to sender):');
+      blocked.forEach(t => console.log(`  ✗ ${t}: off`));
+    }
+
+    const defaultIsOff = effectiveDefault === 'off';
+    console.log(`\n  Default for unknown topics: ${effectiveDefault}${defaultIsOff ? ' (anything not listed above is blocked)' : ''}`);
+
+    if (allowed.length === 0 || defaultIsOff) {
+      console.log(`\n  NEXT STEPS:`);
+      if (allowed.length === 0) {
+        console.log(`    Add a topic so messages get through:`);
+        console.log(`    ogp agent-comms add-topic ${peer.id} general --level summary`);
+      }
+      if (defaultIsOff) {
+        console.log(`    Or open all topics by default:`);
+        console.log(`    ogp agent-comms set-default ${peer.id} summary`);
+      }
+    } else {
+      console.log(`\n  Commands:`);
+      console.log(`    Add topic:    ogp agent-comms add-topic ${peer.id} <topic> --level summary`);
+      console.log(`    Block topic:  ogp agent-comms set-topic ${peer.id} <topic> off`);
+      console.log(`    Remove topic: ogp agent-comms remove-topic ${peer.id} <topic>`);
+    }
   } else {
     // Show global policies and summary of per-peer
     console.log('\nGLOBAL POLICIES:\n');
@@ -73,24 +107,29 @@ export function showPolicies(peerId?: string): void {
     console.log(`\n  Default level: ${config.defaultLevel}`);
     console.log(`  Activity logging: ${config.activityLog ? 'enabled' : 'disabled'}`);
 
-    // Show peers with custom policies or custom default levels
+    // Show all approved peers and their comms status
     const peers = listPeers('approved');
-    const peersWithPolicies = peers.filter(p =>
-      (p.responsePolicy && Object.keys(p.responsePolicy).length > 0) || p.defaultLevel
-    );
+    if (peers.length > 0) {
+      console.log('\nAPPROVED PEERS:\n');
+      for (const peer of peers) {
+        const effective = getAllEffectivePolicies(peer.id);
+        const effectiveDefault = peer.defaultLevel || config.defaultLevel;
+        const allowedTopics = Object.entries(effective).filter(([, p]) => p.level !== 'off').map(([t]) => t);
+        const blockedTopics = Object.entries(effective).filter(([, p]) => p.level === 'off').map(([t]) => t);
 
-    if (peersWithPolicies.length > 0) {
-      console.log('\nPEER-SPECIFIC POLICIES:\n');
-      for (const peer of peersWithPolicies) {
-        console.log(`  ${peer.displayName} (${peer.id}):`);
-        if (peer.defaultLevel) {
-          console.log(`    [default]: ${peer.defaultLevel}`);
+        const hasAnyAllowed = allowedTopics.length > 0 || effectiveDefault !== 'off';
+        const statusIcon = hasAnyAllowed ? '✓' : '⚠ ';
+        const statusText = hasAnyAllowed
+          ? allowedTopics.length > 0 ? `topics: ${allowedTopics.join(', ')}` : `default: ${effectiveDefault}`
+          : 'NO TOPICS ALLOWED — messages will be blocked';
+
+        console.log(`  ${statusIcon} ${peer.displayName} (${peer.id})`);
+        console.log(`      ${statusText}`);
+        if (blockedTopics.length > 0) console.log(`      blocked: ${blockedTopics.join(', ')}`);
+        if (!hasAnyAllowed) {
+          console.log(`      → Fix: ogp agent-comms add-topic ${peer.id} general --level summary`);
         }
-        if (peer.responsePolicy) {
-          for (const [topic, policy] of Object.entries(peer.responsePolicy)) {
-            console.log(`    ${topic}: ${policy.level}`);
-          }
-        }
+        console.log('');
       }
     }
   }
