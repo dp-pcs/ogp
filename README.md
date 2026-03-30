@@ -135,6 +135,9 @@ https://your-tunnel-url.com/.well-known/ogp
 | `ogp federation grant <peer-id> [options]` | Update scope grants for a peer |
 | `ogp federation agent <peer-id> <topic> <message>` | Send agent-comms message |
 | `ogp federation ping <peer-url>` | Test connectivity to a peer gateway |
+| `ogp federation invite` | Generate a short-lived invite code (v0.2.15+) |
+| `ogp federation accept <token>` | Accept an invite and auto-connect (v0.2.15+) |
+| `ogp federation connect <pubkey>` | Connect to a peer by public key via rendezvous (v0.2.14+) |
 
 ### Scope Options (v0.2.0)
 
@@ -610,6 +613,7 @@ Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill pr
 - [Federation Flow](./docs/federation-flow.md) - How federation works internally
 - [Scope Negotiation](./docs/scopes.md) - Per-peer scope configuration (v0.2.0)
 - [Agent Communications](./docs/agent-comms.md) - Agent-to-agent messaging (v0.2.0)
+- [Rendezvous & Invite Flow](./docs/rendezvous.md) - Zero-config peer discovery (v0.2.14+)
 - [Protocol Specification](https://github.com/dp-pcs/openclaw-federation) - Full OGP protocol spec
 
 ## Security
