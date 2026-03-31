@@ -137,6 +137,22 @@ export async function projectJoin(
 /**
  * List all projects
  */
+export async function projectRemove(projectId: string): Promise<void> {
+  const { deleteProject, getProject } = await import('../daemon/projects.js');
+  const project = getProject(projectId);
+  if (!project) {
+    console.error(`Project not found: ${projectId}`);
+    process.exit(1);
+  }
+  const deleted = deleteProject(projectId);
+  if (deleted) {
+    console.log(`✓ Removed project: ${projectId} (${project.name})`);
+  } else {
+    console.error(`Failed to remove project: ${projectId}`);
+    process.exit(1);
+  }
+}
+
 export async function projectList(): Promise<void> {
   const projects = listProjects();
 

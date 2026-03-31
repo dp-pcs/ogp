@@ -4,12 +4,12 @@ import fs from 'node:fs';
 import { runSetup } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig, saveConfig } from './shared/config.js';
-import { federationList, federationRequest, federationApprove, federationReject, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect, federationInvite, federationAccept } from './cli/federation.js';
+import { federationList, federationRequest, federationApprove, federationReject, federationRemove, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect, federationInvite, federationAccept } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, showActivity, clearActivity, setDefault, setLogging, setTopic, setPeerDefault } from './cli/agent-comms.js';
 import { registerNewIntent, listRegisteredIntents, removeIntent } from './cli/intent-registry.js';
-import { projectCreate, projectJoin, projectList, projectContribute, projectQuery, projectStatus, projectRequestJoin, projectSendContribution, projectQueryPeer, projectStatusPeer } from './cli/project.js';
+import { projectCreate, projectJoin, projectList, projectRemove, projectContribute, projectQuery, projectStatus, projectRequestJoin, projectSendContribution, projectQueryPeer, projectStatusPeer } from './cli/project.js';
 const program = new Command();
 program
     .name('ogp')
@@ -142,6 +142,13 @@ federation
     .argument('<peer-id>', 'Peer ID')
     .action(async (peerId) => {
     await federationReject(peerId);
+});
+federation
+    .command('remove')
+    .description('Remove a peer from your federation list')
+    .argument('<peer-id>', 'Peer ID to remove')
+    .action(async (peerId) => {
+    await federationRemove(peerId);
 });
 federation
     .command('ping')
@@ -427,6 +434,13 @@ project
     .description('List all local projects')
     .action(async () => {
     await projectList();
+});
+project
+    .command('remove')
+    .description('Remove a local project')
+    .argument('<project-id>', 'Project ID to remove')
+    .action(async (projectId) => {
+    await projectRemove(projectId);
 });
 project
     .command('contribute')

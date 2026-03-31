@@ -10,6 +10,7 @@ import {
   federationRequest,
   federationApprove,
   federationReject,
+  federationRemove,
   federationSend,
   federationShowScopes,
   federationUpdateGrants,
@@ -42,6 +43,7 @@ import {
   projectCreate,
   projectJoin,
   projectList,
+  projectRemove,
   projectContribute,
   projectQuery,
   projectStatus,
@@ -194,6 +196,14 @@ federation
   .argument('<peer-id>', 'Peer ID')
   .action(async (peerId) => {
     await federationReject(peerId);
+  });
+
+federation
+  .command('remove')
+  .description('Remove a peer from your federation list')
+  .argument('<peer-id>', 'Peer ID to remove')
+  .action(async (peerId) => {
+    await federationRemove(peerId);
   });
 
 federation
@@ -504,6 +514,14 @@ project
   .description('List all local projects')
   .action(async () => {
     await projectList();
+  });
+
+project
+  .command('remove')
+  .description('Remove a local project')
+  .argument('<project-id>', 'Project ID to remove')
+  .action(async (projectId) => {
+    await projectRemove(projectId);
   });
 
 project

@@ -26,6 +26,7 @@ export declare function projectJoin(projectId: string, projectName?: string, opt
 /**
  * List all projects
  */
+export declare function projectRemove(projectId: string): Promise<void>;
 export declare function projectList(): Promise<void>;
 /**
  * Contribute to a project topic

@@ -1,4 +1,4 @@
-import { listPeers, getPeer, approvePeer, rejectPeer, updatePeerGrantedScopes } from '../daemon/peers.js';
+import { listPeers, loadPeers, savePeers, getPeer, approvePeer, rejectPeer, updatePeerGrantedScopes } from '../daemon/peers.js';
 import { requireConfig } from '../shared/config.js';
 import { lookupPeer } from '../daemon/rendezvous.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
@@ -199,6 +199,17 @@ export async function federationReject(peerId) {
     catch (error) {
         console.error('Failed to notify peer:', error);
     }
+}
+export async function federationRemove(peerId) {
+    const peers = loadPeers();
+    const peer = peers.find(p => p.id === peerId);
+    if (!peer) {
+        console.error(`Peer not found: ${peerId}`);
+        process.exit(1);
+    }
+    const filtered = peers.filter(p => p.id !== peerId);
+    savePeers(filtered);
+    console.log(`✓ Removed peer: ${peerId} (${peer.displayName})`);
 }
 export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
     const config = requireConfig();
