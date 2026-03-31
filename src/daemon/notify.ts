@@ -9,53 +9,65 @@ export interface NotificationPayload {
 export async function notifyOpenClaw(payload: NotificationPayload): Promise<boolean> {
   const config = requireConfig();
 
-  // Method 1: HTTP via sessions_send (fastest, no CLI spawn, works even when CLI hangs)
-  if (config.openclawToken) {
+  // Method 1: POST /hooks/agent — deliver:true routes the message to the user's last channel
+  // This is the correct OpenClaw webhook ingress for external systems (e.g. OGP daemon).
+  // Requires hooks.enabled=true and hooks.token in openclaw.json.
+  // Falls back to Method 2 if the hooks token is not configured.
+  const hooksToken = (config as any).openclawHooksToken;
+  if (hooksToken && config.openclawUrl) {
     const openclawUrl = config.openclawUrl.replace(/\/$/, '');
     try {
-      // Use node:https directly to support self-signed localhost certs
       const result = await new Promise<boolean>((resolve) => {
-        import('node:https').then(({ request }) => {
-          import('node:url').then(({ URL }) => {
-            const url = new URL(`${openclawUrl}/tools/invoke`);
-            const body = JSON.stringify({
-              tool: 'sessions_send',
-              args: {
-                sessionKey: payload.sessionKey || 'agent:main:main',
-                message: payload.text
-              }
+        import('node:https').then(({ request: httpsRequest }) => {
+          import('node:http').then(({ request: httpRequest }) => {
+            import('node:url').then(({ URL }) => {
+              const url = new URL(`${openclawUrl}/hooks/agent`);
+              const isHttps = url.protocol === 'https:';
+              const body = JSON.stringify({
+                message: payload.text,
+                name: 'OGP',
+                deliver: true,
+                channel: (config as any).notifyChannel || 'last',
+                ...(
+                  (config as any).notifyTarget
+                    ? { to: String((config as any).notifyTarget) }
+                    : {}
+                ),
+              });
+              const reqFn = isHttps ? httpsRequest : httpRequest;
+              const req = (reqFn as typeof httpsRequest)({
+                hostname: url.hostname,
+                port: url.port || (isHttps ? 443 : 80),
+                path: url.pathname,
+                method: 'POST',
+                rejectUnauthorized: false,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${hooksToken}`,
+                  'Content-Length': Buffer.byteLength(body),
+                },
+              }, (res) => {
+                resolve(res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300);
+              });
+              req.on('error', () => resolve(false));
+              req.setTimeout(5000, () => { req.destroy(); resolve(false); });
+              req.write(body);
+              req.end();
             });
-            const req = request({
-              hostname: url.hostname,
-              port: url.port || 443,
-              path: url.pathname,
-              method: 'POST',
-              rejectUnauthorized: false,
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.openclawToken}`,
-                'Content-Length': Buffer.byteLength(body)
-              }
-            }, (res) => {
-              resolve(res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300);
-            });
-            req.on('error', () => resolve(false));
-            req.setTimeout(5000, () => { req.destroy(); resolve(false); });
-            req.write(body);
-            req.end();
           });
         });
       });
       if (result) {
-        console.log('[OGP] Notified OpenClaw via HTTP (sessions_send):', payload.text);
+        console.log('[OGP] Notified OpenClaw via /hooks/agent:', payload.text);
         return true;
       }
+      console.warn('[OGP] /hooks/agent call failed (non-2xx or error), falling back');
     } catch (error) {
-      console.error('[OGP] HTTP sessions_send failed:', error);
+      console.error('[OGP] /hooks/agent failed:', error);
     }
   }
 
-  // Method 2: openclaw system event --mode now (CLI fallback)
+  // Method 2: openclaw system event --mode now (CLI fallback, no channel routing)
   try {
     const { execSync } = await import('node:child_process');
     const escaped = payload.text.replace(/'/g, "'\\''");
