@@ -1,7 +1,7 @@
 ---
 skill_name: ogp-project
-version: 1.0.0
-description: Agent-aware project context skill for OGP with interview, freeform logging, and cross-peer summarization
+version: 1.1.0
+description: Agent-aware project context skill for OGP with interview, freeform logging, and cross-peer summarization (updated for OGP 0.2.24+ peer identity)
 trigger: Use when the user wants to create, manage, log to, or summarize OGP projects. This includes project context interviews, freeform activity logging, and cross-peer collaboration. Also triggers on natural logging phrases like "remember this for project X", "account for this", "make note of", "track this", "jot this down", "save this to", "document this" when a project context is active or named.
 requires:
   bins:
@@ -23,6 +23,8 @@ ogp-install-skills
 ogp setup
 ogp start
 ```
+
+**Note on Peer IDs (OGP 0.2.24+):** Peers are identified by the first 16 characters of their Ed25519 public key (e.g., `302a300506032b65`). This is stable even when their gateway URL changes.
 
 Full documentation: https://github.com/dp-pcs/ogp
 
@@ -322,7 +324,7 @@ Agent runs: ogp project contribute inventory-system decision "Switched from Mong
 User: "What has Alice been working on in the mobile-app project?"
 
 Agent runs:
-1. ogp project query-peer alice:18790 mobile-app --limit 10
+1. ogp project query-peer 9d4e1f... mobile-app --limit 10
 2. ogp project query mobile-app --limit 10 --author alice
 
 Agent: "Alice's recent contributions to mobile-app:
@@ -357,10 +359,10 @@ ogp status
 ```bash
 # Verify peer is approved and has project scope
 ogp federation list --status approved
-ogp federation scopes <peer-id>
+ogp federation scopes 302a300506032b65
 
 # Test basic peer connectivity
-ogp federation send <peer-id> message '{"text":"ping"}'
+ogp federation send 302a300506032b65 message '{"text":"ping"}'
 ```
 
 ### No Context Loaded

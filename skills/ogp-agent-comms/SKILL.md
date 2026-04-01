@@ -1,7 +1,7 @@
 ---
 skill_name: ogp-agent-comms
-version: 0.1.0
-description: Interactive wizard to configure agent-to-agent communication policies
+version: 0.2.0
+description: Interactive wizard to configure agent-to-agent communication policies (updated for OGP 0.2.24+ peer identity)
 trigger: Use when the user wants to configure how their agent responds to incoming agent-comms messages from federated peers
 ---
 ## Prerequisites
@@ -78,9 +78,9 @@ ogp federation list --status approved --json
 Example interaction:
 ```
 Select peers to configure:
-  [x] Stanislav (peer-gateway.trycloudflare.com)
-  [ ] Leonardo (leo-gateway.example.com)
-  [x] Alice (alice.ngrok-free.app)
+  [x] Stanislav (302a300506032b65)
+  [ ] Leonardo (5f8b2c...)
+  [x] Alice (9d4e1f...)
 
 Selected: Stanislav, Alice
 ```
@@ -145,7 +145,7 @@ Shows global defaults and per-peer overrides.
 ### View Peer Policy
 
 ```bash
-ogp agent-comms policies <peer-id>
+ogp agent-comms policies 302a300506032b65
 ```
 
 Shows effective policy for a specific peer (global + overrides).
@@ -197,13 +197,13 @@ ogp agent-comms reset <peer-id>
 ## Policy Inheritance
 
 1. **Global defaults** apply to all peers
-2. **Per-peer policies** override globals for that peer
+2. **Per-peer policies** override globals for that peer  
 3. **Topic-level settings** are the most specific
 
 Example:
 ```
 Global: { "general": "summary", "testing": "full" }
-Stan:   { "memory-management": "full" }
+Stan (302a300506032b65):   { "memory-management": "full" }
 
 Effective for Stan:
   - general: summary (from global)
@@ -217,7 +217,7 @@ Stored in `~/.ogp/peers.json` under each peer:
 
 ```json
 {
-  "id": "stan:18790",
+  "id": "302a300506032b65",
   "displayName": "Stanislav",
   "responsePolicy": {
     "memory-management": {
@@ -294,7 +294,7 @@ Log format:
 ### Trusted Collaborator (Full Access)
 
 ```bash
-ogp agent-comms configure stan \
+ogp agent-comms configure 302a300506032b65 \
   --topics "memory-management,testing,general,code-review" \
   --level full \
   --notes "Trusted peer, full collaboration"
@@ -303,7 +303,7 @@ ogp agent-comms configure stan \
 ### Business Contact (Limited)
 
 ```bash
-ogp agent-comms configure leonardo \
+ogp agent-comms configure 5f8b2c... \
   --topics "general,status-updates" \
   --level summary \
   --notes "Professional contact, keep it high-level"
@@ -341,5 +341,5 @@ ogp agent-comms configure --global \
 
 New peers inherit global defaults. Configure them specifically:
 ```bash
-ogp agent-comms configure <new-peer-id> --topics "..." --level "..."
+ogp agent-comms configure 302a300506032b65 --topics "..." --level "..."
 ```
