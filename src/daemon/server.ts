@@ -100,6 +100,11 @@ export function startServer(config?: OGPConfig, background = false): void {
         console.log(`[OGP] Peer ${peer.displayName} offers intents: ${offeredIntents.join(', ')}`);
       }
 
+      // BUILD-111 CRITICAL FIX: Actually persist the peer to disk!
+      // This was missing - the peer was created but never saved
+      addPeer(peerData);
+      console.log(`[OGP] Peer ${peer.displayName} (${peerIdFromKey}) added to peers.json`);
+
       console.log(`[OGP] Federation request from ${peer.displayName} (${peerIdFromKey})`);
 
       // BUILD-77: Fire immediate OpenClaw notification to agent session
