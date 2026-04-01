@@ -65,10 +65,19 @@ export function startServer(config, background = false) {
                 return res.status(400).json({ error: 'Missing peer or signature' });
             }
             // Derive peer ID from public key (BUILD-111: port-agnostic identity)
-            // Peer ID is first 16 chars of public key - this is their cryptographic identity
+            // NEVER trust sender's peer.id - always use public key prefix
             const peerIdFromKey = peer.publicKey.substring(0, 16);
+            // Check if peer already exists (by public key)
+            const existingPeer = getPeer(peerIdFromKey);
+            if (existingPeer) {
+                return res.status(200).json({
+                    received: true,
+                    status: 'already-pending-or-approved',
+                    peerId: peerIdFromKey
+                });
+            }
             const peerData = {
-                id: peerIdFromKey,
+                id: peerIdFromKey, // Always use derived ID, never sender's
                 displayName: peer.displayName,
                 email: peer.email,
                 gatewayUrl: peer.gatewayUrl,
