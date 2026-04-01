@@ -1,6 +1,6 @@
 ---
 skill_name: ogp
-version: 2.1.0
+version: 2.2.0
 description: >
   OGP (Open Gateway Protocol) — federated agent communication, peer management,
   and project collaboration across OpenClaw gateways. Use when the user asks to
@@ -35,15 +35,14 @@ If `ogp: command not found`, install it first.
 
 ---
 
-## Known Peers
+## Known Peers (OGP 0.2.24+)
 
-| Name | Peer ID | Gateway URL |
-|------|---------|-------------|
-| Stanislav | giving-produces-microphone-mild.trycloudflare.com:18790 | https://giving-produces-microphone-mild.trycloudflare.com |
-| Clawporate (David) | david-proctor.gw.clawporate.elelem.expert:3001 | https://david-proctor.gw.clawporate.elelem.expert |
+| Peer ID | Name | Gateway URL |
+|---------|------|-------------|
+| `302a300506032b65` | Stanislav | Dynamic — use invite flow |
+| `738064beab1ef8eb` | Clawporate (David) | https://david-proctor.gw.clawporate.elelem.expert |
 
-> Peer IDs can change when tunnel URLs rotate. Always verify with `ogp federation list`.
-> **Prefer the invite flow (v0.2.15+)** for new connections — no URL or peer ID needed.
+> **Peer IDs are public key prefixes (first 16 chars).** They never change, even when tunnel URLs rotate. Gateway URL is just the address — the public key is the identity.
 
 ---
 
@@ -105,16 +104,15 @@ ogp federation request https://giving-produces-microphone-mild.trycloudflare.com
 
 ### Approve an inbound federation request
 ```bash
-# Auto-grants default scopes (message, agent-comms, project.*)
+# Auto-grants scopes that mirror peer's offered intents (symmetric federation)
 ogp federation approve <peer-id>
 
-# Or approve with specific custom scopes:
+# Or approve with specific custom scopes (asymmetric):
 ogp federation approve <peer-id> --intents "message,agent-comms,project.join,project.contribute,project.query,project.status"
 ```
 
-> **Note:** As of OGP 0.2.7+, `federation approve` automatically grants default scopes bidirectionally.
-> As of 0.2.19, approval also auto-enables the `general` agent-comms topic so messages work immediately.
-> Blocked messages notify your agent: *"Hey — [peer] tried to message you on topic X but I blocked it. Say the word and I'll enable it."*
+> **Note (OGP 0.2.24+):** Peer IDs are now public key prefixes (e.g., `302a300506032b65`). 
+> **Intent Negotiation:** Approval automatically mirrors the intents the peer offered, creating symmetric capabilities by default. Both sides can call the same intents on each other.
 
 ### Grant or update scopes for an existing peer
 ```bash
@@ -284,8 +282,9 @@ ogp start --background
 
 ## Design Notes
 
-- **Scopes are bilateral:** Each side independently grants what the other can call. OGP 0.2.7+ auto-grants defaults on approval.
+- **Peer Identity (OGP 0.2.24+):** Peers are identified by the first 16 characters of their Ed25519 public key (e.g., `302a300506032b65`). This is stable even when tunnel URLs rotate — the public key is the identity, the URL is just the address.
+- **Intent Negotiation (OGP 0.2.24+):** Federation requests include `offeredIntents`. Approval automatically mirrors those intents back to the requester, creating symmetric capabilities by default.
+- **Scopes are bilateral:** Each side independently grants what the other can call. OGP 0.2.24+ auto-mirrors offered intents on approval.
 - **Project isolation:** Projects are scoped to their member list. Full mesh federation does NOT give all peers access to all projects. A peer only sees projects they are a member of.
 - **Signatures:** All federation messages are signed with Ed25519. Peer's public key is stored in `peers.json` at federation time.
-- **Tunnel URLs rotate:** If using Cloudflare/ngrok tunnels, peer IDs (hostname:port) change when tunnels restart. Use the invite flow instead to avoid this entirely.
 - **Rendezvous is optional:** Peers with a static IP or existing tunnel continue working unchanged. Rendezvous is an additional discovery path, not a requirement.
