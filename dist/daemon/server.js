@@ -7,7 +7,7 @@ const _require = createRequire(import.meta.url);
 const OGP_VERSION = _require('../../package.json').version;
 import { requireConfig, loadConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
-import { getPeer, approvePeer, listPeers, updatePeer } from './peers.js';
+import { addPeer, getPeer, approvePeer, listPeers, updatePeer } from './peers.js';
 import { handleMessage } from './message-handler.js';
 import { notifyOpenClaw } from './notify.js';
 import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
@@ -82,6 +82,10 @@ export function startServer(config, background = false) {
                 peerData.offeredIntents = offeredIntents;
                 console.log(`[OGP] Peer ${peer.displayName} offers intents: ${offeredIntents.join(', ')}`);
             }
+            // BUILD-111 CRITICAL FIX: Actually persist the peer to disk!
+            // This was missing - the peer was created but never saved
+            addPeer(peerData);
+            console.log(`[OGP] Peer ${peer.displayName} (${peerIdFromKey}) added to peers.json`);
             console.log(`[OGP] Federation request from ${peer.displayName} (${peerIdFromKey})`);
             // BUILD-77: Fire immediate OpenClaw notification to agent session
             const offeredIntentsList = peerData.offeredIntents ? peerData.offeredIntents.join(', ') : 'message, agent-comms, project.* (defaults)';
