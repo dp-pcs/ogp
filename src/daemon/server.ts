@@ -79,8 +79,12 @@ export function startServer(config?: OGPConfig, background = false): void {
         return res.status(400).json({ error: 'Missing peer or signature' });
       }
 
+      // Derive peer ID from public key (BUILD-111: port-agnostic identity)
+      // Peer ID is first 16 chars of public key - this is their cryptographic identity
+      const peerIdFromKey = peer.publicKey.substring(0, 16);
+      
       const peerData: Peer = {
-        id: peer.id,
+        id: peerIdFromKey,
         displayName: peer.displayName,
         email: peer.email,
         gatewayUrl: peer.gatewayUrl,
@@ -89,17 +93,23 @@ export function startServer(config?: OGPConfig, background = false): void {
         requestedAt: new Date().toISOString()
       };
 
-      addPeer(peerData);
+      // Store offered intents if provided (BUILD-110: intent negotiation)
+      const offeredIntents = req.body.offeredIntents as string[] | undefined;
+      if (offeredIntents && offeredIntents.length > 0) {
+        peerData.offeredIntents = offeredIntents;
+        console.log(`[OGP] Peer ${peer.displayName} offers intents: ${offeredIntents.join(', ')}`);
+      }
 
-      console.log(`[OGP] Federation request from ${peer.displayName} (${peer.id})`);
+      console.log(`[OGP] Federation request from ${peer.displayName} (${peerIdFromKey})`);
 
       // BUILD-77: Fire immediate OpenClaw notification to agent session
-      const notificationText = `[OGP Federation Request] ${peer.displayName} (${peer.id}) requests federation approval\n` +
+      const offeredIntentsList = peerData.offeredIntents ? peerData.offeredIntents.join(', ') : 'message, agent-comms, project.* (defaults)';
+      const notificationText = `[OGP Federation Request] ${peer.displayName} (${peerIdFromKey}) requests federation approval\n` +
         `Gateway: ${peer.gatewayUrl}\n` +
         `Email: ${peer.email}\n` +
         `Type: Bidirectional (two-way) federation\n` +
-        `Scopes: Pending negotiation during approval\n` +
-        `Action: Review and approve/reject using: ogp federation approve ${peer.id}`;
+        `Intents Offered: ${offeredIntentsList}\n` +
+        `Action: Review and approve/reject using: ogp federation approve ${peerIdFromKey}`;
 
       // Send notification with metadata for agent processing
       const notificationPayload = {
@@ -116,7 +126,7 @@ export function startServer(config?: OGPConfig, background = false): void {
             },
             requestedAt: peerData.requestedAt,
             federationType: 'bidirectional',
-            scopeStatus: 'pending_negotiation',
+            offeredIntents: peerData.offeredIntents || ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'],
             approvalCommand: `ogp federation approve ${peer.id}`
           }
         }
@@ -166,16 +176,23 @@ export function startServer(config?: OGPConfig, background = false): void {
       const scopeGrants = body.scopeGrants as ScopeBundle | undefined;
       const protocolVersion = body.protocolVersion || (scopeGrants ? '0.2.0' : '0.1.0');
 
+      // Derive peer ID from public key (BUILD-111: port-agnostic identity)
+      const peerIdFromKey = fromPublicKey ? fromPublicKey.substring(0, 16) : (peerId || fromGatewayId);
+
       // Find the peer to approve — try multiple strategies
       let peer = null;
 
-      if (peerId) peer = getPeer(peerId);
-      if (!peer && fromGatewayId) peer = getPeer(fromGatewayId);
+      if (peerIdFromKey) peer = getPeer(peerIdFromKey);
       if (!peer && fromGatewayUrl) {
         const allPeers = listPeers();
         peer = allPeers.find((p: Peer) => p.gatewayUrl === fromGatewayUrl) || null;
       }
-      // Last resort: approve any pending peer
+      // Last resort: match by public key prefix
+      if (!peer && fromPublicKey) {
+        const allPeers = listPeers();
+        peer = allPeers.find((p: Peer) => p.publicKey.startsWith(fromPublicKey.substring(0, 16))) || null;
+      }
+      // Final fallback: approve any pending peer
       if (!peer) {
         const allPeers = listPeers();
         peer = allPeers.find((p: Peer) => p.status === 'pending') || null;

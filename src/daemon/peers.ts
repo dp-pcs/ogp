@@ -26,6 +26,7 @@ export interface Peer {
   protocolVersion?: string;          // "0.1.0" or "0.2.0"
   grantedScopes?: ScopeBundle;       // what I grant TO this peer
   receivedScopes?: ScopeBundle;      // what this peer grants TO me
+  offeredIntents?: string[];         // BUILD-110: intents offered by peer in request
   // Agent-comms response policy
   responsePolicy?: ResponsePolicy;   // how my agent responds to this peer
   defaultLevel?: ResponseLevel;      // per-peer default for unknown topics
@@ -60,7 +61,31 @@ export function addPeer(peer: Peer): void {
 
 export function getPeer(peerId: string): Peer | null {
   const peers = loadPeers();
-  return peers.find(p => p.id === peerId) || null;
+  // Try exact match first
+  let peer = peers.find(p => p.id === peerId) || null;
+  // If not found, try matching by public key prefix (BUILD-111)
+  if (!peer && peerId.length >= 16) {
+    peer = peers.find(p => p.publicKey && p.publicKey.startsWith(peerId.substring(0, 16))) || null;
+  }
+  return peer;
+}
+
+// BUILD-111: Find peer by gateway URL (for port-agnostic lookups)
+export function getPeerByUrl(gatewayUrl: string): Peer | null {
+  const peers = loadPeers();
+  return peers.find(p => p.gatewayUrl === gatewayUrl) || null;
+}
+
+// BUILD-111: Find peer by public key (full or prefix)
+export function getPeerByPublicKey(publicKey: string): Peer | null {
+  const peers = loadPeers();
+  // Try exact match first
+  let peer = peers.find(p => p.publicKey === publicKey) || null;
+  // If not found, try prefix match
+  if (!peer && publicKey.length >= 16) {
+    peer = peers.find(p => p.publicKey && p.publicKey.startsWith(publicKey.substring(0, 16))) || null;
+  }
+  return peer;
 }
 
 export function approvePeer(peerId: string): boolean {

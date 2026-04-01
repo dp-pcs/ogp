@@ -6,7 +6,7 @@
  * Layer 2: Peer Negotiation - What I WILL grant YOU
  * Layer 3: Runtime Enforcement - Is THIS request within YOUR granted scope (doorman)
  */
-import { getPeer } from './peers.js';
+import { getPeer, getPeerByPublicKey } from './peers.js';
 import { DEFAULT_V1_SCOPES, DEFAULT_RATE_LIMIT, findScopeGrant, scopeCoversIntent } from './scopes.js';
 // In-memory rate limit tracking
 // Key format: "peerId:intent"
@@ -52,8 +52,11 @@ function cleanupExpiredEntries() {
  * @returns DoormanResult indicating if request is allowed
  */
 export function checkAccess(peerId, intent, payload) {
-    // 1. Get peer and verify approved
-    const peer = getPeer(peerId);
+    // BUILD-111: Check by public key prefix if peerId looks like one
+    let peer = getPeer(peerId);
+    if (!peer && peerId.length >= 16) {
+        peer = getPeerByPublicKey(peerId);
+    }
     if (!peer) {
         return {
             allowed: false,

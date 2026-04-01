@@ -14,6 +14,7 @@ export interface Peer {
     protocolVersion?: string;
     grantedScopes?: ScopeBundle;
     receivedScopes?: ScopeBundle;
+    offeredIntents?: string[];
     responsePolicy?: ResponsePolicy;
     defaultLevel?: ResponseLevel;
 }
@@ -21,6 +22,8 @@ export declare function loadPeers(): Peer[];
 export declare function savePeers(peers: Peer[]): void;
 export declare function addPeer(peer: Peer): void;
 export declare function getPeer(peerId: string): Peer | null;
+export declare function getPeerByUrl(gatewayUrl: string): Peer | null;
+export declare function getPeerByPublicKey(publicKey: string): Peer | null;
 export declare function approvePeer(peerId: string): boolean;
 export declare function rejectPeer(peerId: string): boolean;
 export declare function listPeers(status?: 'pending' | 'approved' | 'rejected'): Peer[];

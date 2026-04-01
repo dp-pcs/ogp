@@ -7,7 +7,7 @@
  * Layer 3: Runtime Enforcement - Is THIS request within YOUR granted scope (doorman)
  */
 
-import { getPeer, type Peer } from './peers.js';
+import { getPeer, getPeerByPublicKey, type Peer } from './peers.js';
 import {
   type ScopeBundle,
   type ScopeGrant,
@@ -83,8 +83,12 @@ export function checkAccess(
   intent: string,
   payload?: { topic?: string }
 ): DoormanResult {
-  // 1. Get peer and verify approved
-  const peer = getPeer(peerId);
+  // BUILD-111: Check by public key prefix if peerId looks like one
+  let peer = getPeer(peerId);
+  if (!peer && peerId.length >= 16) {
+    peer = getPeerByPublicKey(peerId);
+  }
+  
   if (!peer) {
     return {
       allowed: false,

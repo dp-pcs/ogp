@@ -27,7 +27,29 @@ export function addPeer(peer) {
 }
 export function getPeer(peerId) {
     const peers = loadPeers();
-    return peers.find(p => p.id === peerId) || null;
+    // Try exact match first
+    let peer = peers.find(p => p.id === peerId) || null;
+    // If not found, try matching by public key prefix (BUILD-111)
+    if (!peer && peerId.length >= 16) {
+        peer = peers.find(p => p.publicKey && p.publicKey.startsWith(peerId.substring(0, 16))) || null;
+    }
+    return peer;
+}
+// BUILD-111: Find peer by gateway URL (for port-agnostic lookups)
+export function getPeerByUrl(gatewayUrl) {
+    const peers = loadPeers();
+    return peers.find(p => p.gatewayUrl === gatewayUrl) || null;
+}
+// BUILD-111: Find peer by public key (full or prefix)
+export function getPeerByPublicKey(publicKey) {
+    const peers = loadPeers();
+    // Try exact match first
+    let peer = peers.find(p => p.publicKey === publicKey) || null;
+    // If not found, try prefix match
+    if (!peer && publicKey.length >= 16) {
+        peer = peers.find(p => p.publicKey && p.publicKey.startsWith(publicKey.substring(0, 16))) || null;
+    }
+    return peer;
 }
 export function approvePeer(peerId) {
     const peers = loadPeers();

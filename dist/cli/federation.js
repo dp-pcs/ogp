@@ -5,6 +5,7 @@ import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/ke
 import { signObject } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
 import { createScopeBundle, createScopeGrant, parseRateLimit, formatRateLimit, DEFAULT_RATE_LIMIT } from '../daemon/scopes.js';
+import { loadIntents } from '../daemon/intent-registry.js';
 export async function federationList(status) {
     const peers = listPeers(status);
     if (peers.length === 0) {
@@ -23,17 +24,12 @@ export async function federationList(status) {
 }
 export async function federationRequest(peerUrl, peerId) {
     const config = requireConfig();
-    // Build our peer info
-    const ourPeerInfo = {
-        id: peerId,
-        displayName: config.displayName,
-        email: config.email,
-        gatewayUrl: config.gatewayUrl,
-        publicKey: getPublicKey()
-    };
     const keypair = loadOrGenerateKeyPair();
+    // BUILD-111: Use public key prefix as peer ID (port-agnostic identity)
+    const ourPeerId = keypair.publicKey.substring(0, 16);
+    // Build our peer info
     const peer = {
-        id: `${new URL(config.gatewayUrl).hostname}:${config.daemonPort}`,
+        id: ourPeerId, // Public key prefix, not hostname:port
         displayName: config.displayName,
         email: config.email,
         gatewayUrl: config.gatewayUrl,
@@ -41,7 +37,13 @@ export async function federationRequest(peerUrl, peerId) {
     };
     const { sign } = await import('../shared/signing.js');
     const signature = sign(JSON.stringify(peer), keypair.privateKey);
-    const requestBody = { peer, signature };
+    // Fetch our capabilities to include in the request (BUILD-110: intent negotiation)
+    let ourIntents = loadIntents().map((i) => i.name);
+    if (ourIntents.length === 0) {
+        // Fallback to default intents if none registered
+        ourIntents = ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'];
+    }
+    const requestBody = { peer, signature, offeredIntents: ourIntents };
     // Send request
     try {
         const response = await fetch(`${peerUrl}/federation/request`, {
@@ -95,12 +97,20 @@ export async function federationApprove(peerId, options = {}) {
         console.log(`Peer ${peerId} is already approved.`);
         return;
     }
-    // BUILD-99/100: Default to full standard scopes if no intents specified
+    // BUILD-110: Mirror peer's offered intents by default, with user confirmation
     const DEFAULT_INTENTS = ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'];
+    // If peer offered intents, use those as default (for symmetry)
+    const peerOfferedIntents = peer.offeredIntents;
     if (!options.intents || options.intents.length === 0) {
-        options.intents = DEFAULT_INTENTS;
-        console.log(`ℹ Auto-granting default scopes: ${DEFAULT_INTENTS.join(', ')}`);
-        console.log(`  (Use --intents to specify custom scopes)`);
+        if (peerOfferedIntents && peerOfferedIntents.length > 0) {
+            options.intents = peerOfferedIntents;
+            console.log(`ℹ Auto-granting peer's offered intents: ${options.intents.join(', ')}`);
+        }
+        else {
+            options.intents = DEFAULT_INTENTS;
+            console.log(`ℹ Peer offered no intents; auto-granting defaults: ${options.intents.join(', ')}`);
+        }
+        console.log(`  (Use --intents to customize or override)`);
     }
     // Build scope grants if provided
     let scopeGrants;
@@ -224,7 +234,8 @@ export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
     }
     const payload = JSON.parse(payloadJson);
     const keypair = loadOrGenerateKeyPair();
-    const ourId = `${new URL(config.gatewayUrl).hostname}:${config.daemonPort}`;
+    // BUILD-111: Use public key prefix as our ID (not hostname:port)
+    const ourId = keypair.publicKey.substring(0, 16);
     const message = {
         intent,
         from: ourId,
@@ -376,7 +387,8 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
         return;
     }
     const keypair = loadOrGenerateKeyPair();
-    const ourId = `${new URL(config.gatewayUrl).hostname}:${config.daemonPort}`;
+    // BUILD-111: Use public key prefix as our ID (not hostname:port)
+    const ourId = keypair.publicKey.substring(0, 16);
     const nonce = crypto.randomUUID();
     // Build replyTo URL if we want to receive callbacks
     const replyTo = options.waitForReply

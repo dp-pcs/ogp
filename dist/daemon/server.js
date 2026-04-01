@@ -7,7 +7,7 @@ const _require = createRequire(import.meta.url);
 const OGP_VERSION = _require('../../package.json').version;
 import { requireConfig, loadConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
-import { addPeer, getPeer, approvePeer, listPeers, updatePeer } from './peers.js';
+import { getPeer, approvePeer, listPeers, updatePeer } from './peers.js';
 import { handleMessage } from './message-handler.js';
 import { notifyOpenClaw } from './notify.js';
 import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
@@ -64,8 +64,11 @@ export function startServer(config, background = false) {
             if (!peer || !signature) {
                 return res.status(400).json({ error: 'Missing peer or signature' });
             }
+            // Derive peer ID from public key (BUILD-111: port-agnostic identity)
+            // Peer ID is first 16 chars of public key - this is their cryptographic identity
+            const peerIdFromKey = peer.publicKey.substring(0, 16);
             const peerData = {
-                id: peer.id,
+                id: peerIdFromKey,
                 displayName: peer.displayName,
                 email: peer.email,
                 gatewayUrl: peer.gatewayUrl,
@@ -73,15 +76,21 @@ export function startServer(config, background = false) {
                 status: 'pending',
                 requestedAt: new Date().toISOString()
             };
-            addPeer(peerData);
-            console.log(`[OGP] Federation request from ${peer.displayName} (${peer.id})`);
+            // Store offered intents if provided (BUILD-110: intent negotiation)
+            const offeredIntents = req.body.offeredIntents;
+            if (offeredIntents && offeredIntents.length > 0) {
+                peerData.offeredIntents = offeredIntents;
+                console.log(`[OGP] Peer ${peer.displayName} offers intents: ${offeredIntents.join(', ')}`);
+            }
+            console.log(`[OGP] Federation request from ${peer.displayName} (${peerIdFromKey})`);
             // BUILD-77: Fire immediate OpenClaw notification to agent session
-            const notificationText = `[OGP Federation Request] ${peer.displayName} (${peer.id}) requests federation approval\n` +
+            const offeredIntentsList = peerData.offeredIntents ? peerData.offeredIntents.join(', ') : 'message, agent-comms, project.* (defaults)';
+            const notificationText = `[OGP Federation Request] ${peer.displayName} (${peerIdFromKey}) requests federation approval\n` +
                 `Gateway: ${peer.gatewayUrl}\n` +
                 `Email: ${peer.email}\n` +
                 `Type: Bidirectional (two-way) federation\n` +
-                `Scopes: Pending negotiation during approval\n` +
-                `Action: Review and approve/reject using: ogp federation approve ${peer.id}`;
+                `Intents Offered: ${offeredIntentsList}\n` +
+                `Action: Review and approve/reject using: ogp federation approve ${peerIdFromKey}`;
             // Send notification with metadata for agent processing
             const notificationPayload = {
                 text: notificationText,
@@ -97,7 +106,7 @@ export function startServer(config, background = false) {
                         },
                         requestedAt: peerData.requestedAt,
                         federationType: 'bidirectional',
-                        scopeStatus: 'pending_negotiation',
+                        offeredIntents: peerData.offeredIntents || ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'],
                         approvalCommand: `ogp federation approve ${peer.id}`
                     }
                 }
@@ -143,17 +152,22 @@ export function startServer(config, background = false) {
             // v0.2.0: Scope grants from the approving peer
             const scopeGrants = body.scopeGrants;
             const protocolVersion = body.protocolVersion || (scopeGrants ? '0.2.0' : '0.1.0');
+            // Derive peer ID from public key (BUILD-111: port-agnostic identity)
+            const peerIdFromKey = fromPublicKey ? fromPublicKey.substring(0, 16) : (peerId || fromGatewayId);
             // Find the peer to approve — try multiple strategies
             let peer = null;
-            if (peerId)
-                peer = getPeer(peerId);
-            if (!peer && fromGatewayId)
-                peer = getPeer(fromGatewayId);
+            if (peerIdFromKey)
+                peer = getPeer(peerIdFromKey);
             if (!peer && fromGatewayUrl) {
                 const allPeers = listPeers();
                 peer = allPeers.find((p) => p.gatewayUrl === fromGatewayUrl) || null;
             }
-            // Last resort: approve any pending peer
+            // Last resort: match by public key prefix
+            if (!peer && fromPublicKey) {
+                const allPeers = listPeers();
+                peer = allPeers.find((p) => p.publicKey.startsWith(fromPublicKey.substring(0, 16))) || null;
+            }
+            // Final fallback: approve any pending peer
             if (!peer) {
                 const allPeers = listPeers();
                 peer = allPeers.find((p) => p.status === 'pending') || null;
