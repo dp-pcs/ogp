@@ -30,6 +30,7 @@ Host: peer.example.com
   "email": "alice@example.com",
   "gatewayUrl": "https://peer.example.com",
   "publicKey": "302a300506032b6570032100abc123...",
+  "agentId": "main",
   "capabilities": {
     "intents": ["message", "task-request", "status-update", "agent-comms"],
     "features": ["scope-negotiation", "reply-callback", "project-intent"]
@@ -48,6 +49,7 @@ This endpoint:
 - Lists federation endpoints
 - Advertises gateway capabilities (v0.2.0+)
 - Indicates supported intents and features
+- Includes `agentId` (v0.2.28+) - identifies which OpenClaw agent owns this gateway
 
 ## Federation Request
 

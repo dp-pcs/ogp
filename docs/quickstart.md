@@ -28,7 +28,19 @@ Run the interactive setup:
 ogp setup
 ```
 
-Answer the prompts:
+The wizard will auto-discover agents from your OpenClaw configuration and prompt you to select which agent owns this gateway:
+
+```
+=== OGP Setup ===
+
+Available agents:
+  1. 🦝 Junior (main)
+  2. ✍️ Scribe (scribe)
+
+Which agent owns this gateway? (number or ID) [1]:
+```
+
+Then answer the remaining prompts:
 
 ```
 Daemon port [18790]: <enter>

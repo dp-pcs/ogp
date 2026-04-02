@@ -57,6 +57,7 @@ ogp setup
 ```
 
 You'll be prompted for:
+- **Agent ID** - Which OpenClaw agent owns this gateway (auto-discovers available agents from your OpenClaw config)
 - Daemon port (default: 18790)
 - OpenClaw URL (default: http://localhost:18789)
 - OpenClaw API token
@@ -206,7 +207,7 @@ https://your-gateway-url.com/.well-known/ogp
 | `ogp federation list` | List all peers |
 | `ogp federation list --status pending` | List pending federation requests |
 | `ogp federation list --status approved` | List approved peers |
-| `ogp federation request <url> [peer-id]` | Request federation (peer-id auto-resolves if omitted) |
+| `ogp federation request <url> [alias]` | Request federation (alias auto-resolves if omitted) |
 | `ogp federation approve <peer-id> [options]` | Approve with optional scope grants |
 | `ogp federation reject <peer-id>` | Reject a federation request |
 | `ogp federation send <peer-id> <intent> <json>` | Send a message to an approved peer |
@@ -265,29 +266,29 @@ When approving or granting scopes:
 ### Federation Examples
 
 ```bash
-# Request federation (peer-id auto-resolves from /.well-known/ogp)
+# Request federation (alias auto-resolves from /.well-known/ogp)
 ogp federation request https://peer.example.com
 
-# Or specify custom peer-id
-ogp federation request https://peer.example.com peer-alice
+# Or specify a custom alias for easier reference
+ogp federation request https://peer.example.com --alias big-papa
 
 # Check pending requests
 ogp federation list --status pending
 
 # Approve a peer (v0.1 mode - no scope restrictions)
-ogp federation approve peer-alice
+ogp federation approve alice
 
 # Approve with scope grants (v0.2.0+)
-ogp federation approve peer-alice \
+ogp federation approve alice \
   --intents message,agent-comms \
   --rate 100/3600 \
   --topics memory-management,task-delegation
 
 # View peer scopes
-ogp federation scopes peer-alice
+ogp federation scopes alice
 
 # Update grants for an existing peer
-ogp federation grant peer-alice \
+ogp federation grant alice \
   --intents agent-comms \
   --topics project-planning
 
@@ -295,25 +296,25 @@ ogp federation grant peer-alice \
 ogp federation ping https://peer.example.com
 
 # Send a simple message
-ogp federation send peer-alice message '{"text":"Hello!"}'
+ogp federation send alice message '{"text":"Hello!"}'
 
 # Send agent-comms (v0.2.0+)
-ogp federation agent peer-alice memory-management "How do you persist context?"
+ogp federation agent alice memory-management "How do you persist context?"
 
 # Send agent-comms with priority
-ogp federation agent peer-alice task-delegation "Schedule standup" --priority high
+ogp federation agent alice task-delegation "Schedule standup" --priority high
 
 # Send agent-comms and wait for reply
-ogp federation agent peer-alice queries "What's the status?" --wait --timeout 60000
+ogp federation agent alice queries "What's the status?" --wait --timeout 60000
 
 # Send a task request
-ogp federation send peer-alice task-request '{
+ogp federation send alice task-request '{
   "taskType": "analysis",
   "description": "Analyze recent logs"
 }'
 
 # Send a status update
-ogp federation send peer-alice status-update '{
+ogp federation send alice status-update '{
   "status": "completed",
   "message": "Task finished"
 }'
@@ -775,6 +776,7 @@ Configuration is stored in `~/.ogp/config.json`:
   "displayName": "Your Name",
   "email": "you@example.com",
   "stateDir": "~/.ogp",
+  "agentId": "main",
   "notifyTarget": "telegram:123456789",
   "notifyTargets": {
     "main": "telegram:123456789",
@@ -788,17 +790,69 @@ Configuration is stored in `~/.ogp/config.json`:
 }
 ```
 
+### Agent ID (v0.2.28+)
+
+The `agentId` field identifies which OpenClaw agent owns this OGP gateway. This is important for:
+
+- **Federation ownership**: Messages sent from this gateway are attributed to the specified agent
+- **Routing context**: Incoming federation requests include the agent ID for proper routing
+- **Multi-agent setups**: When running multiple agents (main, scribe, optimus, etc.), each can have its own OGP configuration
+
+When you run `ogp setup`, the wizard auto-discovers agents from your OpenClaw configuration and presents a list to choose from:
+
+```
+Available agents:
+  1. 🦝 Junior (main)
+  2. ✍️ Scribe (scribe)
+  3. ⚡ Optimus (optimus)
+
+Which agent owns this gateway? (number or ID) [1]:
+```
+
+You can also specify a custom agent ID if needed.
+```
+
 ### Notification Routing (v0.2.28+)
 
-The `notifyTargets` field enables per-agent notification routing. When OGP sends notifications to your OpenClaw instance, it can target specific agents based on the message context.
+The `notifyTargets` field enables per-agent notification routing. When OGP sends notifications to your OpenClaw instance, it routes to specific agents based on the message context.
 
+**Configuration fields:**
 - **`notifyTarget`** (legacy, string): Single notification target for all messages. Maintained for backward compatibility.
 - **`notifyTargets`** (object): Map of agent names to notification targets. Example: `{"main": "telegram:...", "scribe": "telegram:..."}`
 
-Resolution priority:
-1. If an agent is specified and exists in `notifyTargets`, use that target
-2. Fall back to `notifyTarget` for backward compatibility
-3. If neither is set, the notification is sent without a specific target (OpenClaw routes to the default channel)
+**Example configuration with multiple agents:**
+
+```json
+{
+  "daemonPort": 18790,
+  "openclawUrl": "http://localhost:18789",
+  "openclawToken": "your-token",
+  "gatewayUrl": "https://your-gateway.example.com",
+  "displayName": "Alice",
+  "email": "alice@example.com",
+  "stateDir": "~/.ogp",
+  "notifyTarget": "telegram:123456789",
+  "notifyTargets": {
+    "main": "telegram:123456789",
+    "scribe": "telegram:987654321",
+    "optimus": "telegram:555666777"
+  },
+  "agentId": "main"
+}
+```
+
+**Resolution priority:**
+
+When routing notifications, OGP resolves the target in this order:
+
+1. **`notifyTargets[agent]`** — If the agent is specified and exists in `notifyTargets`, use that target
+2. **`notifyTarget`** — Fall back to the legacy single target for backward compatibility
+3. **Default** — If neither is set, the notification is sent without a specific target (OpenClaw routes to the default channel)
+
+This allows you to:
+- Route federation messages to different agents based on context
+- Maintain backward compatibility with existing single-agent setups
+- Gradually migrate to multi-agent routing without breaking existing configurations
 
 ### Environment Variables
 
