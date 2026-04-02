@@ -1,7 +1,7 @@
 ---
 skill_name: ogp-project
-version: 1.1.0
-description: Agent-aware project context skill for OGP with interview, freeform logging, and cross-peer summarization (updated for OGP 0.2.24+ peer identity)
+version: 1.1.1
+description: Agent-aware project context skill for OGP with interview, freeform logging, and cross-peer summarization (updated for OGP 0.2.24+ peer identity and 0.2.28+ multi-agent notifyTargets)
 trigger: Use when the user wants to create, manage, log to, or summarize OGP projects. This includes project context interviews, freeform activity logging, and cross-peer collaboration. Also triggers on natural logging phrases like "remember this for project X", "account for this", "make note of", "track this", "jot this down", "save this to", "document this" when a project context is active or named.
 requires:
   bins:
@@ -24,7 +24,9 @@ ogp setup
 ogp start
 ```
 
-**Note on Peer IDs (OGP 0.2.24+):** Peers are identified by the first 16 characters of their Ed25519 public key (e.g., `302a300506032b65`). This is stable even when their gateway URL changes.
+**Note on Peer IDs (OGP 0.2.24+):** Peers are identified by the first 16 characters of their Ed25519 public key (e.g., `302a300506032b65`). This is stable even when their gateway URL changes. You can also reference peers by their **alias** (the friendly name you assigned during federation).
+
+**Note on Multi-Agent Routing (OGP 0.2.28+):** When `notifyTargets` is configured in `~/.ogp/config.json`, project-related federation messages can be routed to specific agents. Each agent can have its own project context and policies.
 
 Full documentation: https://github.com/dp-pcs/ogp
 

@@ -1,6 +1,6 @@
 ---
 skill_name: ogp
-version: 2.2.0
+version: 2.2.1
 description: >
   OGP (Open Gateway Protocol) — federated agent communication, peer management,
   and project collaboration across OpenClaw gateways. Use when the user asks to
@@ -86,6 +86,79 @@ When enabled, your daemon auto-registers on startup and heartbeats every 30 seco
 
 ---
 
+## Configuration
+
+### Agent ID (v0.2.28+)
+
+The `agentId` field identifies which OpenClaw agent owns this OGP gateway. During `ogp setup`, the wizard auto-discovers available agents from your OpenClaw configuration:
+
+```
+Available agents:
+  1. 🦝 Junior (main)
+  2. ✍️ Scribe (scribe)
+  3. ⚡ Optimus (optimus)
+
+Which agent owns this gateway? (number or ID) [1]:
+```
+
+**Example config with agentId:**
+```json
+{
+  "daemonPort": 18790,
+  "openclawUrl": "http://localhost:18789",
+  "openclawToken": "your-token",
+  "gatewayUrl": "https://your-gateway.example.com",
+  "displayName": "Alice",
+  "email": "alice@example.com",
+  "stateDir": "~/.ogp",
+  "agentId": "main"
+}
+```
+
+### Notification Routing — notifyTargets (v0.2.28+)
+
+The `notifyTargets` field enables per-agent notification routing. When OGP sends notifications to your OpenClaw instance, it routes to specific agents based on the message context.
+
+**Configuration fields:**
+- **`notifyTarget`** (legacy, string): Single notification target for all messages. Maintained for backward compatibility.
+- **`notifyTargets`** (object): Map of agent names to notification targets. Example: `{"main": "telegram:...", "scribe": "telegram:..."}`
+
+**Example configuration with multiple agents:**
+
+```json
+{
+  "daemonPort": 18790,
+  "openclawUrl": "http://localhost:18789",
+  "openclawToken": "your-token",
+  "gatewayUrl": "https://your-gateway.example.com",
+  "displayName": "Alice",
+  "email": "alice@example.com",
+  "stateDir": "~/.ogp",
+  "agentId": "main",
+  "notifyTarget": "telegram:123456789",
+  "notifyTargets": {
+    "main": "telegram:123456789",
+    "scribe": "telegram:987654321",
+    "optimus": "telegram:555666777"
+  }
+}
+```
+
+**Resolution priority:**
+
+When routing notifications, OGP resolves the target in this order:
+
+1. **`notifyTargets[agent]`** — If the agent is specified and exists in `notifyTargets`, use that target
+2. **`notifyTarget`** — Fall back to the legacy single target for backward compatibility
+3. **Default** — If neither is set, the notification is sent without a specific target (OpenClaw routes to the default channel)
+
+This allows you to:
+- Route federation messages to different agents based on context
+- Maintain backward compatibility with existing single-agent setups
+- Gradually migrate to multi-agent routing without breaking existing configurations
+
+---
+
 ## Federation Management
 
 ### List all peers
@@ -144,7 +217,7 @@ ogp federation send <peer-id> <intent> '<json-payload>'
 ```bash
 ogp federation agent <peer-id> <topic> "<message>"
 # Example:
-ogp federation agent giving-produces-microphone-mild.trycloudflare.com:18790 general "Hey, can you check on project synapse?"
+ogp federation agent stanislav general "Hey, can you check on project synapse?"
 ```
 
 ### Manage agent-comms policies (what topics you'll respond to)
@@ -274,7 +347,7 @@ ogp start --background
 
 | File | Purpose |
 |------|---------|
-| `~/.ogp/config.json` | Gateway config (URL, email, port) |
+| `~/.ogp/config.json` | Gateway config (URL, email, port, notifyTargets, agentId) |
 | `~/.ogp/keypair.json` | Ed25519 signing keypair |
 | `~/.ogp/peers.json` | All federation peers + scopes |
 | `~/.ogp/projects.json` | Local project data + contributions |
@@ -291,3 +364,4 @@ ogp start --background
 - **Project isolation:** Projects are scoped to their member list. Full mesh federation does NOT give all peers access to all projects. A peer only sees projects they are a member of.
 - **Signatures:** All federation messages are signed with Ed25519. Peer's public key is stored in `peers.json` at federation time.
 - **Rendezvous is optional:** Peers with a static IP or existing tunnel continue working unchanged. Rendezvous is an additional discovery path, not a requirement.
+- **Notification Routing:** The `notifyTargets` config enables multi-agent setups where different agents handle different types of federation messages.

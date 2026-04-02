@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.2.29 (2026-04-02)
+
+### BUILD-115: Agent-Specific Notification Routing
+
+**Problem:** OGP notifications were routed to a single `notifyTarget`, causing all agent-comms to notify the main agent even when intended for other agents (Scribe, Optimus, etc.).
+
+**Solution:**
+- Added `notifyTargets` config map for per-agent routing: `{ "main": "telegram:...", "scribe": "telegram:..." }`
+- Added `agentId` field to peer storage and federation context
+- Hook payload now includes `agentId`, `peerId`, `intent`, `topic` for proper routing
+- Updated setup wizard to ask which agent owns the gateway
+- OpenClaw now routes notifications to the correct agent based on binding config
+
+### BUILD-114: Peer Aliases (petname → alias)
+
+**Problem:** "petname" terminology was confusing and inconsistent with cryptographic identity.
+
+**Solution:**
+- Renamed `petname` to `alias` across the entire codebase
+- Auto-migration: existing `petname` configs migrate to `alias` on daemon start
+- CLI now uses `--alias` flag (`--petname` deprecated but still works)
+- `ogp federation list` shows ALIAS column alongside public key
+- New `ogp federation status` shows alias → public key mappings
+
+### BUILD-113: Asymmetric Federation Removal
+
+**Problem:** When one peer removed federation, the other side stayed in "approved" state indefinitely, causing confusion and preventing re-federation.
+
+**Solution:**
+- Added `/federation/removed` endpoint for tear-down notifications
+- When `ogp federation remove` is called, notifies peer with signed removal message
+- Receiving peer updates status to "removed" and notifies user
+- Full protocol documentation in PROTOCOL.md
+
+---
+
 ## 0.2.28 (2026-04-01)
 
 ### BUILD-113: Asymmetric Federation Removal Notifications

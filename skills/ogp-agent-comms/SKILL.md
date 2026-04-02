@@ -1,7 +1,7 @@
 ---
 skill_name: ogp-agent-comms
-version: 0.2.1
-description: Interactive wizard to configure agent-to-agent communication policies (updated for OGP 0.2.24+ peer identity)
+version: 0.2.2
+description: Interactive wizard to configure agent-to-agent communication policies (updated for OGP 0.2.24+ peer identity and 0.2.28+ multi-agent routing)
 trigger: Use when the user wants to configure how their agent responds to incoming agent-comms messages from federated peers
 ---
 ## Prerequisites
@@ -37,6 +37,9 @@ Agent-comms policies control HOW your agent responds to incoming messages (separ
 **Two layers:**
 1. **Scope grants** (doorman) - Controls which intents/topics are ALLOWED
 2. **Response policies** (this skill) - Controls HOW your agent RESPONDS
+
+**Multi-Agent Routing (v0.2.28+):**
+When using `notifyTargets` in your OGP config, federation messages can be routed to specific agents based on the message context. Each agent can have its own agent-comms policies.
 
 ## Interactive Flow
 
@@ -176,6 +179,8 @@ ogp agent-comms configure stan,leonardo,alice \
   --level full
 ```
 
+**Note:** Peers are referenced by their alias (the friendly name you assigned during federation), not their full peer ID.
+
 ### Add Topic to Existing Policy
 
 ```bash
@@ -218,7 +223,7 @@ Stored in `~/.ogp/peers.json` under each peer:
 ```json
 {
   "id": "302a300506032b65",
-  "displayName": "Stanislav",
+  "alias": "Stanislav",
   "responsePolicy": {
     "memory-management": {
       "level": "full",
@@ -235,6 +240,8 @@ Stored in `~/.ogp/peers.json` under each peer:
 }
 ```
 
+**Note:** The `alias` field (formerly `petname`) is the user-friendly name for the peer.
+
 Global defaults in `~/.ogp/config.json`:
 
 ```json
@@ -246,6 +253,10 @@ Global defaults in `~/.ogp/config.json`:
     },
     "defaultLevel": "summary",
     "activityLog": true
+  },
+  "notifyTargets": {
+    "main": "telegram:123456789",
+    "scribe": "telegram:987654321"
   }
 }
 ```
@@ -265,6 +276,8 @@ When an agent-comms message arrives:
    - `summary`: Brief, high-level response
    - `escalate`: "Let me check with my human and get back to you"
    - `deny`: "I'm not able to discuss that topic"
+
+**Multi-Agent Routing:** When `notifyTargets` is configured, messages are routed to the appropriate agent who then applies their own policies.
 
 ## Activity Logging
 
@@ -318,6 +331,21 @@ ogp agent-comms configure --global \
   --notes "Default: check with human for new peers"
 ```
 
+### Multi-Agent Setup
+
+With `notifyTargets` configured in `~/.ogp/config.json`:
+
+```json
+{
+  "notifyTargets": {
+    "main": "telegram:123456789",
+    "scribe": "telegram:987654321"
+  }
+}
+```
+
+Each agent can have independent policies. The main agent might have full access for operational topics, while the scribe agent handles content-related discussions.
+
 ## Troubleshooting
 
 ### Agent not following policies
@@ -343,3 +371,10 @@ New peers inherit global defaults. Configure them specifically:
 ```bash
 ogp agent-comms configure 302a300506032b65 --topics "..." --level "..."
 ```
+
+### Multi-Agent Routing Issues
+
+If notifications aren't reaching the right agent:
+1. Check `notifyTargets` in `~/.ogp/config.json`
+2. Verify the target format: `telegram:chat_id` or `session:session_id`
+3. Check OpenClaw hook configuration for proper routing
