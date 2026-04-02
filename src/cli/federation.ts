@@ -101,7 +101,9 @@ export async function federationRequest(peerUrl: string, peerId: string): Promis
           gatewayUrl: peerUrl,
           publicKey: card.publicKey || '',
           status: 'pending',
-          requestedAt: new Date().toISOString()
+          requestedAt: new Date().toISOString(),
+          // BUILD-115: Record which agent owns this federation relationship
+          agentId: config.agentId
         });
       }
     } catch { /* non-fatal */ }
@@ -120,6 +122,7 @@ export interface ApproveOptions {
 }
 
 export async function federationApprove(peerId: string, options: ApproveOptions = {}): Promise<void> {
+  const config = requireConfig();
   const peer = getPeer(peerId);
   if (!peer) {
     console.error(`Peer not found: ${peerId}`);
@@ -174,6 +177,12 @@ export async function federationApprove(peerId: string, options: ApproveOptions 
       console.log(`  Topics: ${options.topics.join(', ')}`);
     }
     console.log(`  Rate limit: ${formatRateLimit(rateLimit)}`);
+  }
+
+  // BUILD-115: Set the agentId on the peer before approval
+  if (config.agentId) {
+    const { updatePeer } = await import('../daemon/peers.js');
+    updatePeer(peerId, { agentId: config.agentId });
   }
 
   approvePeer(peerId);

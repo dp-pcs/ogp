@@ -79,7 +79,9 @@ export async function federationRequest(peerUrl, peerId) {
                     gatewayUrl: peerUrl,
                     publicKey: card.publicKey || '',
                     status: 'pending',
-                    requestedAt: new Date().toISOString()
+                    requestedAt: new Date().toISOString(),
+                    // BUILD-115: Record which agent owns this federation relationship
+                    agentId: config.agentId
                 });
             }
         }
@@ -92,6 +94,7 @@ export async function federationRequest(peerUrl, peerId) {
     }
 }
 export async function federationApprove(peerId, options = {}) {
+    const config = requireConfig();
     const peer = getPeer(peerId);
     if (!peer) {
         console.error(`Peer not found: ${peerId}`);
@@ -140,6 +143,11 @@ export async function federationApprove(peerId, options = {}) {
             console.log(`  Topics: ${options.topics.join(', ')}`);
         }
         console.log(`  Rate limit: ${formatRateLimit(rateLimit)}`);
+    }
+    // BUILD-115: Set the agentId on the peer before approval
+    if (config.agentId) {
+        const { updatePeer } = await import('../daemon/peers.js');
+        updatePeer(peerId, { agentId: config.agentId });
     }
     approvePeer(peerId);
     console.log(`✓ Approved peer: ${peerId}`);

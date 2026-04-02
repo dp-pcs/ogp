@@ -25,7 +25,9 @@ export function loadPeers() {
 }
 export function savePeers(peers) {
     ensureConfigDir();
-    fs.writeFileSync(PEERS_FILE, JSON.stringify(peers, null, 2), 'utf-8');
+    // Strip deprecated petname field from saved data (migration complete)
+    const cleanPeers = peers.map(({ petname, ...peer }) => peer);
+    fs.writeFileSync(PEERS_FILE, JSON.stringify(cleanPeers, null, 2), 'utf-8');
 }
 export function addPeer(peer) {
     const peers = loadPeers();

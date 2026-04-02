@@ -200,6 +200,8 @@ export function startServer(config, background = false) {
             if (fromEmail)
                 peerUpdates.email = fromEmail;
             peerUpdates.protocolVersion = protocolVersion;
+            // BUILD-115: Record which agent owns this federation relationship
+            peerUpdates.agentId = cfg.agentId;
             // Store received scopes (what this peer grants TO us)
             if (scopeGrants) {
                 peerUpdates.receivedScopes = scopeGrants;
