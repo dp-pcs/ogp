@@ -13,20 +13,60 @@ export async function federationList(status) {
         return;
     }
     console.log(`\n${status ? status.toUpperCase() : 'ALL'} PEERS:\n`);
+    // Column headers
+    console.log('  ALIAS                DISPLAY NAME           PUBLIC KEY          STATUS');
+    console.log('  ' + '-'.repeat(80));
     peers.forEach(peer => {
-        const displayLabel = peer.alias ? `${peer.alias} (${peer.displayName})` : peer.displayName;
-        console.log(`  ${peer.id}`);
-        console.log(`    Name: ${displayLabel}`);
-        if (peer.alias) {
-            console.log(`    Alias: ${peer.alias}`);
-        }
-        console.log(`    Status: ${peer.status}`);
+        const aliasCol = (peer.alias || '-').padEnd(20);
+        const displayCol = (peer.displayName || '-').slice(0, 20).padEnd(20);
+        const keyCol = (peer.publicKey?.substring(0, 16) || '-') + '...';
+        const statusCol = peer.status;
+        console.log(`  ${aliasCol} ${displayCol} ${keyCol.padEnd(20)} ${statusCol}`);
         console.log(`    Gateway: ${peer.gatewayUrl}`);
-        console.log(`    Public key: ${peer.publicKey.substring(0, 32)}...`);
+        console.log(`    ID: ${peer.id}`);
         console.log('');
     });
 }
-export async function federationRequest(peerUrl, peerId) {
+export async function federationStatus() {
+    const peers = listPeers();
+    const approvedPeers = peers.filter(p => p.status === 'approved');
+    const pendingPeers = peers.filter(p => p.status === 'pending');
+    const rejectedPeers = peers.filter(p => p.status === 'rejected');
+    console.log('\n📊 FEDERATION STATUS\n');
+    // Summary counts
+    console.log(`Total peers: ${peers.length}`);
+    console.log(`  Approved: ${approvedPeers.length}`);
+    console.log(`  Pending:  ${pendingPeers.length}`);
+    console.log(`  Rejected: ${rejectedPeers.length}`);
+    console.log('');
+    // Alias → Public Key mapping section
+    if (peers.length > 0) {
+        console.log('📝 ALIAS → PUBLIC KEY MAPPING:\n');
+        // Group by status for clarity
+        const statusGroups = [
+            { label: 'Approved', peers: approvedPeers },
+            { label: 'Pending', peers: pendingPeers },
+            { label: 'Rejected', peers: rejectedPeers }
+        ];
+        for (const group of statusGroups) {
+            if (group.peers.length === 0)
+                continue;
+            console.log(`  [${group.label}]`);
+            for (const peer of group.peers) {
+                const aliasDisplay = peer.alias
+                    ? `${peer.alias} (${peer.displayName})`
+                    : `${peer.displayName} (no alias)`;
+                const publicKeyShort = peer.publicKey.substring(0, 16);
+                console.log(`    ${aliasDisplay}`);
+                console.log(`      → ${publicKeyShort}... (${peer.publicKey.substring(0, 32)}...)`);
+                console.log(`      ID: ${peer.id}`);
+                console.log(`      Gateway: ${peer.gatewayUrl}`);
+                console.log('');
+            }
+        }
+    }
+}
+export async function federationRequest(peerUrl, peerId, alias) {
     const config = requireConfig();
     const keypair = loadOrGenerateKeyPair();
     // BUILD-111: Use public key prefix as peer ID (port-agnostic identity)
@@ -80,6 +120,8 @@ export async function federationRequest(peerUrl, peerId) {
                     publicKey: card.publicKey || '',
                     status: 'pending',
                     requestedAt: new Date().toISOString(),
+                    // Set alias if provided via --alias option
+                    alias: alias,
                     // BUILD-115: Record which agent owns this federation relationship
                     agentId: config.agentId
                 });
@@ -555,7 +597,7 @@ export async function federationInvite() {
  * Looks up the token on the rendezvous server, then auto-connects using
  * the returned ip:port + pubkey.
  */
-export async function federationAccept(token) {
+export async function federationAccept(token, alias) {
     const config = requireConfig();
     if (!config.rendezvous?.enabled || !config.rendezvous?.url) {
         console.error('Rendezvous is not enabled in your config.');
@@ -579,7 +621,7 @@ export async function federationAccept(token) {
         const peerUrl = `http://${data.ip}:${data.port}`;
         console.log(`✓ Resolved peer via rendezvous: ${data.pubkey.slice(0, 8)}... at ${peerUrl}`);
         console.log(`Sending federation request...`);
-        const success = await federationRequest(peerUrl, data.pubkey);
+        const success = await federationRequest(peerUrl, data.pubkey, alias);
         if (success) {
             console.log(`\nConnected to ${data.pubkey.slice(0, 8)}... via rendezvous ✅`);
         }
@@ -606,7 +648,7 @@ export async function federationAccept(token) {
  * Looks up the peer URL from the rendezvous server, then sends a
  * federation request to that URL.
  */
-export async function federationConnect(pubkey) {
+export async function federationConnect(pubkey, alias) {
     const config = requireConfig();
     if (!config.rendezvous?.enabled) {
         console.error('Rendezvous is not enabled in your config.');
@@ -623,7 +665,7 @@ export async function federationConnect(pubkey) {
     }
     console.log(`✓ Found peer at ${peerUrl}`);
     console.log(`Sending federation request...`);
-    await federationRequest(peerUrl, pubkey);
+    await federationRequest(peerUrl, pubkey, alias);
 }
 /**
  * Set a user-friendly alias for a peer.

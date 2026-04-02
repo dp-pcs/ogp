@@ -1,5 +1,6 @@
 export declare function federationList(status?: 'pending' | 'approved' | 'rejected'): Promise<void>;
-export declare function federationRequest(peerUrl: string, peerId: string): Promise<boolean>;
+export declare function federationStatus(): Promise<void>;
+export declare function federationRequest(peerUrl: string, peerId: string, alias?: string): Promise<boolean>;
 export interface ApproveOptions {
     intents?: string[];
     rate?: string;
@@ -43,7 +44,7 @@ export declare function federationInvite(): Promise<void>;
  * Looks up the token on the rendezvous server, then auto-connects using
  * the returned ip:port + pubkey.
  */
-export declare function federationAccept(token: string): Promise<void>;
+export declare function federationAccept(token: string, alias?: string): Promise<void>;
 /**
  * Connect to a peer by public key using rendezvous server discovery.
  *
@@ -52,7 +53,7 @@ export declare function federationAccept(token: string): Promise<void>;
  * Looks up the peer URL from the rendezvous server, then sends a
  * federation request to that URL.
  */
-export declare function federationConnect(pubkey: string): Promise<void>;
+export declare function federationConnect(pubkey: string, alias?: string): Promise<void>;
 /**
  * Set a user-friendly alias for a peer.
  *

@@ -338,12 +338,12 @@ ogp project query my-app --limit 10
 ogp project query my-app --type progress
 
 # Collaborate with peers
-ogp project send-contribution peer-alice shared-app progress "Deployed staging"
-ogp project query-peer peer-alice shared-app --limit 10
-ogp project status-peer peer-alice shared-app
+ogp project send-contribution alice shared-app progress "Deployed staging"
+ogp project query-peer alice shared-app --limit 10
+ogp project status-peer alice shared-app
 
 # Join peer's project
-ogp project request-join peer-alice mobile-app "Mobile App Project"
+ogp project request-join alice mobile-app "Mobile App Project"
 ```
 
 ### Custom Intent Examples (v0.2.0+)
