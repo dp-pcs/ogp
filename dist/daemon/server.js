@@ -84,7 +84,9 @@ export function startServer(config, background = false) {
                 gatewayUrl: peer.gatewayUrl,
                 publicKey: peer.publicKey,
                 status: 'pending',
-                requestedAt: new Date().toISOString()
+                requestedAt: new Date().toISOString(),
+                // BUILD-115: Record which agent owns this federation relationship
+                agentId: cfg.agentId
             };
             // Store offered intents if provided (BUILD-110: intent negotiation)
             const offeredIntents = req.body.offeredIntents;

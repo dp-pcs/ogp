@@ -100,7 +100,9 @@ export function startServer(config?: OGPConfig, background = false): void {
         gatewayUrl: peer.gatewayUrl,
         publicKey: peer.publicKey,
         status: 'pending',
-        requestedAt: new Date().toISOString()
+        requestedAt: new Date().toISOString(),
+        // BUILD-115: Record which agent owns this federation relationship
+        agentId: cfg.agentId
       };
 
       // Store offered intents if provided (BUILD-110: intent negotiation)
@@ -223,6 +225,8 @@ export function startServer(config?: OGPConfig, background = false): void {
       if (fromPublicKey) peerUpdates.publicKey = fromPublicKey;
       if (fromEmail) peerUpdates.email = fromEmail;
       peerUpdates.protocolVersion = protocolVersion;
+      // BUILD-115: Record which agent owns this federation relationship
+      peerUpdates.agentId = cfg.agentId;
 
       // Store received scopes (what this peer grants TO us)
       if (scopeGrants) {

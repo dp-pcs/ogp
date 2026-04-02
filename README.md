@@ -775,6 +775,11 @@ Configuration is stored in `~/.ogp/config.json`:
   "displayName": "Your Name",
   "email": "you@example.com",
   "stateDir": "~/.ogp",
+  "notifyTarget": "telegram:123456789",
+  "notifyTargets": {
+    "main": "telegram:123456789",
+    "scribe": "telegram:987654321"
+  },
   "rendezvous": {
     "enabled": true,
     "url": "https://rendezvous.elelem.expert",
@@ -782,6 +787,18 @@ Configuration is stored in `~/.ogp/config.json`:
   }
 }
 ```
+
+### Notification Routing (v0.2.28+)
+
+The `notifyTargets` field enables per-agent notification routing. When OGP sends notifications to your OpenClaw instance, it can target specific agents based on the message context.
+
+- **`notifyTarget`** (legacy, string): Single notification target for all messages. Maintained for backward compatibility.
+- **`notifyTargets`** (object): Map of agent names to notification targets. Example: `{"main": "telegram:...", "scribe": "telegram:..."}`
+
+Resolution priority:
+1. If an agent is specified and exists in `notifyTargets`, use that target
+2. Fall back to `notifyTarget` for backward compatibility
+3. If neither is set, the notification is sent without a specific target (OpenClaw routes to the default channel)
 
 ### Environment Variables
 

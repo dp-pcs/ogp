@@ -15,6 +15,7 @@ export type { ResponseLevel, ResponsePolicy, TopicPolicy };
 export interface Peer {
   id: string;           // unique peer ID (hostname or user-chosen)
   alias?: string;       // user-friendly name for this peer (user-defined)
+  petname?: string;     // DEPRECATED: old field name, migrated to alias on load
   displayName: string;  // peer's self-reported display name
   email: string;
   gatewayUrl: string;
@@ -43,12 +44,30 @@ export function loadPeers(): Peer[] {
     return [];
   }
   const data = fs.readFileSync(PEERS_FILE, 'utf-8');
-  return JSON.parse(data) as Peer[];
+  const peers = JSON.parse(data) as Peer[];
+  
+  // Migration: petname → alias (backward compatibility)
+  let migrated = false;
+  for (const peer of peers) {
+    if (peer.petname && !peer.alias) {
+      peer.alias = peer.petname;
+      migrated = true;
+    }
+  }
+  
+  // Save migration if any changes were made
+  if (migrated) {
+    savePeers(peers);
+  }
+  
+  return peers;
 }
 
 export function savePeers(peers: Peer[]): void {
   ensureConfigDir();
-  fs.writeFileSync(PEERS_FILE, JSON.stringify(peers, null, 2), 'utf-8');
+  // Strip deprecated petname field from saved data (migration complete)
+  const cleanPeers = peers.map(({ petname, ...peer }) => peer);
+  fs.writeFileSync(PEERS_FILE, JSON.stringify(cleanPeers, null, 2), 'utf-8');
 }
 
 export function addPeer(peer: Peer): void {

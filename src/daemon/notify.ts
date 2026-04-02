@@ -1,9 +1,30 @@
-import { requireConfig } from '../shared/config.js';
+import { requireConfig, type OGPConfig } from '../shared/config.js';
 
 export interface NotificationPayload {
   text: string;
   sessionKey?: string;
   metadata?: Record<string, any>;
+  /**
+   * Target agent for routing the notification.
+   * If specified, looks up notifyTargets[agent] first, then falls back to legacy notifyTarget.
+   */
+  agent?: string;
+}
+
+/**
+ * Resolve the notification target for a given agent.
+ * Priority:
+ * 1. notifyTargets[agent] (if agent specified and exists in map)
+ * 2. legacy notifyTarget (for backward compatibility)
+ * 3. undefined (no specific target)
+ */
+function resolveNotifyTarget(config: OGPConfig, agent?: string): string | undefined {
+  // Check per-agent targets first if agent is specified
+  if (agent && config.notifyTargets?.[agent]) {
+    return config.notifyTargets[agent];
+  }
+  // Fall back to legacy notifyTarget
+  return config.notifyTarget;
 }
 
 export async function notifyOpenClaw(payload: NotificationPayload): Promise<boolean> {
@@ -23,16 +44,13 @@ export async function notifyOpenClaw(payload: NotificationPayload): Promise<bool
             import('node:url').then(({ URL }) => {
               const url = new URL(`${openclawUrl}/hooks/agent`);
               const isHttps = url.protocol === 'https:';
+              const target = resolveNotifyTarget(config, payload.agent);
               const body = JSON.stringify({
                 message: payload.text,
                 name: 'OGP',
                 deliver: true,
                 channel: (config as any).notifyChannel || 'last',
-                ...(
-                  (config as any).notifyTarget
-                    ? { to: String((config as any).notifyTarget) }
-                    : {}
-                ),
+                ...(target ? { to: target } : {}),
               });
               const reqFn = isHttps ? httpsRequest : httpRequest;
               const req = (reqFn as typeof httpsRequest)({

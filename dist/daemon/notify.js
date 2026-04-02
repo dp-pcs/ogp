@@ -1,4 +1,19 @@
 import { requireConfig } from '../shared/config.js';
+/**
+ * Resolve the notification target for a given agent.
+ * Priority:
+ * 1. notifyTargets[agent] (if agent specified and exists in map)
+ * 2. legacy notifyTarget (for backward compatibility)
+ * 3. undefined (no specific target)
+ */
+function resolveNotifyTarget(config, agent) {
+    // Check per-agent targets first if agent is specified
+    if (agent && config.notifyTargets?.[agent]) {
+        return config.notifyTargets[agent];
+    }
+    // Fall back to legacy notifyTarget
+    return config.notifyTarget;
+}
 export async function notifyOpenClaw(payload) {
     const config = requireConfig();
     // Method 1: POST /hooks/agent — deliver:true routes the message to the user's last channel
@@ -15,14 +30,13 @@ export async function notifyOpenClaw(payload) {
                         import('node:url').then(({ URL }) => {
                             const url = new URL(`${openclawUrl}/hooks/agent`);
                             const isHttps = url.protocol === 'https:';
+                            const target = resolveNotifyTarget(config, payload.agent);
                             const body = JSON.stringify({
                                 message: payload.text,
                                 name: 'OGP',
                                 deliver: true,
                                 channel: config.notifyChannel || 'last',
-                                ...(config.notifyTarget
-                                    ? { to: String(config.notifyTarget) }
-                                    : {}),
+                                ...(target ? { to: target } : {}),
                             });
                             const reqFn = isHttps ? httpsRequest : httpRequest;
                             const req = reqFn({

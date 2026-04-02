@@ -38,6 +38,9 @@ export interface OGPConfig {
     stateDir: string;
     agentComms?: AgentCommsConfig;
     rendezvous?: RendezvousConfig;
+    notifyTarget?: string;
+    notifyTargets?: Record<string, string>;
+    agentId?: string;
 }
 export declare function getConfigPath(): string;
 export declare function getConfigDir(): string;

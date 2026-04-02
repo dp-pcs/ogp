@@ -8,7 +8,20 @@ export function loadPeers() {
         return [];
     }
     const data = fs.readFileSync(PEERS_FILE, 'utf-8');
-    return JSON.parse(data);
+    const peers = JSON.parse(data);
+    // Migration: petname → alias (backward compatibility)
+    let migrated = false;
+    for (const peer of peers) {
+        if (peer.petname && !peer.alias) {
+            peer.alias = peer.petname;
+            migrated = true;
+        }
+    }
+    // Save migration if any changes were made
+    if (migrated) {
+        savePeers(peers);
+    }
+    return peers;
 }
 export function savePeers(peers) {
     ensureConfigDir();

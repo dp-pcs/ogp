@@ -53,6 +53,8 @@ export interface OGPConfig {
   notifyTarget?: string;
   // Per-agent notification targets: { "main": "telegram:...", "scribe": "telegram:..." }
   notifyTargets?: Record<string, string>;
+  // BUILD-115: Agent-specific notification routing — which agent owns this gateway
+  agentId?: string;
 }
 
 const DEFAULT_CONFIG_DIR = process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');

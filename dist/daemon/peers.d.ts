@@ -4,6 +4,7 @@ export type { ResponseLevel, ResponsePolicy, TopicPolicy };
 export interface Peer {
     id: string;
     alias?: string;
+    petname?: string;
     displayName: string;
     email: string;
     gatewayUrl: string;
