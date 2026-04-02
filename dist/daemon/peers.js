@@ -70,6 +70,16 @@ export function rejectPeer(peerId) {
     savePeers(peers);
     return true;
 }
+export function removePeer(peerId) {
+    const peers = loadPeers();
+    const peerIndex = peers.findIndex(p => p.id === peerId);
+    if (peerIndex === -1)
+        return false;
+    // Mark as removed instead of deleting to maintain audit trail
+    peers[peerIndex].status = 'removed';
+    savePeers(peers);
+    return true;
+}
 export function listPeers(status) {
     const peers = loadPeers();
     if (status) {

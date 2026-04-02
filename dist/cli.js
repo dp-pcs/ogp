@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { runSetup } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig, saveConfig } from './shared/config.js';
-import { federationList, federationRequest, federationApprove, federationReject, federationRemove, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect, federationInvite, federationAccept } from './cli/federation.js';
+import { federationList, federationRequest, federationApprove, federationReject, federationRemove, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect, federationInvite, federationAccept, federationSetAlias } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, showActivity, clearActivity, setDefault, setLogging, setTopic, setPeerDefault } from './cli/agent-comms.js';
@@ -149,6 +149,14 @@ federation
     .argument('<peer-id>', 'Peer ID to remove')
     .action(async (peerId) => {
     await federationRemove(peerId);
+});
+federation
+    .command('alias')
+    .description('Set a user-friendly alias for a peer')
+    .argument('<peer-id>', 'Peer ID')
+    .argument('<alias>', 'Alias name (e.g., "big-papa", "staging-server")')
+    .action(async (peerId, alias) => {
+    await federationSetAlias(peerId, alias);
 });
 federation
     .command('ping')

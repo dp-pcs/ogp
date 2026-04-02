@@ -17,7 +17,8 @@ import {
   federationSendAgentComms,
   federationConnect,
   federationInvite,
-  federationAccept
+  federationAccept,
+  federationSetAlias
 } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
@@ -204,6 +205,15 @@ federation
   .argument('<peer-id>', 'Peer ID to remove')
   .action(async (peerId) => {
     await federationRemove(peerId);
+  });
+
+federation
+  .command('alias')
+  .description('Set a user-friendly alias for a peer')
+  .argument('<peer-id>', 'Peer ID')
+  .argument('<alias>', 'Alias name (e.g., "big-papa", "staging-server")')
+  .action(async (peerId, alias) => {
+    await federationSetAlias(peerId, alias);
   });
 
 federation

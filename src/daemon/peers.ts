@@ -14,11 +14,12 @@ export type { ResponseLevel, ResponsePolicy, TopicPolicy };
 
 export interface Peer {
   id: string;           // unique peer ID (hostname or user-chosen)
-  displayName: string;
+  alias?: string;       // user-friendly name for this peer (user-defined)
+  displayName: string;  // peer's self-reported display name
   email: string;
   gatewayUrl: string;
   publicKey: string;    // hex-encoded Ed25519 public key
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'removed';
   requestedAt: string;  // ISO timestamp
   approvedAt?: string;
   metadata?: Record<string, any>;
@@ -30,6 +31,8 @@ export interface Peer {
   // Agent-comms response policy
   responsePolicy?: ResponsePolicy;   // how my agent responds to this peer
   defaultLevel?: ResponseLevel;      // per-peer default for unknown topics
+  // BUILD-115: Agent-specific notification routing
+  agentId?: string;                  // which local agent "owns" this federation relationship
 }
 
 const PEERS_FILE = path.join(getConfigDir(), 'peers.json');
@@ -105,6 +108,17 @@ export function rejectPeer(peerId: string): boolean {
   if (!peer) return false;
 
   peer.status = 'rejected';
+  savePeers(peers);
+  return true;
+}
+
+export function removePeer(peerId: string): boolean {
+  const peers = loadPeers();
+  const peerIndex = peers.findIndex(p => p.id === peerId);
+  if (peerIndex === -1) return false;
+
+  // Mark as removed instead of deleting to maintain audit trail
+  peers[peerIndex].status = 'removed';
   savePeers(peers);
   return true;
 }

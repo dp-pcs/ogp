@@ -26,8 +26,12 @@ export async function federationList(status?: 'pending' | 'approved' | 'rejected
 
   console.log(`\n${status ? status.toUpperCase() : 'ALL'} PEERS:\n`);
   peers.forEach(peer => {
+    const displayLabel = peer.alias ? `${peer.alias} (${peer.displayName})` : peer.displayName;
     console.log(`  ${peer.id}`);
-    console.log(`    Name: ${peer.displayName}`);
+    console.log(`    Name: ${displayLabel}`);
+    if (peer.alias) {
+      console.log(`    Alias: ${peer.alias}`);
+    }
     console.log(`    Status: ${peer.status}`);
     console.log(`    Gateway: ${peer.gatewayUrl}`);
     console.log(`    Public key: ${peer.publicKey.substring(0, 32)}...`);
@@ -689,4 +693,27 @@ export async function federationConnect(pubkey: string): Promise<void> {
   console.log(`Sending federation request...`);
 
   await federationRequest(peerUrl, pubkey);
+}
+
+/**
+ * Set a user-friendly alias for a peer.
+ *
+ * Usage: ogp federation alias <peer-id> <alias>
+ */
+export async function federationSetAlias(peerId: string, alias: string): Promise<void> {
+  const { updatePeer, getPeer } = await import('../daemon/peers.js');
+  
+  const peer = getPeer(peerId);
+  if (!peer) {
+    console.error(`Peer not found: ${peerId}`);
+    process.exit(1);
+  }
+
+  const success = updatePeer(peerId, { alias });
+  if (success) {
+    console.log(`✓ Set alias for ${peerId}: ${alias}`);
+  } else {
+    console.error(`Failed to set alias for ${peerId}`);
+    process.exit(1);
+  }
 }

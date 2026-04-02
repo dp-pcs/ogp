@@ -53,4 +53,10 @@ export declare function federationAccept(token: string): Promise<void>;
  * federation request to that URL.
  */
 export declare function federationConnect(pubkey: string): Promise<void>;
+/**
+ * Set a user-friendly alias for a peer.
+ *
+ * Usage: ogp federation alias <peer-id> <alias>
+ */
+export declare function federationSetAlias(peerId: string, alias: string): Promise<void>;
 //# sourceMappingURL=federation.d.ts.map

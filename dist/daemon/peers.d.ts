@@ -3,11 +3,12 @@ import type { ScopeBundle } from './scopes.js';
 export type { ResponseLevel, ResponsePolicy, TopicPolicy };
 export interface Peer {
     id: string;
+    alias?: string;
     displayName: string;
     email: string;
     gatewayUrl: string;
     publicKey: string;
-    status: 'pending' | 'approved' | 'rejected';
+    status: 'pending' | 'approved' | 'rejected' | 'removed';
     requestedAt: string;
     approvedAt?: string;
     metadata?: Record<string, any>;
@@ -17,6 +18,7 @@ export interface Peer {
     offeredIntents?: string[];
     responsePolicy?: ResponsePolicy;
     defaultLevel?: ResponseLevel;
+    agentId?: string;
 }
 export declare function loadPeers(): Peer[];
 export declare function savePeers(peers: Peer[]): void;
@@ -26,6 +28,7 @@ export declare function getPeerByUrl(gatewayUrl: string): Peer | null;
 export declare function getPeerByPublicKey(publicKey: string): Peer | null;
 export declare function approvePeer(peerId: string): boolean;
 export declare function rejectPeer(peerId: string): boolean;
+export declare function removePeer(peerId: string): boolean;
 export declare function listPeers(status?: 'pending' | 'approved' | 'rejected'): Peer[];
 /**
  * Update the scopes granted TO a peer (what they can request from us)

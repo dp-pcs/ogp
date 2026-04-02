@@ -49,6 +49,10 @@ export interface OGPConfig {
   agentComms?: AgentCommsConfig;
   // Rendezvous configuration (optional)
   rendezvous?: RendezvousConfig;
+  // Legacy: single notification target for all agents (backward compatibility)
+  notifyTarget?: string;
+  // Per-agent notification targets: { "main": "telegram:...", "scribe": "telegram:..." }
+  notifyTargets?: Record<string, string>;
 }
 
 const DEFAULT_CONFIG_DIR = process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');

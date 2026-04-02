@@ -7,8 +7,9 @@ const _require = createRequire(import.meta.url);
 const OGP_VERSION = _require('../../package.json').version;
 import { requireConfig, loadConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
-import { addPeer, getPeer, approvePeer, listPeers, updatePeer } from './peers.js';
+import { addPeer, getPeer, approvePeer, listPeers, updatePeer, removePeer } from './peers.js';
 import { handleMessage } from './message-handler.js';
+import { verify } from '../shared/signing.js';
 import { notifyOpenClaw } from './notify.js';
 import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
 import { startReplyCleanup, stopReplyCleanup, getPendingReply, deletePendingReply, storePendingReply } from './reply-handler.js';
@@ -250,6 +251,67 @@ export function startServer(config, background = false) {
         catch (error) {
             console.error('[OGP] Error handling approval:', error);
             res.status(500).json({ error: 'Internal server error' });
+        }
+    });
+    // POST /federation/removed - Receive tear-down notification from removing peer
+    // BUILD-113: Orphaned federation cleanup (asymmetric removal)
+    app.post('/federation/removed', async (req, res) => {
+        try {
+            const { peerId, timestamp, signature } = req.body;
+            // Validate required fields
+            if (!peerId || !timestamp || !signature) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Missing required fields: peerId, timestamp, signature'
+                });
+            }
+            // Find the peer
+            const peer = getPeer(peerId);
+            if (!peer) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Unknown peer'
+                });
+            }
+            // Verify signature from the removing peer
+            // The message to verify is the JSON string of the payload
+            const payload = { peerId, timestamp };
+            const payloadStr = JSON.stringify(payload);
+            const isValidSignature = verify(payloadStr, signature, peer.publicKey);
+            if (!isValidSignature) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Invalid signature'
+                });
+            }
+            // Check timestamp freshness (allow 5 minute window)
+            const now = Date.now();
+            const removalTime = new Date(timestamp).getTime();
+            const fiveMinutes = 5 * 60 * 1000;
+            if (isNaN(removalTime) || Math.abs(now - removalTime) > fiveMinutes) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invalid or stale timestamp'
+                });
+            }
+            // Update peer status to 'removed'
+            const removed = removePeer(peer.id);
+            if (!removed) {
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to update peer status'
+                });
+            }
+            console.log(`[OGP] Federation removed by ${peer.displayName} (${peer.id})`);
+            res.json({
+                success: true,
+                peerId: peer.id,
+                status: 'removed'
+            });
+        }
+        catch (error) {
+            console.error('[OGP] Error handling removal notification:', error);
+            res.status(500).json({ success: false, error: 'Internal server error' });
         }
     });
     // GET /federation/ping - Simple liveness + identity check (no auth required)
