@@ -7,6 +7,7 @@ import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig, saveConfig } from './shared/config.js';
 import {
   federationList,
+  federationStatus,
   federationRequest,
   federationApprove,
   federationReject,
@@ -127,11 +128,31 @@ federation
   });
 
 federation
+  .command('status')
+  .description('Show federation status and alias → public key mappings')
+  .action(async () => {
+    await federationStatus();
+  });
+
+federation
   .command('request')
   .description('Send federation request to a peer')
   .argument('<peer-url>', 'Peer gateway URL')
   .argument('[peer-id]', 'Peer ID (optional — auto-resolved from /.well-known/ogp)')
-  .action(async (peerUrl, peerId) => {
+  .option('-a, --alias <name>', 'User-friendly alias for this peer (e.g., "big-papa")')
+  .option('--petname <name>', 'Deprecated: use --alias instead')
+  .action(async (peerUrl, peerId, options) => {
+    // Handle backward compatibility: --petname maps to --alias with deprecation warning
+    let alias = options.alias;
+    if (options.petname) {
+      if (!alias) {
+        console.warn('⚠️  --petname is deprecated. Use --alias instead.');
+        alias = options.petname;
+      } else {
+        console.warn('⚠️  Both --alias and --petname provided. Using --alias.');
+      }
+    }
+    
     // Auto-resolve peer ID from /.well-known/ogp if not provided
     if (!peerId) {
       try {
@@ -149,15 +170,27 @@ federation
         process.exit(1);
       }
     }
-    await federationRequest(peerUrl, peerId);
+    await federationRequest(peerUrl, peerId, alias);
   });
 
 federation
   .command('connect')
   .description('Connect to a peer by public key using rendezvous server discovery')
   .argument('<pubkey>', 'Peer public key (hex)')
-  .action(async (pubkey) => {
-    await federationConnect(pubkey);
+  .option('-a, --alias <name>', 'User-friendly alias for this peer (e.g., "big-papa")')
+  .option('--petname <name>', 'Deprecated: use --alias instead')
+  .action(async (pubkey, options) => {
+    // Handle backward compatibility: --petname maps to --alias with deprecation warning
+    let alias = options.alias;
+    if (options.petname) {
+      if (!alias) {
+        console.warn('⚠️  --petname is deprecated. Use --alias instead.');
+        alias = options.petname;
+      } else {
+        console.warn('⚠️  Both --alias and --petname provided. Using --alias.');
+      }
+    }
+    await federationConnect(pubkey, alias);
   });
 
 federation
@@ -171,8 +204,20 @@ federation
   .command('accept')
   .description('Accept a peer\'s invite token and auto-connect via rendezvous')
   .argument('<token>', 'Invite token from peer (e.g. a3f7k2)')
-  .action(async (token) => {
-    await federationAccept(token);
+  .option('-a, --alias <name>', 'User-friendly alias for this peer (e.g., "big-papa")')
+  .option('--petname <name>', 'Deprecated: use --alias instead')
+  .action(async (token, options) => {
+    // Handle backward compatibility: --petname maps to --alias with deprecation warning
+    let alias = options.alias;
+    if (options.petname) {
+      if (!alias) {
+        console.warn('⚠️  --petname is deprecated. Use --alias instead.');
+        alias = options.petname;
+      } else {
+        console.warn('⚠️  Both --alias and --petname provided. Using --alias.');
+      }
+    }
+    await federationAccept(token, alias);
   });
 
 federation
@@ -209,7 +254,7 @@ federation
 
 federation
   .command('alias')
-  .description('Set a user-friendly alias for a peer')
+  .description('Set a user-friendly alias for a peer (alternative: use --alias when connecting/requesting)')
   .argument('<peer-id>', 'Peer ID')
   .argument('<alias>', 'Alias name (e.g., "big-papa", "staging-server")')
   .action(async (peerId, alias) => {
