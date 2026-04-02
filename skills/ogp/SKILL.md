@@ -97,9 +97,12 @@ ogp federation list --status approved
 
 ### Request federation with a new peer
 ```bash
-ogp federation request <peer-gateway-url> [peer-id]
-# Example:
-ogp federation request https://giving-produces-microphone-mild.trycloudflare.com stanislav
+ogp federation request <peer-gateway-url> [--alias <name>]
+# Example with alias:
+ogp federation request https://giving-produces-microphone-mild.trycloudflare.com --alias stanislav
+
+# Alias auto-resolves from gateway's display name if omitted:
+ogp federation request https://giving-produces-microphone-mild.trycloudflare.com
 ```
 
 ### Approve an inbound federation request

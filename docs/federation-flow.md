@@ -120,7 +120,7 @@ $ ogp federation list --status pending
 
 PENDING PEERS:
 
-  peer-alice
+  alice
     Name: Alice
     Status: pending
     Gateway: https://alice.example.com
@@ -219,7 +219,7 @@ $ ogp federation list --status approved
 
 APPROVED PEERS:
 
-  peer-bob
+  bob
     Name: Bob
     Status: approved
     Gateway: https://bob.example.com
@@ -231,12 +231,12 @@ APPROVED PEERS:
 View detailed scopes:
 
 ```bash
-$ ogp federation scopes peer-bob
+$ ogp federation scopes bob
 
-Scopes granted TO peer-bob (what they can request from you):
+Scopes granted TO bob (what they can request from you):
   [not configured - full access]
 
-Scopes received FROM peer-bob (what you can request from them):
+Scopes received FROM bob (what you can request from them):
   • message (enabled)
     Rate limit: 100 requests / 3600 seconds
 
@@ -586,7 +586,7 @@ Federation can be terminated by either peer at any time. OGP uses **asymmetric r
 ### Alice Removes Bob
 
 ```bash
-ogp federation remove peer-bob
+ogp federation remove bob
 ```
 
 This:
@@ -598,13 +598,13 @@ This:
 Alice sees:
 ```
 ✓ Notified peer of removal
-✓ Removed peer: peer-bob (Bob)
+✓ Removed peer: bob (Bob)
 ```
 
 If Bob is unreachable:
 ```
 ⚠ Could not notify peer of removal: fetch failed
-✓ Removed peer: peer-bob (Bob)
+✓ Removed peer: bob (Bob)
 ```
 
 The removal still succeeds — the warning only indicates Bob wasn't notified.
