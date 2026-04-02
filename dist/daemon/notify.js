@@ -31,13 +31,21 @@ export async function notifyOpenClaw(payload) {
                             const url = new URL(`${openclawUrl}/hooks/agent`);
                             const isHttps = url.protocol === 'https:';
                             const target = resolveNotifyTarget(config, payload.agent);
-                            const body = JSON.stringify({
+                            const hookPayload = {
+                                agentId: payload.agent || config.agentId || 'default',
+                                peerId: payload.peerId || payload.metadata?.ogp?.from || 'unknown',
+                                intent: payload.intent || payload.metadata?.ogp?.intent || 'unknown',
+                                topic: payload.topic || payload.metadata?.ogp?.topic || 'general',
                                 message: payload.text,
+                                notifyTarget: target || config.notifyTarget || null,
+                                timestamp: new Date().toISOString(),
+                                // Legacy fields for backward compatibility
                                 name: 'OGP',
                                 deliver: true,
                                 channel: config.notifyChannel || 'last',
                                 ...(target ? { to: target } : {}),
-                            });
+                            };
+                            const body = JSON.stringify(hookPayload);
                             const reqFn = isHttps ? httpsRequest : httpRequest;
                             const req = reqFn({
                                 hostname: url.hostname,
