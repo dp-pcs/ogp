@@ -8,7 +8,8 @@ Detailed walkthrough of OGP federation message flows.
 2. [Federation Request](#federation-request)
 3. [Federation Approval](#federation-approval)
 4. [Message Exchange](#message-exchange)
-5. [Security Model](#security-model)
+5. [Federation Removal (Asymmetric Tear-Down)](#federation-removal-asymmetric-tear-down)
+6. [Security Model](#security-model)
 
 ## Discovery
 
@@ -66,7 +67,7 @@ ogp federation request https://bob.example.com
 Or specify a custom peer-id:
 
 ```bash
-ogp federation request https://bob.example.com peer-bob
+ogp federation request https://bob.example.com --alias bob
 ```
 
 This:
@@ -135,7 +136,7 @@ Bob approves Alice's request. In v0.2.0+, Bob can include **scope grants** to co
 Approve with scope grants (v0.2.0+):
 
 ```bash
-ogp federation approve peer-alice \
+ogp federation approve alice \
   --intents message,agent-comms \
   --rate 100/3600 \
   --topics memory-management,task-delegation
@@ -144,7 +145,7 @@ ogp federation approve peer-alice \
 Or approve without restrictions (v0.1 compatibility):
 
 ```bash
-ogp federation approve peer-alice
+ogp federation approve alice
 ```
 
 This:
@@ -251,7 +252,7 @@ Alice sends a message to Bob.
 ### Alice Sends
 
 ```bash
-ogp federation send peer-bob message '{"text":"Hello, Bob!"}'
+ogp federation send bob message '{"text":"Hello, Bob!"}'
 ```
 
 This:
@@ -370,7 +371,7 @@ Agent-comms enables rich agent-to-agent communication with topic routing, priori
 ### Alice Sends Agent-Comms
 
 ```bash
-ogp federation agent peer-bob memory-management "How do you persist context?" --priority high --wait
+ogp federation agent bob memory-management "How do you persist context?" --priority high --wait
 ```
 
 ### Request
@@ -448,7 +449,7 @@ Project intents enable collaborative project management across federated peers.
 ### Alice Sends Contribution
 
 ```bash
-ogp project send-contribution peer-bob shared-app progress "Completed authentication system"
+ogp project send-contribution bob shared-app progress "Completed authentication system"
 ```
 
 ### Request
@@ -500,7 +501,7 @@ Bob sees:
 ### Alice Queries Bob's Project
 
 ```bash
-ogp project query-peer peer-bob shared-app --limit 10
+ogp project query-peer bob shared-app --limit 10
 ```
 
 ### Request
@@ -568,6 +569,118 @@ Content-Type: application/json
 ```
 
 Alice receives a unified view of project activity from both local and Bob's contributions.
+
+## Federation Removal (Asymmetric Tear-Down)
+
+Federation can be terminated by either peer at any time. OGP uses **asymmetric removal** — when one peer removes the other, the removed peer is notified but does not need to acknowledge the removal for it to take effect.
+
+### How Asymmetric Removal Works
+
+1. **Initiator removes peer** — Alice decides to remove Bob from her federation list
+2. **Notification sent (best-effort)** — Alice's daemon POSTs to Bob's `/federation/removed` endpoint
+3. **Removal takes effect immediately** — Alice's side is updated regardless of whether Bob receives the notification
+4. **Bob is notified (if reachable)** — If Bob's gateway is online, he receives the notification and updates his peer list
+
+**Important:** The removal notification is **best-effort only**. Network failures, firewalls, or offline peers do not prevent removal. The removing peer's decision is authoritative.
+
+### Alice Removes Bob
+
+```bash
+ogp federation remove peer-bob
+```
+
+This:
+1. Signs a removal payload with Alice's private key
+2. POSTs the notification to Bob's `/federation/removed` endpoint
+3. Updates Bob's status to `removed` in Alice's `~/.ogp/peers.json`
+4. Notifies Alice's OpenClaw agent of the removal
+
+Alice sees:
+```
+✓ Notified peer of removal
+✓ Removed peer: peer-bob (Bob)
+```
+
+If Bob is unreachable:
+```
+⚠ Could not notify peer of removal: fetch failed
+✓ Removed peer: peer-bob (Bob)
+```
+
+The removal still succeeds — the warning only indicates Bob wasn't notified.
+
+### Removal Notification Payload
+
+Alice sends to Bob's `/federation/removed`:
+
+```http
+POST /federation/removed HTTP/1.1
+Host: bob.example.com
+Content-Type: application/json
+
+{
+  "peerId": "peer-alice",
+  "timestamp": "2026-04-02T04:10:00.000Z",
+  "signature": "a1b2c3d4e5f6..."
+}
+```
+
+The signature covers the JSON-serialized payload `{peerId, timestamp}` signed with Alice's Ed25519 private key.
+
+### Bob Receives Removal Notification
+
+Bob's OGP daemon:
+1. Validates required fields (`peerId`, `timestamp`, `signature`)
+2. Finds the peer by `peerId` (404 if unknown)
+3. Verifies the signature using Alice's public key (403 if invalid)
+4. Checks timestamp freshness (5-minute window, 400 if stale)
+5. Updates Alice's status to `removed` in `~/.ogp/peers.json`
+6. Notifies Bob's OpenClaw agent
+
+Bob sees:
+```
+[OGP Federation Removed] Alice (peer-alice) has removed your gateway from their federation
+Your gateway is no longer federated with Alice.
+You can re-establish federation by sending a new request if needed.
+```
+
+### Bob's Response to Alice
+
+```json
+{
+  "success": true,
+  "peerId": "peer-alice",
+  "status": "removed"
+}
+```
+
+Error responses:
+- `400` — Missing required fields or stale timestamp
+- `403` — Invalid signature (possible impersonation attempt)
+- `404` — Unknown peer (peer already removed or never existed)
+- `500` — Failed to update peer status
+
+### Re-establishing Federation
+
+After removal, either peer can re-establish federation by sending a new request:
+
+```bash
+# Alice wants to federate with Bob again
+ogp federation request https://bob.example.com
+
+# Or Bob initiates
+ogp federation request https://alice.example.com
+```
+
+The new request goes through the normal request → approval flow.
+
+### Removed Peer Status
+
+Peers with `removed` status remain in `~/.ogp/peers.json` for audit purposes but:
+- Cannot send messages to you
+- Do not appear in `ogp federation list` by default
+- Can be viewed with `ogp federation list --status removed` (flag not yet implemented)
+- Can be re-added by initiating a new federation request
 
 ## Security Model
 

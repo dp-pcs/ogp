@@ -152,16 +152,16 @@ You should see:
 
 ## Step 7: Federate with a Peer
 
-Ask a friend to share their OGP gateway URL. The peer-id is now **optional** - OGP will auto-resolve it from the gateway's `/.well-known/ogp` endpoint:
+Ask a friend to share their OGP gateway URL. The alias is now **optional** - OGP will auto-resolve it from the gateway's `/.well-known/ogp` endpoint:
 
 ```bash
 ogp federation request https://peer.example.com
 ```
 
-Or specify a custom peer-id:
+Or specify a custom alias for easier reference:
 
 ```bash
-ogp federation request https://peer.example.com peer-bob
+ogp federation request https://peer.example.com --alias bob
 ```
 
 You'll see:
@@ -176,7 +176,7 @@ Wait for Bob to approve your request. In v0.2.3, Bob can approve with **scope gr
 
 ```bash
 # Bob approves with specific intents and rate limits
-ogp federation approve peer-alice \
+ogp federation approve alice \
   --intents message,agent-comms \
   --rate 100/3600 \
   --topics memory-management,task-delegation
@@ -185,7 +185,7 @@ ogp federation approve peer-alice \
 Or approve without restrictions (v0.1 compatibility):
 
 ```bash
-ogp federation approve peer-alice
+ogp federation approve alice
 ```
 
 Check your approved peers:
@@ -197,7 +197,7 @@ ogp federation list --status approved
 ## Step 8: Send Your First Message
 
 ```bash
-ogp federation send peer-bob message '{"text":"Hello from OGP!"}'
+ogp federation send bob message '{"text":"Hello from OGP!"}'
 ```
 
 Bob's OpenClaw agent will receive a notification via Telegram (if configured) or system event:
@@ -214,16 +214,16 @@ Use agent-comms for rich agent collaboration:
 
 ```bash
 # Send agent-comms with topic routing
-ogp federation agent peer-bob memory-management "How do you persist context?"
+ogp federation agent bob memory-management "How do you persist context?"
 
 # High-priority message
-ogp federation agent peer-bob task-delegation "Schedule standup ASAP" --priority high
+ogp federation agent bob task-delegation "Schedule standup ASAP" --priority high
 
 # Wait for reply
-ogp federation agent peer-bob queries "What's the status?" --wait --timeout 60000
+ogp federation agent bob queries "What's the status?" --wait --timeout 60000
 
 # Start a conversation thread
-ogp federation agent peer-bob project-planning "Let's discuss sprint goals" --conversation sprint-42
+ogp federation agent bob project-planning "Let's discuss sprint goals" --conversation sprint-42
 ```
 
 ### Configure Response Policies
@@ -238,10 +238,10 @@ ogp agent-comms policies
 ogp agent-comms configure --global --topics "general,testing" --level summary
 
 # Configure specific peer
-ogp agent-comms configure peer-bob --topics "memory-management" --level full
+ogp agent-comms configure bob --topics "memory-management" --level full
 
 # Add escalation for sensitive topics
-ogp agent-comms add-topic peer-bob calendar --level escalate
+ogp agent-comms add-topic bob calendar --level escalate
 ```
 
 Response levels:
@@ -270,10 +270,10 @@ ogp project status my-app
 ogp project query my-app --limit 10
 
 # Send contribution to peer's project
-ogp project send-contribution peer-bob shared-project progress "Deployed staging environment"
+ogp project send-contribution bob shared-project progress "Deployed staging environment"
 
 # Query peer's project contributions
-ogp project query-peer peer-bob shared-project
+ogp project query-peer bob shared-project
 ```
 
 ### Custom Intents
@@ -297,13 +297,13 @@ ogp intent remove deployment
 
 ```bash
 # Task request
-ogp federation send peer-bob task-request '{
+ogp federation send bob task-request '{
   "taskType": "analysis",
   "description": "Analyze server logs from last hour"
 }'
 
 # Status update
-ogp federation send peer-bob status-update '{
+ogp federation send bob status-update '{
   "status": "online",
   "message": "Ready to collaborate"
 }'
@@ -318,22 +318,22 @@ When someone sends you a federation request:
 ogp federation list --status pending
 
 # Approve with scope grants (v0.2.0+)
-ogp federation approve peer-charlie \
+ogp federation approve charlie \
   --intents message,agent-comms \
   --rate 50/3600 \
   --topics general,project-updates
 
 # Or approve without restrictions
-ogp federation approve peer-charlie
+ogp federation approve charlie
 
 # Or reject
-ogp federation reject peer-charlie
+ogp federation reject charlie
 
 # View granted scopes
-ogp federation scopes peer-charlie
+ogp federation scopes charlie
 
 # Update scopes later
-ogp federation grant peer-charlie \
+ogp federation grant charlie \
   --intents agent-comms \
   --topics memory-management,planning \
   --rate 100/3600
@@ -377,7 +377,7 @@ The peer must approve your federation request first. Contact them or check their
 Check the peer's granted scopes:
 
 ```bash
-ogp federation scopes peer-bob
+ogp federation scopes bob
 ```
 
 Request the peer to update your grants if needed.

@@ -210,6 +210,7 @@ https://your-gateway-url.com/.well-known/ogp
 | `ogp federation request <url> [alias]` | Request federation (alias auto-resolves if omitted) |
 | `ogp federation approve <peer-id> [options]` | Approve with optional scope grants |
 | `ogp federation reject <peer-id>` | Reject a federation request |
+| `ogp federation remove <peer-id>` | Remove a peer from federation (asymmetric tear-down) |
 | `ogp federation send <peer-id> <intent> <json>` | Send a message to an approved peer |
 | `ogp federation scopes <peer-id>` | Show scope grants for a peer |
 | `ogp federation grant <peer-id> [options]` | Update scope grants for a peer |
@@ -291,6 +292,9 @@ ogp federation scopes alice
 ogp federation grant alice \
   --intents agent-comms \
   --topics project-planning
+
+# Remove a peer from federation (asymmetric tear-down)
+ogp federation remove alice
 
 # Test connectivity
 ogp federation ping https://peer.example.com
@@ -650,16 +654,16 @@ ogp intent register deployment \
 ogp federation approve alice --intents deployment --rate 50/3600
 ```
 
-### 5. Auto Peer-ID Resolution (v0.2.3+)
+### 5. Auto Peer-Alias Resolution (v0.2.3+)
 
-Peer IDs automatically resolve from `/.well-known/ogp` - no need to specify manually.
+Peer aliases automatically resolve from `/.well-known/ogp` - no need to specify manually.
 
 **Example:**
 ```bash
-# Old way (still works)
-ogp federation request https://peer.example.com peer-alice
+# Specify a friendly alias when connecting (recommended)
+ogp federation request https://peer.example.com --alias alice
 
-# New way (auto-resolves)
+# New way (auto-resolves from gateway display name)
 ogp federation request https://peer.example.com
 ```
 
@@ -692,14 +696,61 @@ When you create a project, its ID is automatically registered as an agent-comms 
 ogp project create my-app "My Application"
 
 # Approving a peer also registers existing projects as topics
-ogp federation approve peer-alice --intents agent-comms
+ogp federation approve alice --intents agent-comms
 ```
 
 ### Backward Compatibility
 
 - v0.1 peers work without scope negotiation (default rate limits apply)
 - v0.2+ gateways automatically detect protocol version
+- **petname → alias migration**: The deprecated `--petname` flag automatically maps to `--alias` with a deprecation warning. Existing peer data with `petname` fields is auto-migrated to `alias` on load.
 - No breaking changes - existing federations continue working
+
+## Peer Aliases vs Public Key IDs
+
+OGP uses two different identifiers for peers:
+
+| Identifier | Purpose | Example |
+|------------|---------|---------|
+| **Public Key ID** | Cryptographic identity used in messages | `abc123...def456` (Ed25519 public key) |
+| **Alias** | User-friendly name for CLI convenience | `alice`, `big-papa`, `staging-server` |
+
+### How Aliases Work
+
+- When you request federation, you can optionally specify an alias: `ogp federation request <url> --alias alice`
+- If omitted, OGP auto-resolves an alias from the peer's `displayName` in `/.well-known/ogp`
+- The alias is stored locally in `~/.ogp/peers.json` alongside the peer's public key
+- You reference peers by alias in all CLI commands (`ogp federation send alice message ...`)
+
+### Setting or Changing an Alias
+
+```bash
+# Set alias when requesting federation
+ogp federation request https://peer.example.com --alias big-papa
+
+# Set alias when connecting by public key (rendezvous)
+ogp federation connect <pubkey> --alias big-papa
+
+# Set alias when accepting an invite
+ogp federation accept <token> --alias big-papa
+
+# Change alias for existing peer
+ogp federation alias <peer-id> <new-alias>
+```
+
+### Legacy petname Support
+
+The `--petname` flag is deprecated but still works for backward compatibility:
+
+```bash
+# This will work but show a deprecation warning
+ogp federation request https://peer.example.com --petname big-papa
+# ⚠️  --petname is deprecated. Use --alias instead.
+```
+
+Data migration happens automatically:
+- On daemon startup, any peer with a `petname` field gets migrated to `alias`
+- The deprecated `petname` field is removed from storage after migration
 
 ## Agent-Comms Response Policies
 
