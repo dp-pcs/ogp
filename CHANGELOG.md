@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.28 (2026-04-01)
+
+### BUILD-113: Asymmetric Federation Removal Notifications
+
+- `/federation/removed` endpoint now triggers OpenClaw notification when a peer removes your gateway
+- User is notified via their agent session with peer details
+- Notification includes: peer display name, ID, timestamp, and removal type
+- Uses best-effort delivery (no retry) since removal is already processed
+
+---
+
 ## 0.2.27 (2026-04-01)
 
 ### Critical Fix: Peer ID Normalization (BUILD-111)

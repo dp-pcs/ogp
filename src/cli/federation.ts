@@ -2,7 +2,7 @@ import { listPeers, loadPeers, savePeers, getPeer, getPeerByUrl, getPeerByPublic
 import { requireConfig } from '../shared/config.js';
 import { lookupPeer } from '../daemon/rendezvous.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
-import { signObject } from '../shared/signing.js';
+import { signObject, sign } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
 import {
   type ScopeBundle,
@@ -270,8 +270,42 @@ export async function federationRemove(peerId: string): Promise<void> {
     console.error(`Peer not found: ${peerId}`);
     process.exit(1);
   }
-  const filtered = peers.filter(p => p.id !== peerId);
-  savePeers(filtered);
+
+  // BUILD-113: Send removal notification to peer before removing
+  try {
+    const keypair = loadOrGenerateKeyPair();
+    // BUILD-111: Use public key prefix as our ID (not hostname:port)
+    const ourId = keypair.publicKey.substring(0, 16);
+    const timestamp = new Date().toISOString();
+    
+    // Sign the removal payload
+    const payload = { peerId: ourId, timestamp };
+    const payloadStr = JSON.stringify(payload);
+    const signature = sign(payloadStr, keypair.privateKey);
+    
+    const response = await fetch(`${peer.gatewayUrl}/federation/removed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        peerId: ourId,
+        timestamp,
+        signature
+      })
+    });
+    
+    if (response.ok) {
+      console.log(`✓ Notified peer of removal`);
+    } else {
+      console.warn(`⚠ Peer notification failed: ${response.status} ${response.statusText}`);
+    }
+  } catch (error) {
+    // Log network errors but don't fail the removal
+    console.warn(`⚠ Could not notify peer of removal: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // Update peer status to 'removed' instead of deleting (audit trail)
+  const { removePeer } = await import('../daemon/peers.js');
+  removePeer(peerId);
   console.log(`✓ Removed peer: ${peerId} (${peer.displayName})`);
 }
 

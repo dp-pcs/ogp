@@ -347,6 +347,42 @@ export function startServer(config?: OGPConfig, background = false): void {
 
       console.log(`[OGP] Federation removed by ${peer.displayName} (${peer.id})`);
 
+      // BUILD-113: Notify OpenClaw that a peer has removed us
+      const notificationText = `[OGP Federation Removed] ${peer.displayName} (${peer.id}) has removed your gateway from their federation\n` +
+        `Your gateway is no longer federated with ${peer.displayName}.\n` +
+        `You can re-establish federation by sending a new request if needed.`;
+
+      const notificationPayload = {
+        text: notificationText,
+        sessionKey: 'agent:main:main',
+        metadata: {
+          ogp: {
+            type: 'federation_removed',
+            peer: {
+              id: peer.id,
+              displayName: peer.displayName,
+              email: peer.email,
+              gatewayUrl: peer.gatewayUrl
+            },
+            removedAt: new Date().toISOString(),
+            removalType: 'asymmetric'
+          }
+        }
+      };
+
+      // Fire notification (best effort - no retry needed as removal is already processed)
+      try {
+        const notified = await notifyOpenClaw(notificationPayload);
+        if (notified) {
+          console.log(`[OGP] Agent session notified of federation removal by ${peer.displayName}`);
+        } else {
+          console.warn(`[OGP] Failed to notify agent session of federation removal by ${peer.displayName} (logged but not retried)`);
+        }
+      } catch (error) {
+        console.error(`[OGP] Error notifying agent session of removal:`, error);
+        // No retry - removal is already processed, notification is best-effort
+      }
+
       res.json({
         success: true,
         peerId: peer.id,
