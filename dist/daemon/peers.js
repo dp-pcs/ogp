@@ -27,7 +27,27 @@ export function savePeers(peers) {
     ensureConfigDir();
     // Strip deprecated petname field from saved data (migration complete)
     const cleanPeers = peers.map(({ petname, ...peer }) => peer);
-    fs.writeFileSync(PEERS_FILE, JSON.stringify(cleanPeers, null, 2), 'utf-8');
+    const tempFile = `${PEERS_FILE}.tmp`;
+    try {
+        // BUILD-116: Atomic write - write to temp file first, then rename
+        // This prevents race conditions where concurrent reads get stale data
+        fs.writeFileSync(tempFile, JSON.stringify(cleanPeers, null, 2), 'utf-8');
+        fs.renameSync(tempFile, PEERS_FILE);
+        return true;
+    }
+    catch (error) {
+        console.error('[OGP] Failed to save peers:', error);
+        // Clean up temp file if it exists
+        try {
+            if (fs.existsSync(tempFile)) {
+                fs.unlinkSync(tempFile);
+            }
+        }
+        catch (cleanupError) {
+            // Ignore cleanup errors
+        }
+        return false;
+    }
 }
 export function addPeer(peer) {
     const peers = loadPeers();
@@ -38,7 +58,7 @@ export function addPeer(peer) {
     else {
         peers.push(peer);
     }
-    savePeers(peers);
+    return savePeers(peers);
 }
 export function getPeer(peerId) {
     const peers = loadPeers();
@@ -73,8 +93,11 @@ export function approvePeer(peerId) {
         return false;
     peer.status = 'approved';
     peer.approvedAt = new Date().toISOString();
-    savePeers(peers);
-    return true;
+    const saved = savePeers(peers);
+    if (!saved) {
+        console.error(`[OGP] Failed to persist approval for peer ${peerId}`);
+    }
+    return saved;
 }
 export function rejectPeer(peerId) {
     const peers = loadPeers();

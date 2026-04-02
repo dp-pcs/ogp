@@ -22,8 +22,8 @@ export interface Peer {
     agentId?: string;
 }
 export declare function loadPeers(): Peer[];
-export declare function savePeers(peers: Peer[]): void;
-export declare function addPeer(peer: Peer): void;
+export declare function savePeers(peers: Peer[]): boolean;
+export declare function addPeer(peer: Peer): boolean;
 export declare function getPeer(peerId: string): Peer | null;
 export declare function getPeerByUrl(gatewayUrl: string): Peer | null;
 export declare function getPeerByPublicKey(publicKey: string): Peer | null;

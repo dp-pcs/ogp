@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.30 (2026-04-02)
+
+### BUILD-116: Race Condition Fix for Peer Storage
+
+**Problem:** When a peer approval was received, the status update didn't persist to disk because of a race condition between concurrent `savePeers()` calls. The approval notification would update the peer in memory, but a concurrent write would overwrite it with stale data.
+
+**Solution:**
+- Changed `savePeers()` to use atomic file writes (write to temp file, then rename)
+- Added error handling and logging for disk write failures
+- `savePeers()` now returns boolean to indicate success/failure
+- `approvePeer()`, `addPeer()`, and other peer functions now log errors on save failure
+
+**Impact:** Federation approvals now reliably persist to disk. The requester automatically sees "approved" status after the approver confirms.
+
+---
+
 ## 0.2.29 (2026-04-02)
 
 ### BUILD-115: Agent-Specific Notification Routing
