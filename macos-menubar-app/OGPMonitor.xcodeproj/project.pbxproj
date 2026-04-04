@@ -1,0 +1,191 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		OGP00001 /* OGPMonitorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00002 /* OGPMonitorApp.swift */; };
+		OGP00003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00004 /* ContentView.swift */; };
+		OGP00005 /* OGPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00006 /* OGPService.swift */; };
+		OGP00007 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00008 /* Models.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		OGP00009 /* OGPMonitor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OGPMonitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		OGP00002 /* OGPMonitorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OGPMonitorApp.swift; sourceTree = "<group>"; };
+		OGP00004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		OGP00006 /* OGPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OGPService.swift; sourceTree = "<group>"; };
+		OGP00008 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		OGP00010 = {
+			isa = PBXGroup;
+			children = (
+				OGP00011 /* OGPMonitor */,
+				OGP00012 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		OGP00011 /* OGPMonitor */ = {
+			isa = PBXGroup;
+			children = (
+				OGP00002 /* OGPMonitorApp.swift */,
+				OGP00004 /* ContentView.swift */,
+				OGP00006 /* OGPService.swift */,
+				OGP00008 /* Models.swift */,
+			);
+			path = OGPMonitor;
+			sourceTree = "<group>";
+		};
+		OGP00012 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				OGP00009 /* OGPMonitor.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		OGP00013 /* OGPMonitor */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = OGP00014 /* Build configuration list for PBXNativeTarget "OGPMonitor" */;
+			buildPhases = (
+				OGP00015 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OGPMonitor;
+			productName = OGPMonitor;
+			productReference = OGP00009 /* OGPMonitor.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		OGP00016 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+			};
+			buildConfigurationList = OGP00017 /* Build configuration list for PBXProject "OGPMonitor" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = OGP00010;
+			productRefGroup = OGP00012 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				OGP00013 /* OGPMonitor */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		OGP00015 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				OGP00001 /* OGPMonitorApp.swift in Sources */,
+				OGP00003 /* ContentView.swift in Sources */,
+				OGP00005 /* OGPService.swift in Sources */,
+				OGP00007 /* Models.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		OGP00018 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ogp.monitor;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		OGP00019 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ogp.monitor;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		OGP00014 /* Build configuration list for PBXNativeTarget "OGPMonitor" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				OGP00018 /* Debug */,
+				OGP00019 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		OGP00017 /* Build configuration list for PBXProject "OGPMonitor" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				OGP00018 /* Debug */,
+				OGP00019 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = OGP00016 /* Project object */;
+}
