@@ -55,6 +55,13 @@ export interface OGPConfig {
   notifyTargets?: Record<string, string>;
   // BUILD-115: Agent-specific notification routing — which agent owns this gateway
   agentId?: string;
+
+  // Platform selection (optional, defaults to 'openclaw' for backward compatibility)
+  platform?: 'openclaw' | 'hermes';
+
+  // Hermes-specific configuration (optional, only used when platform === 'hermes')
+  hermesWebhookUrl?: string;
+  hermesWebhookSecret?: string;
 }
 
 const DEFAULT_CONFIG_DIR = process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');

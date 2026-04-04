@@ -41,6 +41,9 @@ export interface OGPConfig {
     notifyTarget?: string;
     notifyTargets?: Record<string, string>;
     agentId?: string;
+    platform?: 'openclaw' | 'hermes';
+    hermesWebhookUrl?: string;
+    hermesWebhookSecret?: string;
 }
 export declare function getConfigPath(): string;
 export declare function getConfigDir(): string;
