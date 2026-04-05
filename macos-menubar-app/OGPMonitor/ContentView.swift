@@ -5,22 +5,6 @@ struct ContentView: View {
     @State private var expandedPeers: Set<String> = []
 
     var body: some View {
-        if service.showTunnelSelection {
-            TunnelSelectionView(
-                options: service.tunnelOptions,
-                onSelect: { option in
-                    service.startTunnel(option)
-                },
-                onCancel: {
-                    service.showTunnelSelection = false
-                }
-            )
-        } else {
-            mainView
-        }
-    }
-
-    private var mainView: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
@@ -49,6 +33,40 @@ struct ContentView: View {
                 status: service.status.tunnelStatus,
                 action: tunnelAction
             )
+
+            // Tunnel selection (inline)
+            if service.showTunnelSelection {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Select tunnel:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 20)
+
+                    ForEach(service.tunnelOptions) { option in
+                        Button(action: {
+                            service.startTunnel(option)
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: tunnelIcon(for: option))
+                                    .font(.caption)
+                                Text(option.name)
+                                    .font(.caption)
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button("Cancel") {
+                        service.showTunnelSelection = false
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .padding(.leading, 20)
+                }
+                .padding(.vertical, 4)
+            }
 
             Divider()
 
@@ -127,6 +145,17 @@ struct ContentView: View {
             service.promptTunnelSelection()
         }
     }
+
+    private func tunnelIcon(for option: TunnelOption) -> String {
+        switch option.type {
+        case .cloudflareNamed:
+            return "cloud.fill"
+        case .cloudflareFree:
+            return "cloud"
+        case .ngrok:
+            return "network"
+        }
+    }
 }
 
 // MARK: - Status Row
@@ -135,6 +164,7 @@ struct StatusRow: View {
     let label: String
     let status: ServiceStatus
     let action: () -> Void
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         HStack {
@@ -148,10 +178,15 @@ struct StatusRow: View {
             Spacer()
 
             Button(actionLabel) {
+                // Don't dismiss menu when clicking these buttons
                 action()
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
             .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(4)
         }
     }
 

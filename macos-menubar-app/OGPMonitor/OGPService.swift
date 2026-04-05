@@ -58,13 +58,17 @@ class OGPService: ObservableObject {
     private func loadConfig() {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: ogpConfigPath)),
               let config = try? JSONDecoder().decode(OGPConfig.self, from: data) else {
+            print("⚠️ Failed to load OGP config from \(ogpConfigPath)")
             return
         }
+
+        print("✓ Loaded OGP config: port=\(config.daemonPort)")
 
         DispatchQueue.main.async {
             self.config = config
             // Initialize tunnel manager with the OGP port
             self.tunnelManager = TunnelManager(ogpPort: config.daemonPort)
+            print("✓ TunnelManager initialized")
         }
     }
 
@@ -104,10 +108,12 @@ class OGPService: ObservableObject {
     private func checkTunnelStatus() -> ServiceStatus {
         // Use TunnelManager to detect any tunnel serving the OGP port
         guard let manager = tunnelManager else {
+            print("⚠️ TunnelManager not initialized, defaulting to stopped")
             return .stopped
         }
 
-        return manager.detectRunningTunnel() ? .running : .stopped
+        let isRunning = manager.detectRunningTunnel()
+        return isRunning ? .running : .stopped
     }
 
     private func loadPeers() -> [Peer] {
@@ -154,13 +160,16 @@ class OGPService: ObservableObject {
     func startTunnel(_ option: TunnelOption) {
         guard let manager = tunnelManager else { return }
 
+        print("Starting tunnel: \(option.name)")
         manager.startTunnel(option)
 
         DispatchQueue.main.async {
             self.showTunnelSelection = false
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        // Give tunnel time to start before checking status
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            print("Refreshing status after tunnel start...")
             self.refreshStatus()
         }
     }
