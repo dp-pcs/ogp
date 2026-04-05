@@ -5,6 +5,22 @@ struct ContentView: View {
     @State private var expandedPeers: Set<String> = []
 
     var body: some View {
+        if service.showTunnelSelection {
+            TunnelSelectionView(
+                options: service.tunnelOptions,
+                onSelect: { option in
+                    service.startTunnel(option)
+                },
+                onCancel: {
+                    service.showTunnelSelection = false
+                }
+            )
+        } else {
+            mainView
+        }
+    }
+
+    private var mainView: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
@@ -108,7 +124,7 @@ struct ContentView: View {
         if service.status.tunnelStatus == .running {
             service.stopTunnel()
         } else {
-            service.startTunnel()
+            service.promptTunnelSelection()
         }
     }
 }

@@ -3,20 +3,21 @@ import Foundation
 class OGPService: ObservableObject {
     @Published var status: OGPStatus = .empty
     @Published var config: OGPConfig = .default
+    @Published var showTunnelSelection: Bool = false
+    @Published var tunnelOptions: [TunnelOption] = []
 
     private var timer: Timer?
     private let fileManager = FileManager.default
     private let ogpConfigPath: String
     private let ogpPeersPath: String
-    private let tunnelPidPath: String
     private let daemonPidPath: String
+    private var tunnelManager: TunnelManager?
 
     init() {
         let homeDir = fileManager.homeDirectoryForCurrentUser.path
         let ogpDir = "\(homeDir)/.ogp"
         self.ogpConfigPath = "\(ogpDir)/config.json"
         self.ogpPeersPath = "\(ogpDir)/peers.json"
-        self.tunnelPidPath = "\(ogpDir)/tunnel.pid"
         self.daemonPidPath = "\(ogpDir)/daemon.pid"
 
         loadConfig()
@@ -62,6 +63,8 @@ class OGPService: ObservableObject {
 
         DispatchQueue.main.async {
             self.config = config
+            // Initialize tunnel manager with the OGP port
+            self.tunnelManager = TunnelManager(ogpPort: config.daemonPort)
         }
     }
 
@@ -99,33 +102,12 @@ class OGPService: ObservableObject {
     }
 
     private func checkTunnelStatus() -> ServiceStatus {
-        // Check if tunnel PID file exists
-        guard fileManager.fileExists(atPath: tunnelPidPath),
-              let pidString = try? String(contentsOfFile: tunnelPidPath, encoding: .utf8),
-              let pid = Int(pidString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        // Use TunnelManager to detect any tunnel serving the OGP port
+        guard let manager = tunnelManager else {
             return .stopped
         }
 
-        // Check if process is running
-        let task = Process()
-        task.launchPath = "/bin/ps"
-        task.arguments = ["-p", "\(pid)"]
-
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = pipe
-
-        do {
-            try task.run()
-            task.waitUntilExit()
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-
-            return output.contains("\(pid)") ? .running : .stopped
-        } catch {
-            return .stopped
-        }
+        return manager.detectRunningTunnel() ? .running : .stopped
     }
 
     private func loadPeers() -> [Peer] {
@@ -158,16 +140,35 @@ class OGPService: ObservableObject {
         }
     }
 
-    func startTunnel() {
-        runCommand("ogp", arguments: ["expose", "--background"])
+    func promptTunnelSelection() {
+        guard let manager = tunnelManager else { return }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        let options = manager.getAvailableTunnels()
+
+        DispatchQueue.main.async {
+            self.tunnelOptions = options
+            self.showTunnelSelection = true
+        }
+    }
+
+    func startTunnel(_ option: TunnelOption) {
+        guard let manager = tunnelManager else { return }
+
+        manager.startTunnel(option)
+
+        DispatchQueue.main.async {
+            self.showTunnelSelection = false
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             self.refreshStatus()
         }
     }
 
     func stopTunnel() {
-        runCommand("ogp", arguments: ["expose", "stop"])
+        guard let manager = tunnelManager else { return }
+
+        manager.stopTunnel()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             self.refreshStatus()
@@ -191,26 +192,58 @@ class OGPService: ObservableObject {
     // MARK: - Helpers
 
     private func runCommand(_ command: String, arguments: [String]) {
+        // Find ogp in common locations (GUI apps don't inherit shell PATH)
+        let commonPaths = [
+            "/opt/homebrew/bin/ogp",
+            "/usr/local/bin/ogp",
+            "\(fileManager.homeDirectoryForCurrentUser.path)/.npm-global/bin/ogp",
+            "\(fileManager.homeDirectoryForCurrentUser.path)/.nvm/versions/node/*/bin/ogp"
+        ]
+
+        var ogpPath: String?
+        for path in commonPaths {
+            if path.contains("*") {
+                // Handle glob pattern for nvm
+                if let matches = try? fileManager.contentsOfDirectory(atPath: path.replacingOccurrences(of: "/*/bin/ogp", with: "")),
+                   let nodeVersion = matches.first(where: { $0.hasPrefix("v") }) {
+                    let expandedPath = path.replacingOccurrences(of: "*", with: nodeVersion)
+                    if fileManager.fileExists(atPath: expandedPath) {
+                        ogpPath = expandedPath
+                        break
+                    }
+                }
+            } else if fileManager.fileExists(atPath: path) {
+                ogpPath = path
+                break
+            }
+        }
+
+        guard let commandPath = ogpPath else {
+            print("Failed to find ogp command in common locations")
+            print("Tried: \(commonPaths)")
+            return
+        }
+
         let task = Process()
+        task.launchPath = commandPath
+        task.arguments = arguments
 
-        // Find ogp in PATH
-        let whichTask = Process()
-        whichTask.launchPath = "/usr/bin/which"
-        whichTask.arguments = [command]
-
+        // Capture output for debugging
         let pipe = Pipe()
-        whichTask.standardOutput = pipe
+        task.standardOutput = pipe
+        task.standardError = pipe
 
         do {
-            try whichTask.run()
-            whichTask.waitUntilExit()
+            try task.run()
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let commandPath = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !commandPath.isEmpty {
-                task.launchPath = commandPath
-                task.arguments = arguments
-                try task.run()
+            // Don't wait for completion since --background commands detach
+            if !arguments.contains("--background") {
+                task.waitUntilExit()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let output = String(data: data, encoding: .utf8), !output.isEmpty {
+                    print("Command output: \(output)")
+                }
             }
         } catch {
             print("Failed to run command: \(error)")

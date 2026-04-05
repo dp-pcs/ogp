@@ -11,6 +11,8 @@
 		OGP00003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00004 /* ContentView.swift */; };
 		OGP00005 /* OGPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00006 /* OGPService.swift */; };
 		OGP00007 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00008 /* Models.swift */; };
+		OGP00020 /* TunnelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00021 /* TunnelManager.swift */; };
+		OGP00022 /* TunnelSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00023 /* TunnelSelectionView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -19,6 +21,8 @@
 		OGP00004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		OGP00006 /* OGPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OGPService.swift; sourceTree = "<group>"; };
 		OGP00008 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		OGP00021 /* TunnelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelManager.swift; sourceTree = "<group>"; };
+		OGP00023 /* TunnelSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelSelectionView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -35,7 +39,9 @@
 			children = (
 				OGP00002 /* OGPMonitorApp.swift */,
 				OGP00004 /* ContentView.swift */,
+				OGP00023 /* TunnelSelectionView.swift */,
 				OGP00006 /* OGPService.swift */,
+				OGP00021 /* TunnelManager.swift */,
 				OGP00008 /* Models.swift */,
 			);
 			path = OGPMonitor;
@@ -102,7 +108,9 @@
 			files = (
 				OGP00001 /* OGPMonitorApp.swift in Sources */,
 				OGP00003 /* ContentView.swift in Sources */,
+				OGP00022 /* TunnelSelectionView.swift in Sources */,
 				OGP00005 /* OGPService.swift in Sources */,
+				OGP00020 /* TunnelManager.swift in Sources */,
 				OGP00007 /* Models.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
