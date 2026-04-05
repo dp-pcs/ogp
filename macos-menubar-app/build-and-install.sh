@@ -32,9 +32,19 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     # Kill any running instances
     pkill -f OGPMonitor 2>/dev/null || true
 
+    # Remove old version
+    rm -rf /Applications/OGPMonitor.app
+
     # Copy to Applications
     cp -R "$APP_PATH" /Applications/
     echo "✓ Installed to /Applications/OGPMonitor.app"
+
+    # Clear icon cache so macOS picks up the new icon
+    echo "🔄 Refreshing icon cache..."
+    rm -rf ~/Library/Caches/com.apple.iconservices* 2>/dev/null || true
+    touch /Applications/OGPMonitor.app
+    killall Dock 2>/dev/null || true
+    sleep 1
     echo ""
 
     # Ask to launch
