@@ -13,6 +13,7 @@
 		OGP00007 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00008 /* Models.swift */; };
 		OGP00020 /* TunnelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00021 /* TunnelManager.swift */; };
 		OGP00022 /* TunnelSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00023 /* TunnelSelectionView.swift */; };
+		OGP00025 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = OGP00024 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -64,6 +65,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = OGP00014 /* Build configuration list for PBXNativeTarget "OGPMonitor" */;
 			buildPhases = (
+				OGP00026 /* Resources */,
 				OGP00015 /* Sources */,
 			);
 			buildRules = (
@@ -102,6 +104,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		OGP00026 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				OGP00025 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		OGP00015 /* Sources */ = {
