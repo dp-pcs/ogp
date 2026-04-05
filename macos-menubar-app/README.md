@@ -4,10 +4,11 @@ A lightweight macOS menu bar app for monitoring OGP (Open Gateway Protocol) stat
 
 ## Features
 
-- **Status Indicator**: Color-coded dot in menu bar
+- **Status Indicator**: OGP brand glyph in menu bar, color-coded by status
   - 🟢 Green: Everything running normally (daemon + tunnel)
   - 🟡 Yellow: Partial service (daemon running, tunnel down)
   - 🔴 Red: Daemon not running
+  - Note: Currently uses template rendering. Add brand assets to `Assets.xcassets` (see ASSETS.md)
 
 - **Smart Tunnel Detection**:
   - Detects any tunnel serving the OGP port (18790)
@@ -57,8 +58,11 @@ When starting a tunnel:
 
 This is a native Swift/SwiftUI app for macOS 13.0+.
 
-1. Open the Xcode project
-2. Build and run (⌘+R)
+1. (Optional) Add OGP brand assets to `Assets.xcassets` - see `ASSETS.md` for details
+2. Open the Xcode project
+3. Build and run (⌘+R)
+
+**Note**: The app will build and run without assets, but the menu bar icon will show a placeholder. See `ASSETS.md` for asset requirements.
 
 ## Installation
 

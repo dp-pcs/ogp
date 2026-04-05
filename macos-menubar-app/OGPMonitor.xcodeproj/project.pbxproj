@@ -23,6 +23,7 @@
 		OGP00009 /* OGPMonitor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OGPMonitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		OGP00021 /* TunnelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelManager.swift; sourceTree = "<group>"; };
 		OGP00023 /* TunnelSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelSelectionView.swift; sourceTree = "<group>"; };
+		OGP00024 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -43,6 +44,7 @@
 				OGP00006 /* OGPService.swift */,
 				OGP00021 /* TunnelManager.swift */,
 				OGP00008 /* Models.swift */,
+				OGP00024 /* Assets.xcassets */,
 			);
 			path = OGPMonitor;
 			sourceTree = "<group>";

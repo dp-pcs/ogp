@@ -8,8 +8,21 @@ struct OGPMonitorApp: App {
         MenuBarExtra {
             ContentView(service: service)
         } label: {
-            // Show colored indicator based on overall status
-            Text(service.status.overallStatus.icon)
+            // Show OGP status glyph with color based on status
+            Image("OGPStatusGlyph")
+                .renderingMode(.template)
+                .foregroundColor(statusColor)
+        }
+    }
+
+    private var statusColor: Color {
+        switch service.status.overallStatus {
+        case .running:
+            return .green
+        case .stopped:
+            return .red
+        case .unknown:
+            return .yellow
         }
     }
 }
