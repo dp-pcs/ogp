@@ -58,18 +58,38 @@ When starting a tunnel:
 
 This is a native Swift/SwiftUI app for macOS 13.0+.
 
-1. (Optional) Add OGP brand assets to `Assets.xcassets` - see `ASSETS.md` for details
-2. Open the Xcode project
-3. Build and run (⌘+R)
+### Development (Run in Xcode)
 
-**Note**: The app will build and run without assets, but the menu bar icon will show a placeholder. See `ASSETS.md` for asset requirements.
+1. Open `OGPMonitor.xcodeproj` in Xcode
+2. Press ⌘+R to build and run
+3. The app appears in your menu bar while Xcode is running
+
+### Production Build (Standalone App)
+
+**Quick Method:**
+```bash
+./build-and-install.sh
+```
+
+This script will:
+- Build a Release version
+- Optionally install to `/Applications`
+- Optionally launch the app
+
+**Manual Method:**
+
+See `BUILD.md` for detailed instructions including:
+- Xcode Archive for distribution
+- Command-line builds
+- Code signing options
 
 ## Installation
 
 After building:
-1. Copy the app to `/Applications`
-2. Grant necessary permissions when prompted
-3. The app will appear in your menu bar
+1. Copy `OGPMonitor.app` to `/Applications`
+2. Launch from Applications folder or Spotlight
+3. The OGP icon appears in your menu bar (background app, no dock icon)
+4. Grant necessary permissions when prompted
 
 ## Requirements
 
