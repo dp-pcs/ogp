@@ -28,9 +28,20 @@
    - No compilation errors ✅
    - Ready for asset files ✅
 
-## ⏳ Pending
+6. **Asset Files Integrated** ✅
+   - Extracted brand assets from `ogp-assets.zip`
+   - Integrated 7 app icon sizes (16px through 1024px)
+   - Added OGP status glyph at 18px with @2x and @3x variants
+   - Included symbol and horizontal logo variants (black/white)
+   - All 22 PNG files properly placed in asset catalog
+   - Build verified with assets - **BUILD SUCCEEDED** ✅
 
-**Asset Files**: The actual PNG files need to be added to complete the visual integration.
+## ✅ Integration Complete
+
+The OGP macOS menubar app now features the official OGP brand glyph in the menu bar, replacing the previous emoji indicators. The glyph automatically tints based on daemon/tunnel status:
+- **Green**: Daemon + Tunnel running
+- **Yellow**: Daemon only (partial service)
+- **Red**: Daemon stopped
 
 ### Required Files:
 
