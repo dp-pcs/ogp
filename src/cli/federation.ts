@@ -143,8 +143,10 @@ export async function federationRequest(peerUrl: string, peerId: string, alias?:
         const card = await cardRes.json() as { displayName?: string; email?: string; publicKey?: string };
         const peerHostname = new URL(peerUrl).hostname;
         const peerPort = new URL(peerUrl).port || '18790';
+        // BUILD-111: Use public key prefix as canonical ID, fall back to hostname:port only if no key
+        const canonicalId = card.publicKey?.substring(0, 16) || `${peerHostname}:${peerPort}`;
         addPeer({
-          id: `${peerHostname}:${peerPort}`,
+          id: canonicalId,
           displayName: card.displayName || peerId,
           email: card.email || '',
           gatewayUrl: peerUrl,

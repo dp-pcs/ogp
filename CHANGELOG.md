@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.31 (2026-04-02)
+
+### BUILD-117: CLI Uses Public Key ID Format for New Peers
+
+**Problem:** When sending a federation request, the CLI created local peer entries with the old `hostname:port` ID format instead of the public key prefix format. This caused duplicate peer entries when the approval response used the new format.
+
+**Solution:**
+- Updated `federationRequest()` in `src/cli/federation.ts` to derive peer ID from `publicKey.substring(0, 16)`
+- Falls back to `hostname:port` only if no public key is available (legacy compatibility)
+- Ensures local peer ID matches the ID format used by the receiving peer
+
+**Impact:** Eliminates duplicate peer entries with different ID formats. Federation requests now use consistent public-key-based identity across both sides.
+
+---
+
 ## 0.2.30 (2026-04-02)
 
 ### BUILD-116: Race Condition Fix for Peer Storage

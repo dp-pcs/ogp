@@ -1015,6 +1015,17 @@ skills/
 
 MIT
 
+## macOS Menu Bar App
+
+A lightweight native macOS app for monitoring OGP status at a glance:
+
+- **Status Indicator**: Color-coded dot in menu bar (🟢/🟡/🔴)
+- **Quick View**: Daemon, tunnel, and peer status
+- **Quick Actions**: Start/stop services with one click
+- **Peer List**: See federated peers, intents, and last activity
+
+See [macos-menubar-app/QUICKSTART.md](./macos-menubar-app/QUICKSTART.md) for setup instructions.
+
 ## Links
 
 - **GitHub Repository**: https://github.com/dp-pcs/ogp

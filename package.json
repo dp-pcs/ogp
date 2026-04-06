@@ -1,6 +1,6 @@
 {
   "name": "@dp-pcs/ogp",
-  "version": "0.2.30",
+  "version": "0.2.31",
   "description": "Open Gateway Protocol (OGP) - Peer-to-peer federation daemon for OpenClaw AI gateways with cryptographic signatures",
   "type": "module",
   "main": "./dist/index.js",
@@ -12,7 +12,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "postinstall": "node scripts/install-skills.js || echo 'Note: Run ogp-install-skills to install OGP skills for your AI agent'"
   },
   "keywords": [
     "ogp",
