@@ -192,37 +192,100 @@ Response levels:
 
 ## Project Creation with Context Interview
 
-When creating a project, conduct this interview to capture where everything lives. This is what enables peer agents to know what to ask you about later.
+When a project is created, run this conversational interview. It is **optional but valuable** — the more context captured here, the more useful the agent becomes for both the user and their collaborators.
 
+**Two things happen with every answer:**
+1. It gets logged as a `context.*` contribution (so peer agents can query it)
+2. It shapes how YOUR agent behaves going forward for this project (so you actually use it)
+
+If the user skips questions, that's fine — the agent operates in generalized mode and logs/queries from `projects.json` only.
+
+### Step 1: Create the project
 ```bash
-# Create the project
 ogp project create <project-id> <name> --description "<description>"
 ```
 
-Then run the interview:
+### Step 2: Run the interview
+
+Ask these questions conversationally — not as a form. Let the user's answers lead naturally. Skip any they don't want to answer.
+
+---
+
+**Q1: How do you track tasks for this project?**
+*(e.g. Linear, Jira, GitHub Issues, Trello, a text file, nothing formal)*
+
+- If answered → `ogp project contribute <id> context.tools "Tasks tracked in: <answer>"`
+- Agent behavior unlocked: When a peer agent asks about tasks/issues/tickets, search here first. If the tool has an API or CLI, offer to query it directly.
+- Example agent behavior: *"Stan's agent is asking what's in your backlog for this project. I can check Linear for you — want me to pull the open items?"*
+- If skipped → agent notes task tracking is unspecified; will only know what's been logged manually
+
+---
+
+**Q2: Where do you keep notes or docs for this project?**
+*(e.g. Obsidian vault at ~/notes/project-x, Notion, GitHub wiki, Apple Notes, Google Docs, a local folder)*
+
+- If answered → `ogp project contribute <id> context.notes "<location>"`
+- Agent behavior unlocked: When a peer asks about ideas, decisions, meeting notes, or any written context — go look there first before saying "I don't know."
+- Example agent behavior: *"Before I answer Stan's question about the API design, let me check your Obsidian vault..."*
+- If skipped → agent can only surface what's been explicitly logged to the project
+
+---
+
+**Q3: Is there a code repository?**
+*(e.g. GitHub URL, GitLab, local git repo path)*
+
+- If answered → `ogp project contribute <id> context.repository "<url or path>"`
+- Agent behavior unlocked: When peer asks about code, architecture, or recent commits — check the repo. Can run `git log`, search files, check open PRs.
+- If skipped → agent won't know where code lives
+
+---
+
+**Q4: Where do you store files for this project?**
+*(e.g. ~/Documents/project-x, iCloud Drive, Google Drive, Dropbox, S3 bucket)*
+
+- If answered → `ogp project contribute <id> context.workspace "<path or location>"`
+- Agent behavior unlocked: When peer asks about assets, specs, or anything file-based — look here.
+- If skipped → agent won't look for files outside the project log
+
+---
+
+**Q5: Is anyone else working on this with you?**
+*(peer IDs, names, or email addresses of collaborators)*
+
+- If answered → `ogp project contribute <id> context.collaborators "<names/peer-ids>"`
+- Agent behavior unlocked: Know who to ping during pre-task checks. Know whose agent to query when looking for context.
+- Also offer: *"Want me to send them a federation invite?"* — if yes, run `ogp project request-join <peer-id> <project-id> <name>`
+- If skipped → no peer checks until collaborators are added later
+
+---
+
+**Q6: Anything else I should know about this project?**
+*(free text — constraints, deadlines, important context, tools not covered above)*
+
+- If answered → `ogp project contribute <id> context "<free text>"`
+- This catches anything the structured questions missed
+- If skipped → fine, move on
+
+---
+
+### Step 3: Confirm what was captured
+
+After the interview, summarize what you now know:
+
 ```
-Project created! Let me capture some context (all optional — press Enter to skip):
+✅ Project "<name>" is set up. Here's what I know:
 
-1. 📁 GitHub/GitLab repo URL?
-   → [if provided] ogp project contribute <id> context.repository "<url>"
+  📋 Tasks:       <answer or "not specified — log manually">
+  📝 Notes:       <answer or "not specified">
+  💻 Repo:        <answer or "not specified">
+  📁 Files:       <answer or "not specified">
+  👥 Collaborators: <answer or "none yet">
 
-2. 💻 Local workspace folder?
-   → [if provided] ogp project contribute <id> context.workspace "<path>"
-
-3. 📝 Where do you keep notes? (Obsidian vault, Apple Notes, GitHub, Notion, etc.)
-   → [if provided] ogp project contribute <id> context.notes "<location>"
-
-4. 🗂️ What tools are you using? (Linear, Jira, Trello, GitHub Issues, etc.)
-   → [if provided] ogp project contribute <id> context.tools "<tools>"
-
-5. 👥 Any collaborators? (peer IDs or names)
-   → [if provided] ogp project contribute <id> context.collaborators "<collaborators>"
-
-6. 🎯 One sentence: what is this project about?
-   → [if provided] ogp project contribute <id> context.description "<description>"
+For anything I don't know yet, you can tell me later and I'll update the project context.
+I'll check this context before starting any work on this project.
 ```
 
-> **Why this matters:** The `context.*` entries are what peer agents query first when they need to know where your stuff lives. A peer agent asking "where does David keep his notes on this project?" will get the answer from `context.notes`.
+> **Why this matters:** The `context.*` entries do two jobs. They tell peer agents where your stuff lives (so they know what to ask you about). And they tell YOUR agent where to actually look when answering questions — not just what's been logged to `projects.json`.
 
 ---
 
