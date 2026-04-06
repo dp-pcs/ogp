@@ -1,8 +1,21 @@
 ---
 skill_name: ogp-project
-version: 1.1.1
-description: Agent-aware project context skill for OGP with interview, freeform logging, and cross-peer summarization (updated for OGP 0.2.24+ peer identity and 0.2.28+ multi-agent notifyTargets)
-trigger: Use when the user wants to create, manage, log to, or summarize OGP projects. This includes project context interviews, freeform activity logging, and cross-peer collaboration. Also triggers on natural logging phrases like "remember this for project X", "account for this", "make note of", "track this", "jot this down", "save this to", "document this" when a project context is active or named.
+version: 2.0.0
+description: >
+  Tool-agnostic project collaboration for AI assistants. Users keep their own tools
+  (Linear, Jira, Obsidian, GitHub, iCloud, local files — anything). This skill makes
+  agents aware of what each collaborator's agent knows and where it lives, so agents
+  can query each other proactively rather than making the human relay information.
+  Supports project creation with context interviews, freeform activity logging,
+  proactive pre-task peer checks, and cross-peer summarization.
+trigger: >
+  Use when the user wants to create, manage, log to, or summarize OGP projects.
+  ALSO use proactively — before starting any project-related work — to check shared
+  project state and query peer agents. Triggers on natural logging phrases like
+  "remember this for project X", "account for this", "make note of", "track this",
+  "jot this down", "save this to", "document this" when a project context is active or named.
+  The goal is to eliminate human-as-messenger friction: agents surface conflicts and
+  overlaps automatically so users don't have to ask.
 requires:
   bins:
     - ogp
@@ -13,6 +26,7 @@ requires:
   install: npm install -g @dp-pcs/ogp
   docs: https://github.com/dp-pcs/ogp
 ---
+
 ## Prerequisites
 
 The OGP daemon must be installed and configured. If you see errors like 'ogp: command not found', install it first:
@@ -31,55 +45,161 @@ ogp start
 Full documentation: https://github.com/dp-pcs/ogp
 
 
-
 # OGP Project Context Management
 
-This skill enables conversational project management with OGP federation. It provides agent-aware project creation with context interviews, freeform logging capabilities, and cross-peer collaboration summaries.
+## The Core Idea
+
+People work differently. One person tracks tasks in Linear, keeps notes in GitHub, stores files locally. Another uses a different issue tracker, writes in Obsidian, stores files in iCloud. In the past, collaboration meant forcing everyone onto the same tools.
+
+**This skill changes that.** Each user keeps their own tools and workflow. Their agent knows what they're working on and where everything lives. When two people collaborate on a project, their agents communicate directly — surfacing conflicts, sharing context, and answering each other's questions — without the human having to relay anything.
+
+The human-as-messenger problem:
+> Coworker wants to know something → asks you → you ask your agent → agent finds answer → you tell coworker
+
+What this skill enables:
+> Coworker's agent asks your agent → answer flows back → coworker just knows
+
+---
 
 ## When to Use
 
-Use this skill when:
 - User wants to create a new OGP project with contextual setup
-- User says "add this to project X" or "log that to project Y"
-- User asks about project status, activity, or collaborator contributions
-- User wants to understand project context or recent work
-- User mentions OGP projects, project logging, or cross-peer collaboration
+- **User is about to start work on something project-related** → check shared state first (see Proactive Pre-Task Check below)
+- User expresses logging intent: "add this to project X", "log that", "remember this", "track this", etc.
+- User asks about project status, activity, or what a collaborator has been working on
+- A peer agent sends a query about something in your project context
+
+---
 
 ## Core Features
 
 ### 1. Project Creation with Context Interview
-- Interactive 5-question interview during project creation
-- Captures repository, workspace, notes location, collaborators, description
-- Stores as structured `context.*` contributions
+- Interactive interview during project creation
+- Captures: repository, workspace, notes location, tools used, collaborators, description
+- Stored as `context.*` contributions — this is how peer agents know what to ask you about
 
 ### 2. Freeform Activity Logging
-- Monitors for logging signals ("add this to project X")
-- Agent-driven logging of decisions, progress, blockers
-- Flexible entry type assignment (progress, decision, blocker, context, summary)
-- **Auto-registration**: Project IDs auto-register as agent-comms topics for all approved peers
+- Monitors for logging intent (any natural phrasing)
+- Logs decisions, progress, blockers, context — all queryable later
+- Auto-registers project ID as agent-comms topic for all approved peers
 
-### 3. Project-Aware Agent Behavior
-- Auto-loads project context on first reference
-- Proactive logging during work sessions
-- Cross-peer contribution awareness
+### 3. Proactive Pre-Task Check ← KEY BEHAVIOR
+- Before starting project-related work, automatically check local state AND ping peer agents
+- Surfaces "heads up — your collaborator is already working on that" moments
+- Eliminates duplicate work and uncovers conflicts early
 
-### 4. Cross-Peer Summarization
-- Queries both local and peer contributions
-- Unified view of team activity
+### 4. Peer Response Policy Awareness
+- Peer agents have their own response policies (auto-answer vs. escalate to human)
+- Your agent respects those policies and adjusts behavior accordingly
+- This preserves each user's autonomy over how their agent handles interruptions
+
+### 5. Cross-Peer Summarization
+- Unified view of contributions across local + all peer agents
 - Deduplication and synthesis
 
-## Interactive Workflows
+---
 
-### Project Creation Interview
+## Proactive Pre-Task Check (MANDATORY)
 
-When creating a project, conduct this optional interview:
+**This is the most important behavior in this skill.**
+
+Whenever the user expresses intent to start work on something project-related, run this flow BEFORE starting:
+
+### Step 1: Check local project state
+```bash
+# Quick scan of recent activity
+ogp project query <project-id> --limit 20
+
+# Check for anything on this specific topic
+ogp project query <project-id> --search "<keywords from user's intent>"
+```
+
+### Step 2: Query peer agents
+```bash
+# For each approved peer in the project, ask if they know anything relevant
+ogp federation agent <peer-id> <project-id> "My user is about to start working on <what they said>. Anything I should know before we begin?"
+```
+
+### Step 3: Surface findings
+- **If something relevant found locally:** "Before you start — I found [X] in the project. [Summary]."
+- **If peer agent responds with something relevant:** "Heads up — [peer's name]'s agent says [summary]."
+- **If nothing found:** Proceed silently (don't announce "I checked and found nothing" — just start).
+
+### When to trigger this check
+- User says they're going to start/build/work on something in a known project context
+- User asks a question that could be answered by a peer's project context
+- User mentions a feature/component that might overlap with collaborator work
+
+### Example
+```
+User: "Let's start working on the companion app"
+
+Agent (internally):
+1. ogp project query my-project --search "companion app"
+   → Found: "User B flagged companion app as out of scope in v1" (decision, 3 days ago)
+
+Agent (to user): "Before you dive in — there's a note in the project from 3 days ago: 
+User B's agent logged a decision that companion app is out of scope for v1. 
+Want to check with them first, or are you overriding that?"
+```
+
+```
+User: "Let's start working on the companion app"
+
+Agent (internally):
+1. ogp project query my-project --search "companion app" → nothing found
+2. ogp federation agent peer-b my-project "My user is about to start on the companion app. Anything I should know?"
+   → Peer agent responds: "No conflicts. Bob hasn't touched that area."
+
+Agent: [starts working — no announcement needed]
+```
+
+---
+
+## Peer Response Policy
+
+When your agent queries a peer agent, the peer agent responds according to its owner's configured policy. Your agent should interpret and respect these responses:
+
+| Peer Response | Meaning | Your Agent's Behavior |
+|--------------|---------|----------------------|
+| Direct answer | Peer auto-answered | Use the information, proceed |
+| "I've asked [name] and will follow up" | Peer is escalating to human | Wait for follow-up, or proceed with caveat |
+| "I don't have permission to share that" | Topic is restricted | Respect it, don't re-ask |
+| No response / timeout | Peer offline or unavailable | Proceed, note that peer was unavailable |
+
+**Configuring your own response policy** (how YOUR agent handles incoming queries):
+```bash
+# See current policies
+ogp agent-comms policies
+
+# Auto-answer project queries (full detail)
+ogp agent-comms add-topic <peer-id> <project-id> --level full
+
+# Escalate to human before answering
+ogp agent-comms add-topic <peer-id> <project-id> --level escalate
+
+# Summary only
+ogp agent-comms add-topic <peer-id> <project-id> --level summary
+```
+
+Response levels:
+- `full` — agent answers directly with full context
+- `summary` — agent answers with high-level overview only  
+- `escalate` — agent asks the human before responding ("Stan's agent wants to know about X — should I answer?")
+- `off` — agent declines to respond on this topic
+
+---
+
+## Project Creation with Context Interview
+
+When creating a project, conduct this interview to capture where everything lives. This is what enables peer agents to know what to ask you about later.
 
 ```bash
-# First create the project
+# Create the project
 ogp project create <project-id> <name> --description "<description>"
 ```
 
-Then run interview flow:
+Then run the interview:
 ```
 Project created! Let me capture some context (all optional — press Enter to skip):
 
@@ -89,110 +209,88 @@ Project created! Let me capture some context (all optional — press Enter to sk
 2. 💻 Local workspace folder?
    → [if provided] ogp project contribute <id> context.workspace "<path>"
 
-3. 📝 Where do you keep notes? (Obsidian vault, Apple Notes, etc.)
+3. 📝 Where do you keep notes? (Obsidian vault, Apple Notes, GitHub, Notion, etc.)
    → [if provided] ogp project contribute <id> context.notes "<location>"
 
-4. 👥 Any collaborators already? (peer IDs or names)
+4. 🗂️ What tools are you using? (Linear, Jira, Trello, GitHub Issues, etc.)
+   → [if provided] ogp project contribute <id> context.tools "<tools>"
+
+5. 👥 Any collaborators? (peer IDs or names)
    → [if provided] ogp project contribute <id> context.collaborators "<collaborators>"
 
-5. 🎯 One sentence: what is this project about?
+6. 🎯 One sentence: what is this project about?
    → [if provided] ogp project contribute <id> context.description "<description>"
 ```
 
-### Freeform Logging Detection
+> **Why this matters:** The `context.*` entries are what peer agents query first when they need to know where your stuff lives. A peer agent asking "where does David keep his notes on this project?" will get the answer from `context.notes`.
 
-**IMPORTANT: Detect logging intent from ANY natural phrasing — not just exact keywords.**
+---
 
-Monitor for these signals (and semantic equivalents):
+## Freeform Activity Logging
 
-| User Input | Action | Example |
-|------------|---------|---------|
-| "add this to [project]" | `ogp project contribute <id> context "<summary>"` | Context logging |
-| "log that to [project]" | `ogp project contribute <id> progress "<summary>"` | Progress update |
-| "remember for [project] that..." | `ogp project contribute <id> context "<summary>"` | Context note |
-| "account for this in [project]" | `ogp project contribute <id> context "<summary>"` | Context note |
-| "make note of this for [project]" | `ogp project contribute <id> context "<summary>"` | Note |
-| "track this in [project]" | `ogp project contribute <id> progress "<summary>"` | Progress |
-| "jot this down for [project]" | `ogp project contribute <id> context "<summary>"` | Quick note |
-| "save this to [project]" | `ogp project contribute <id> context "<summary>"` | Context |
-| "put this in [project]" | `ogp project contribute <id> context "<summary>"` | Context |
-| "document this for [project]" | `ogp project contribute <id> context "<summary>"` | Documentation |
-| After coding session | Offer: "Should I log a summary to [project]?" | Proactive logging |
-| Decision made | `ogp project contribute <id> decision "<summary>"` | Architecture decisions |
-| Blocker encountered | `ogp project contribute <id> blocker "<summary>"` | Issue tracking |
+**Detect logging intent from ANY natural phrasing — not just exact keywords.**
 
-**If no project is specified:** Ask "Which project should I log this to?" and list active projects from `ogp project list`.
+### Explicit Project Logging
+| User Input | Action |
+|------------|--------|
+| "add/log/save/put/track this to [project]" | `ogp project contribute <id> context "<summary>"` |
+| "remember for [project] that..." | `ogp project contribute <id> context "<summary>"` |
+| Decision made during conversation | `ogp project contribute <id> decision "<summary>"` |
+| Blocker encountered | `ogp project contribute <id> blocker "<summary>"` |
+| Work completed | `ogp project contribute <id> progress "<summary>"` |
 
-**Intent over keywords:** If the user clearly wants to capture something for a project — regardless of exact phrasing — trigger the logging flow. Don't wait for magic words.
-
-### Project Status and Summarization
-
-**Local project query:**
-```bash
-# Get project overview
-ogp project status <project-id>
-
-# Get recent activity
-ogp project query <project-id> --limit 10
-
-# Get specific topics
-ogp project query <project-id> --topic progress
-ogp project query <project-id> --topic context.repository
+### No Project Specified
+If logging intent is clear but no project named:
+```
+📝 I can log this for you. Which project?
+Active: [list from `ogp project list`]
+Or name a new one to create it.
 ```
 
-**Cross-peer collaboration:**
-```bash
-# Query peer contributions
-ogp project query-peer <peer-id> <project-id>
-
-# Get peer project status
-ogp project status-peer <peer-id> <project-id>
-```
-
-**Synthesized team view:**
-1. Query local contributions
-2. Query each peer's contributions
-3. Merge, deduplicate, and present unified timeline
-4. Highlight collaboration patterns and recent activity
-
-## Agent Instructions
-
-### On Project Reference
-When a project is mentioned:
-1. **First time**: Fetch all `context.*` contributions to understand the project
-2. **Check for updates**: Query recent contributions since last interaction
-3. **Cross-peer check**: If project has collaborators, query peer activity
-
-### During Work Sessions
-1. **Monitor for decisions**: Log architectural or product decisions automatically
-2. **Track blockers**: When user expresses frustration or being stuck, offer to log as blocker
-3. **Completion logging**: After significant work, offer: "Should I log a progress summary to [project]?"
-
-### Logging Intelligence
-**Entry Type Selection Logic:**
-- `progress` — work completed, features implemented, milestones reached
+### Entry Type Selection
+- `progress` — work completed, milestones reached
 - `decision` — architectural choices, technology selections, product decisions
-- `blocker` — things preventing progress, issues encountered, dependencies
-- `context` — general observations, meeting notes, requirements changes
-- `summary` — periodic digests, weekly summaries, sprint reviews
+- `blocker` — things preventing progress, unresolved dependencies
+- `context` — general notes, meeting takeaways, requirements changes
+- `summary` — periodic digests, sprint reviews
 
-**Example Logging:**
+---
+
+## Handling Incoming Peer Queries
+
+When a peer agent sends a query to your project topic, your agent should:
+
+1. **Check your response policy** for that peer + topic
+2. **If `full` or `summary`:** Search local project state and context, formulate a response, reply via agent-comms
+3. **If `escalate`:** Ask the user: "Stan's agent is asking about [topic] for project [X]. Here's their question: [question]. Should I answer, and what should I say?"
+4. **If `off`:** Decline politely
+
+**Searching your context to answer:**
 ```bash
-# User completed authentication feature
-ogp project contribute auth-service progress "Implemented OAuth2 login flow with GitHub provider. Added JWT token management and user session persistence. All tests passing."
+# Search project contributions
+ogp project query <project-id> --search "<keywords>"
 
-# User made architectural decision
-ogp project contribute auth-service decision "Decided to use Redis for session storage instead of database. Better performance for frequent session lookups and automatic expiration."
+# Check specific context entries
+ogp project query <project-id> --type context.notes
+ogp project query <project-id> --type context.repository
+ogp project query <project-id> --type decision
 
-# User encountered blocker
-ogp project contribute auth-service blocker "GitHub OAuth app approval pending. Cannot test production flow until approved. Estimated 2-3 days delay."
+# Recent activity
+ogp project query <project-id> --limit 20
 ```
+
+**Replying to a peer query:**
+```bash
+ogp federation agent <peer-id> <project-id> "<your answer>"
+```
+
+---
 
 ## CLI Command Reference
 
 ### Project Management
 ```bash
-# Create project locally
+# Create project
 ogp project create <id> <name> [--description "..."]
 
 # Join existing project
@@ -207,12 +305,12 @@ ogp project status <id>
 
 ### Contributions & Logging
 ```bash
-# Add contribution by entry type
+# Add contribution
 ogp project contribute <id> <type> <summary> [--metadata '{"key":"value"}']
 
 # Query contributions
-ogp project query <id> [--type <type>] [--author <author>] [--search <text>] [--limit <n>]
-# Note: --topic is a hidden alias for --type for backwards compatibility
+ogp project query <id> [--type <type>] [--search <text>] [--limit <n>]
+# Note: --topic is a hidden alias for --type (backwards compat)
 ```
 
 ### Cross-Peer Collaboration
@@ -221,180 +319,114 @@ ogp project query <id> [--type <type>] [--author <author>] [--search <text>] [--
 ogp project request-join <peer-id> <project-id> <name>
 
 # Send contribution to peer project
-ogp project send-contribution <peer-id> <project-id> <topic> <summary>
+ogp project send-contribution <peer-id> <project-id> <type> <summary>
 
 # Query peer project contributions
-ogp project query-peer <peer-id> <project-id> [--topic <topic>] [--limit <n>]
+ogp project query-peer <peer-id> <project-id> [--topic <type>] [--limit <n>]
 
 # Get peer project status
 ogp project status-peer <peer-id> <project-id>
+
+# Send agent-to-agent message on project topic
+ogp federation agent <peer-id> <project-id> "<message>"
 ```
+
+---
 
 ## Response Templates
 
-### Project Creation Success
+### Pre-Task Check — Conflict Found
 ```
-✅ Project "{name}" created successfully!
+Before you start — I found something in the project:
 
-📋 Context captured:
-  • Repository: {repo_url}
-  • Workspace: {workspace_path}
-  • Notes: {notes_location}
-  • Collaborators: {collaborators}
-  • Description: {description}
+[Entry type] from [date]: [summary]
 
-You can now:
-  • Say "add this to {project_id}" to log activities
-  • Ask "tell me about {project_id}" for status updates
-  • Invite collaborators via federation
+Want to proceed anyway, or check with [peer name] first?
 ```
 
-### Freeform Logging Confirmation
+### Pre-Task Check — Peer Agent Response
 ```
-📝 Logged to project "{project_name}":
-  Type: {type}
-  Summary: {summary}
+Heads up — [peer alias]'s agent says: "[their response]"
 
-Recent activity: {recent_count} contributions in the last week
+[Proceed / ask user how to handle based on content]
+```
+
+### Logging Confirmation
+```
+✅ Logged to [project-name] · [type]
+[Summary]
 ```
 
 ### Project Status Summary
 ```
-📊 Project "{name}" Status
+📊 [Project Name]
 
-🎯 About: {description}
-👥 Members: {member_count} ({member_names})
-📈 Activity: {contribution_count} contributions, last active {last_activity}
+🎯 [description]
+👥 [member count] members · last active [date]
 
-📋 Recent Activity:
-{recent_contributions}
+Recent:
+[contributions list]
 
-🤝 Peer Activity:
-{peer_contributions_summary}
+Peer activity:
+[peer summary]
 ```
 
-### Cross-Peer Summary
-```
-🌐 Team Activity for "{project_name}"
-
-Local Contributions ({local_count}):
-{local_summary}
-
-Peer Contributions ({peer_count}):
-{peer_summary}
-
-🔗 Collaboration Highlights:
-{collaboration_patterns}
-```
-
-## Context Entry Types Schema
-
-Standard context entry types for structured project information:
-
-| Entry Type | Purpose | Example |
-|------------|---------|---------|
-| `context.repository` | Code repository URL | `https://github.com/user/repo` |
-| `context.workspace` | Local development path | `/Users/name/projects/myapp` |
-| `context.notes` | Notes/documentation location | `Obsidian vault: ProjectNotes/MyApp` |
-| `context.collaborators` | Team members and peer IDs | `alice:18790, bob@example.com` |
-| `context.description` | Plain English project summary | `Mobile app for expense tracking` |
-
-## Integration Examples
-
-### After Code Implementation
-```
-User: "I just finished the authentication system"
-
-Agent: "Great! Should I log this progress to the auth-service project?"
-[User confirms]
-
-Agent runs: ogp project contribute auth-service progress "Completed authentication system implementation. Added OAuth2 with GitHub, JWT token management, user sessions, password reset flow. All unit tests passing, ready for integration testing."
-```
-
-### During Architecture Decision
-```
-User: "I think we should use PostgreSQL instead of MongoDB for this"
-
-Agent: "That sounds like an important architectural decision. Should I document this in the project?"
-[User confirms]
-
-Agent runs: ogp project contribute inventory-system decision "Switched from MongoDB to PostgreSQL for data persistence. Reasons: better ACID guarantees for inventory tracking, existing team expertise, superior query performance for reporting needs."
-```
-
-### Cross-Peer Status Check
-```
-User: "What has Alice been working on in the mobile-app project?"
-
-Agent runs:
-1. ogp project query-peer 9d4e1f... mobile-app --limit 10
-2. ogp project query mobile-app --limit 10 --author alice
-
-Agent: "Alice's recent contributions to mobile-app:
-• 2 days ago: Implemented push notification system
-• 4 days ago: Fixed authentication token refresh bug
-• 1 week ago: Added offline data sync capability
-
-Total: 8 contributions this month, very active on backend integration work."
-```
+---
 
 ## Troubleshooting
 
+### Pre-Task Check Returns Nothing
+- Normal — proceed with work silently
+- Don't announce "I checked and found nothing"
+
+### Peer Agent Not Responding
+```bash
+# Check peer is online
+ogp federation ping <peer-alias>
+
+# Check agent-comms policies
+ogp agent-comms policies <peer-id>
+
+# Check activity log
+ogp agent-comms activity <peer-id>
+```
+
 ### Project Not Found
 ```bash
-# List available projects
 ogp project list
-
-# Check if peer project exists
 ogp project status-peer <peer-id> <project-id>
 ```
 
 ### Logging Failures
 ```bash
-# Verify project exists and you're a member
 ogp project status <project-id>
-
-# Check OGP daemon status
 ogp status
 ```
 
 ### Cross-Peer Issues
 ```bash
-# Verify peer is approved and has project scope
 ogp federation list --status approved
-ogp federation scopes 302a300506032b65
-
-# Test basic peer connectivity
-ogp federation send 302a300506032b65 message '{"text":"ping"}'
+ogp federation scopes <peer-id>
+ogp federation send <peer-id> message '{"text":"ping"}'
 ```
 
-### No Context Loaded
-If agent seems unaware of project context:
-1. Check `context.*` contributions exist: `ogp project query <id> --topic context`
-2. Verify project membership: `ogp project status <id>`
-3. Restart skill to reload project data
+---
 
 ## Implementation Notes
 
 **Data Flow:**
 ```
-User Input → Agent Skill → OGP CLI → OGP Daemon → ~/.ogp/projects.json
-                                  ↓
-                            Federation (if peer project)
-                                  ↓
-                            Peer's OGP Daemon → OpenClaw Agent
+User says something project-related
+  → Agent checks local project state (ogp project query)
+  → Agent pings peer agents (ogp federation agent)
+  → Surfaces conflicts/info before starting
+  → Logs outcomes (ogp project contribute)
+  → Federation syncs to peers
 ```
 
-**Skill Behavior:**
-- Always load `context.*` on first project reference
-- Proactively offer logging after significant work
-- Monitor conversation for logging signals
-- Cross-reference peer activity for collaboration awareness
-- Synthesize unified views across local + peer contributions
+**The tool-agnostic principle:**
+The project doesn't care what tools you use. `context.notes`, `context.repository`, `context.tools` are just text. If you keep notes in Obsidian, that's in `context.notes`. If your peer uses GitHub wikis, that's in their `context.notes`. Peer agents read each other's context entries and know where to look — or know what to ask.
 
 **Storage:**
-- Projects stored in `~/.ogp/projects.json`
-- Contributions organized by topic within each project
-- Cross-peer queries via federation protocol
-- Activity logged locally for retrospectives
-
-This skill bridges the gap between OGP's technical capabilities and natural conversational project management, enabling seamless collaboration across federated AI agents.
+- `~/.ogp/projects.json` — all project data and contributions
+- `~/.ogp/peers.json` — peer identities and federation state
