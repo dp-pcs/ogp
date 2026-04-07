@@ -7,7 +7,9 @@ import * as crypto from 'node:crypto';
 import { createScopeBundle, createScopeGrant, parseRateLimit, formatRateLimit, DEFAULT_RATE_LIMIT } from '../daemon/scopes.js';
 import { loadIntents } from '../daemon/intent-registry.js';
 export async function federationList(status) {
-    const peers = listPeers(status);
+    // listPeers() doesn't filter 'removed' — load all and filter manually if needed
+    const allPeers = loadPeers();
+    const peers = status ? allPeers.filter(p => p.status === status) : allPeers.filter(p => p.status !== 'removed');
     if (peers.length === 0) {
         console.log('No peers found.');
         return;
@@ -32,12 +34,14 @@ export async function federationStatus() {
     const approvedPeers = peers.filter(p => p.status === 'approved');
     const pendingPeers = peers.filter(p => p.status === 'pending');
     const rejectedPeers = peers.filter(p => p.status === 'rejected');
+    const removedPeers = peers.filter(p => p.status === 'removed');
     console.log('\n📊 FEDERATION STATUS\n');
     // Summary counts
     console.log(`Total peers: ${peers.length}`);
     console.log(`  Approved: ${approvedPeers.length}`);
     console.log(`  Pending:  ${pendingPeers.length}`);
     console.log(`  Rejected: ${rejectedPeers.length}`);
+    console.log(`  Removed:  ${removedPeers.length}`);
     console.log('');
     // Alias → Public Key mapping section
     if (peers.length > 0) {

@@ -16,8 +16,10 @@ import {
 } from '../daemon/scopes.js';
 import { loadIntents } from '../daemon/intent-registry.js';
 
-export async function federationList(status?: 'pending' | 'approved' | 'rejected'): Promise<void> {
-  const peers = listPeers(status);
+export async function federationList(status?: 'pending' | 'approved' | 'rejected' | 'removed'): Promise<void> {
+  // listPeers() doesn't filter 'removed' — load all and filter manually if needed
+  const allPeers = loadPeers();
+  const peers = status ? allPeers.filter(p => p.status === status) : allPeers.filter(p => p.status !== 'removed');
 
   if (peers.length === 0) {
     console.log('No peers found.');
@@ -48,6 +50,7 @@ export async function federationStatus(): Promise<void> {
   const approvedPeers = peers.filter(p => p.status === 'approved');
   const pendingPeers = peers.filter(p => p.status === 'pending');
   const rejectedPeers = peers.filter(p => p.status === 'rejected');
+  const removedPeers = peers.filter(p => p.status === 'removed');
 
   console.log('\n📊 FEDERATION STATUS\n');
 
@@ -56,6 +59,7 @@ export async function federationStatus(): Promise<void> {
   console.log(`  Approved: ${approvedPeers.length}`);
   console.log(`  Pending:  ${pendingPeers.length}`);
   console.log(`  Rejected: ${rejectedPeers.length}`);
+  console.log(`  Removed:  ${removedPeers.length}`);
   console.log('');
 
   // Alias → Public Key mapping section

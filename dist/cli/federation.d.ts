@@ -1,4 +1,4 @@
-export declare function federationList(status?: 'pending' | 'approved' | 'rejected'): Promise<void>;
+export declare function federationList(status?: 'pending' | 'approved' | 'rejected' | 'removed'): Promise<void>;
 export declare function federationStatus(): Promise<void>;
 export declare function federationRequest(peerUrl: string, peerId: string, alias?: string): Promise<boolean>;
 export interface ApproveOptions {
