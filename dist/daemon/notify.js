@@ -113,10 +113,13 @@ class HermesBackend {
             return false;
         }
         // Build webhook payload
+        // Note: event_type is required by Hermes webhook event filter ("events" subscription list)
+        const intentStr = payload.intent || 'message';
         const body = {
+            event_type: intentStr, // required for Hermes event filter ("*" is not a wildcard there)
             peer_id: payload.peerId || 'unknown',
             peer_display_name: payload.peerDisplayName || payload.peerId || 'Unknown Peer',
-            intent: payload.intent || 'message',
+            intent: intentStr,
             topic: payload.topic || 'general',
             message: payload.text,
             priority: payload.priority || 'normal',
