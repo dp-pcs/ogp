@@ -8,7 +8,7 @@ const _require = createRequire(import.meta.url);
 const OGP_VERSION: string = _require('../../package.json').version;
 import { requireConfig, loadConfig, type OGPConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey, getPrivateKey } from './keypair.js';
-import { addPeer, getPeer, approvePeer, listPeers, updatePeer, updatePeerReceivedScopes, type Peer, removePeer } from './peers.js';
+import { addPeer, getPeer, approvePeer, listPeers, updatePeer, updatePeerReceivedScopes, type Peer, removePeer, loadPeers, savePeers } from './peers.js';
 import { handleMessage, type FederationMessage } from './message-handler.js';
 import { signObject, verify } from '../shared/signing.js';
 import { notifyOpenClaw } from './notify.js';
@@ -81,16 +81,30 @@ export function startServer(config?: OGPConfig, background = false): void {
 
       // Derive peer ID from public key (BUILD-111: port-agnostic identity)
       // NEVER trust sender's peer.id - always use public key prefix
-      const peerIdFromKey = peer.publicKey.substring(0, 16);
+      // Use 32-char prefix to avoid collision on shared Ed25519 DER header (first 24 chars identical for ALL Ed25519 keys)
+      const peerIdFromKey = peer.publicKey.substring(0, 32);
       
       // Check if peer already exists (by public key)
       const existingPeer = getPeer(peerIdFromKey);
       if (existingPeer) {
-        return res.status(200).json({ 
-          received: true, 
-          status: 'already-pending-or-approved',
-          peerId: peerIdFromKey
-        });
+        // Allow re-federation if previously removed or rejected
+        if (existingPeer.status === 'removed' || existingPeer.status === 'rejected') {
+          // Reset to pending so the request can be approved fresh
+          const prevStatus = existingPeer.status;
+          existingPeer.status = 'pending';
+          existingPeer.requestedAt = new Date().toISOString();
+          existingPeer.displayName = peer.displayName;
+          existingPeer.email = peer.email;
+          existingPeer.gatewayUrl = peer.gatewayUrl;
+          savePeers(loadPeers().map((p: Peer) => p.id === existingPeer.id ? existingPeer : p));
+          console.log(`[OGP] Re-federation request from ${peer.displayName} (${peerIdFromKey}) — reset from ${prevStatus} to pending`);
+        } else {
+          return res.status(200).json({ 
+            received: true, 
+            status: 'already-pending-or-approved',
+            peerId: peerIdFromKey
+          });
+        }
       }
 
       const peerData: Peer = {
@@ -194,7 +208,7 @@ export function startServer(config?: OGPConfig, background = false): void {
       const protocolVersion = body.protocolVersion || (scopeGrants ? '0.2.0' : '0.1.0');
 
       // Derive peer ID from public key (BUILD-111: port-agnostic identity)
-      const peerIdFromKey = fromPublicKey ? fromPublicKey.substring(0, 16) : (peerId || fromGatewayId);
+      const peerIdFromKey = fromPublicKey ? fromPublicKey.substring(0, 32) : (peerId || fromGatewayId);
 
       // Find the peer to approve — try multiple strategies
       let peer = null;

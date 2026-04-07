@@ -66,7 +66,9 @@ export function getPeer(peerId) {
     let peer = peers.find(p => p.id === peerId) || null;
     // If not found, try matching by public key prefix (BUILD-111)
     if (!peer && peerId.length >= 16) {
-        peer = peers.find(p => p.publicKey && p.publicKey.startsWith(peerId.substring(0, 16))) || null;
+        // Use 32-char prefix minimum to avoid false matches on the shared Ed25519 DER header (first 24 chars are identical for all keys)
+        const prefixLen = Math.max(32, peerId.length);
+        peer = peers.find(p => p.publicKey && p.publicKey.startsWith(peerId.substring(0, prefixLen))) || null;
     }
     return peer;
 }
@@ -82,7 +84,8 @@ export function getPeerByPublicKey(publicKey) {
     let peer = peers.find(p => p.publicKey === publicKey) || null;
     // If not found, try prefix match
     if (!peer && publicKey.length >= 16) {
-        peer = peers.find(p => p.publicKey && p.publicKey.startsWith(publicKey.substring(0, 16))) || null;
+        const prefixLen2 = Math.max(32, publicKey.length);
+        peer = peers.find(p => p.publicKey && p.publicKey.startsWith(publicKey.substring(0, prefixLen2))) || null;
     }
     return peer;
 }
