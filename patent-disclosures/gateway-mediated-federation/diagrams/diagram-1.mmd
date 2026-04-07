@@ -1,0 +1,67 @@
+erDiagram
+    Gateway ||--o{ Peer : "federates_with"
+    Peer ||--|| ScopeBundle : "has_granted"
+    ScopeBundle ||--o{ ScopeGrant : "contains"
+    ScopeGrant ||--o| RateLimit : "enforces"
+    FederationMessage }o--|| Peer : "from"
+    FederationMessage }o--|| ScopeGrant : "invokes"
+    RateLimitEntry }o--|| Peer : "tracks"
+    ResponsePolicy }o--o| Peer : "applies_to"
+
+    Gateway {
+        string id "Ed25519 public key prefix"
+        string displayName
+        string gatewayUrl
+        string publicKey "Ed25519 DER hex"
+        string privateKey "Ed25519 DER hex"
+        string email
+        int daemonPort
+    }
+
+    Peer {
+        string id "Derived from public key"
+        string displayName
+        string gatewayUrl
+        string publicKey "Ed25519 DER hex"
+        string email
+        string status "pending|approved|revoked"
+        int lastSeen
+        ScopeBundle grantedScopes
+    }
+
+    ScopeBundle {
+        string version "Protocol version"
+        array intents "Array of ScopeGrant"
+    }
+
+    ScopeGrant {
+        string intent "e.g., agent-comms, project.query"
+        array topics "Optional topic restrictions"
+        RateLimit rateLimit
+        int expiresAt "Optional expiration timestamp"
+    }
+
+    RateLimit {
+        int requests "Max requests allowed"
+        int windowSeconds "Time window in seconds"
+    }
+
+    FederationMessage {
+        string fromGatewayId "Sender peer ID"
+        string intent "Intent being invoked"
+        object payload "Intent-specific data"
+        int timestamp
+        string signature "Ed25519 hex signature"
+    }
+
+    RateLimitEntry {
+        string key "peerId:intent"
+        array timestamps "Request timestamps"
+        int windowStart "Start of sliding window"
+    }
+
+    ResponsePolicy {
+        string topic "Topic pattern (* for wildcard)"
+        string level "off|notifications-only|interactive"
+        string peer "Optional peer ID (null = global)"
+    }
