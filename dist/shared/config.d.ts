@@ -45,8 +45,14 @@ export interface OGPConfig {
     hermesWebhookUrl?: string;
     hermesWebhookSecret?: string;
 }
-export declare function getConfigPath(): string;
+/**
+ * Get the config directory (computed dynamically based on OGP_HOME)
+ */
 export declare function getConfigDir(): string;
+/**
+ * Get the config file path (computed dynamically based on OGP_HOME)
+ */
+export declare function getConfigPath(): string;
 export declare function ensureConfigDir(): void;
 export declare function loadConfig(): OGPConfig | null;
 export declare function saveConfig(config: OGPConfig): void;

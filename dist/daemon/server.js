@@ -16,21 +16,31 @@ import { startReplyCleanup, stopReplyCleanup, getPendingReply, deletePendingRepl
 import { startRendezvous, stopRendezvous } from './rendezvous.js';
 import { loadIntents } from './intent-registry.js';
 let server = null;
-const DAEMON_PID_FILE = path.join(getConfigDir(), 'daemon.pid');
-const DAEMON_LOG_FILE = path.join(getConfigDir(), 'daemon.log');
+/**
+ * Get the daemon PID file path (computed dynamically based on OGP_HOME)
+ */
+function getDaemonPidFile() {
+    return path.join(getConfigDir(), 'daemon.pid');
+}
+/**
+ * Get the daemon log file path (computed dynamically based on OGP_HOME)
+ */
+function getDaemonLogFile() {
+    return path.join(getConfigDir(), 'daemon.log');
+}
 export function startServer(config, background = false) {
     const cfg = config || requireConfig();
     // If background mode requested, fork and exit parent
     if (background) {
-        const logStream = fs.openSync(DAEMON_LOG_FILE, 'a');
+        const logStream = fs.openSync(getDaemonLogFile(), 'a');
         const child = spawn(process.execPath, [process.argv[1], 'start'], {
             detached: true,
             stdio: ['ignore', logStream, logStream]
         });
         child.unref();
-        fs.writeFileSync(DAEMON_PID_FILE, child.pid.toString(), 'utf-8');
+        fs.writeFileSync(getDaemonPidFile(), child.pid.toString(), 'utf-8');
         console.log(`OGP daemon started (PID: ${child.pid})`);
-        console.log(`Logs: ${DAEMON_LOG_FILE}`);
+        console.log(`Logs: ${getDaemonLogFile()}`);
         process.exit(0);
     }
     const app = express();
@@ -467,17 +477,18 @@ export function stopServer() {
     stopReplyCleanup();
     // Deregister from rendezvous (fire-and-forget)
     stopRendezvous().catch(() => { });
+    const pidFile = getDaemonPidFile();
     // Check for PID file
-    if (!fs.existsSync(DAEMON_PID_FILE)) {
+    if (!fs.existsSync(pidFile)) {
         console.log('OGP daemon is not running');
         return;
     }
     try {
-        const pidStr = fs.readFileSync(DAEMON_PID_FILE, 'utf-8').trim();
+        const pidStr = fs.readFileSync(pidFile, 'utf-8').trim();
         const pid = parseInt(pidStr, 10);
         if (isNaN(pid)) {
             console.error('Invalid PID in daemon.pid file');
-            fs.unlinkSync(DAEMON_PID_FILE);
+            fs.unlinkSync(pidFile);
             return;
         }
         // Check if process is running
@@ -486,12 +497,12 @@ export function stopServer() {
         }
         catch (error) {
             console.log('OGP daemon is not running (stale PID file)');
-            fs.unlinkSync(DAEMON_PID_FILE);
+            fs.unlinkSync(pidFile);
             return;
         }
         // Send SIGTERM
         process.kill(pid, 'SIGTERM');
-        fs.unlinkSync(DAEMON_PID_FILE);
+        fs.unlinkSync(pidFile);
         console.log('OGP daemon stopped');
     }
     catch (error) {
@@ -501,12 +512,13 @@ export function stopServer() {
 export async function getDaemonStatus() {
     const config = loadConfig();
     const port = config?.daemonPort ?? 18790;
+    const pidFile = getDaemonPidFile();
     // Check PID file first
     let pidRunning = false;
     let pid;
-    if (fs.existsSync(DAEMON_PID_FILE)) {
+    if (fs.existsSync(pidFile)) {
         try {
-            const pidStr = fs.readFileSync(DAEMON_PID_FILE, 'utf-8').trim();
+            const pidStr = fs.readFileSync(pidFile, 'utf-8').trim();
             const parsedPid = parseInt(pidStr, 10);
             if (!isNaN(parsedPid)) {
                 try {
@@ -515,11 +527,11 @@ export async function getDaemonStatus() {
                     pid = parsedPid;
                 }
                 catch {
-                    fs.unlinkSync(DAEMON_PID_FILE);
+                    fs.unlinkSync(pidFile);
                 }
             }
             else {
-                fs.unlinkSync(DAEMON_PID_FILE);
+                fs.unlinkSync(pidFile);
             }
         }
         catch {

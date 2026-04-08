@@ -1,25 +1,31 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-const DEFAULT_CONFIG_DIR = process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');
-const CONFIG_FILE = path.join(DEFAULT_CONFIG_DIR, 'config.json');
-export function getConfigPath() {
-    return CONFIG_FILE;
-}
+/**
+ * Get the config directory (computed dynamically based on OGP_HOME)
+ */
 export function getConfigDir() {
-    return DEFAULT_CONFIG_DIR;
+    return process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');
+}
+/**
+ * Get the config file path (computed dynamically based on OGP_HOME)
+ */
+export function getConfigPath() {
+    return path.join(getConfigDir(), 'config.json');
 }
 export function ensureConfigDir() {
-    if (!fs.existsSync(DEFAULT_CONFIG_DIR)) {
-        fs.mkdirSync(DEFAULT_CONFIG_DIR, { recursive: true });
+    const configDir = getConfigDir();
+    if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
     }
 }
 export function loadConfig() {
     try {
-        if (!fs.existsSync(CONFIG_FILE)) {
+        const configFile = getConfigPath();
+        if (!fs.existsSync(configFile)) {
             return null;
         }
-        const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
+        const data = fs.readFileSync(configFile, 'utf-8');
         return JSON.parse(data);
     }
     catch (error) {
@@ -29,7 +35,8 @@ export function loadConfig() {
 }
 export function saveConfig(config) {
     ensureConfigDir();
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+    const configFile = getConfigPath();
+    fs.writeFileSync(configFile, JSON.stringify(config, null, 2), 'utf-8');
 }
 export function requireConfig() {
     const config = loadConfig();

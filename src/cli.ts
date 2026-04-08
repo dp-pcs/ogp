@@ -2,9 +2,12 @@
 
 import { Command } from 'commander';
 import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { runSetup } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig, saveConfig } from './shared/config.js';
+import { loadMetaConfig } from './shared/meta-config.js';
 import {
   federationList,
   federationStatus,
@@ -23,6 +26,7 @@ import {
 } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
+import { installCompletion } from './cli/completion.js';
 import {
   showPolicies,
   configurePolicies,
@@ -54,14 +58,146 @@ import {
   projectQueryPeer,
   projectStatusPeer
 } from './cli/project.js';
+import { configCommand } from './cli/config.js';
 import type { ResponseLevel } from './daemon/peers.js';
+import { showContextHelp } from './shared/help.js';
+
+/**
+ * Expand tilde in paths
+ */
+function expandTilde(filePath: string): string {
+  if (filePath.startsWith('~/') || filePath === '~') {
+    return path.join(os.homedir(), filePath.slice(2));
+  }
+  return filePath;
+}
+
+/**
+ * Select framework based on --for flag and other rules
+ */
+function selectFramework(forFlag: string | undefined): void {
+  // Special case: --for all doesn't set OGP_HOME (multi-framework operation)
+  if (forFlag === 'all') {
+    // Set a marker for multi-framework operations
+    process.env.OGP_FOR_ALL = 'true';
+    return;
+  }
+
+  // If --for is provided, use it
+  if (forFlag) {
+    const metaConfig = loadMetaConfig();
+
+    // No frameworks configured
+    if (!metaConfig.frameworks || metaConfig.frameworks.length === 0) {
+      console.error('Error: No frameworks configured. Run "ogp setup" first.');
+      process.exit(1);
+    }
+
+    // Resolve alias
+    const resolvedId = metaConfig.aliases?.[forFlag] || forFlag;
+
+    // Find framework by ID
+    const framework = metaConfig.frameworks.find(f => f.id === resolvedId);
+
+    if (!framework) {
+      console.error(`Error: Framework '${forFlag}' not found.`);
+      console.error('Available frameworks:');
+      metaConfig.frameworks.forEach(f => {
+        console.error(`  - ${f.id} (${f.name})${f.enabled ? '' : ' [disabled]'}`);
+      });
+      if (metaConfig.aliases && Object.keys(metaConfig.aliases).length > 0) {
+        console.error('Aliases:');
+        Object.entries(metaConfig.aliases).forEach(([alias, id]) => {
+          console.error(`  - ${alias} -> ${id}`);
+        });
+      }
+      process.exit(1);
+    }
+
+    if (!framework.enabled) {
+      console.error(`Error: Framework '${framework.name}' (${framework.id}) is disabled.`);
+      process.exit(1);
+    }
+
+    // Set OGP_HOME to the framework's config directory
+    process.env.OGP_HOME = expandTilde(framework.configDir);
+    return;
+  }
+
+  // No --for flag: apply selection logic
+  const metaConfig = loadMetaConfig();
+
+  // If no frameworks configured, fall back to OGP_HOME or default
+  if (!metaConfig.frameworks || metaConfig.frameworks.length === 0) {
+    if (!process.env.OGP_HOME) {
+      process.env.OGP_HOME = path.join(os.homedir(), '.ogp');
+    }
+    return;
+  }
+
+  const enabledFrameworks = metaConfig.frameworks.filter(f => f.enabled);
+
+  // If only one framework enabled, auto-select it
+  if (enabledFrameworks.length === 1) {
+    process.env.OGP_HOME = expandTilde(enabledFrameworks[0].configDir);
+    return;
+  }
+
+  // If default is set, use it
+  if (metaConfig.default) {
+    const defaultFramework = metaConfig.frameworks.find(f => f.id === metaConfig.default);
+    if (defaultFramework && defaultFramework.enabled) {
+      process.env.OGP_HOME = expandTilde(defaultFramework.configDir);
+      return;
+    }
+  }
+
+  // If OGP_HOME is already set, use it (backward compatibility)
+  if (process.env.OGP_HOME) {
+    return;
+  }
+
+  // Otherwise, error: multiple frameworks, no default
+  console.error('Error: Multiple frameworks configured but no default set.');
+  console.error('Use --for <framework> to specify which framework to use, or set a default:');
+  console.error('  ogp setup  (and select a default framework)');
+  console.error('\nAvailable frameworks:');
+  enabledFrameworks.forEach(f => {
+    console.error(`  - ${f.id} (${f.name})`);
+  });
+  process.exit(1);
+}
+
+// Cisco IOS-style ? help interceptor (must run before Commander parses)
+const args = process.argv;
+const hasQuestionMark = args.includes('?');
+
+if (hasQuestionMark) {
+  // Extract command chain (everything after 'ogp' but before '?', excluding --flags)
+  const commandChain = args.slice(2).filter(a => a !== '?' && !a.startsWith('--'));
+  showContextHelp(commandChain);
+  process.exit(0);
+}
 
 const program = new Command();
 
 program
   .name('ogp')
   .description('OGP (Open Gateway Protocol) federation daemon for OpenClaw')
-  .version(JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8')).version);
+  .version(JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8')).version)
+  .option('--for <framework>', 'Select framework to use (use "all" for multi-framework operations)')
+  .hook('preAction', (thisCommand) => {
+    // Skip framework selection for commands that don't need it
+    const commandName = thisCommand.name();
+    const skipFrameworkSelection = ['setup', 'config'];
+    if (skipFrameworkSelection.includes(commandName)) {
+      return;
+    }
+
+    // Get the --for option from the program (global option)
+    const forFlag = program.opts().for;
+    selectFramework(forFlag);
+  });
 
 program
   .command('setup')
@@ -72,24 +208,256 @@ program
 
 program
   .command('start')
-  .description('Start the OGP daemon')
+  .description('Start the OGP daemon (use --for all to start all enabled frameworks)')
   .option('-b, --background', 'Run in background')
-  .action((options) => {
+  .option('--all', 'Start daemons for all enabled frameworks')
+  .action(async (options) => {
+    const forFlag = program.opts().for;
+
+    // Handle --all flag (overrides --for)
+    if (options.all || forFlag === 'all') {
+      const metaConfig = loadMetaConfig();
+      const enabledFrameworks = metaConfig.frameworks.filter(f => f.enabled);
+
+      if (enabledFrameworks.length === 0) {
+        console.error('Error: No enabled frameworks found. Run "ogp setup" first.');
+        process.exit(1);
+      }
+
+      console.log(`Starting daemons for ${enabledFrameworks.length} enabled framework(s)...\n`);
+
+      for (const framework of enabledFrameworks) {
+        // Set OGP_HOME for this framework
+        const originalOgpHome = process.env.OGP_HOME;
+        process.env.OGP_HOME = expandTilde(framework.configDir);
+
+        try {
+          const config = loadConfig();
+          if (!config) {
+            console.error(`⚠ Framework '${framework.name}' (${framework.id}) has no config - skipping`);
+            continue;
+          }
+
+          // Check if already running
+          const status = await getDaemonStatus();
+          if (status.running) {
+            console.log(`⚠ Framework '${framework.name}' (${framework.id}) daemon already running (PID: ${status.pid || 'unknown'})`);
+          } else {
+            startServer(config, true); // Always background mode for multi-framework
+            console.log(`✓ Started daemon for '${framework.name}' (${framework.id}) on port ${config.daemonPort}`);
+          }
+        } catch (error: any) {
+          console.error(`✗ Failed to start daemon for '${framework.name}' (${framework.id}):`, error.message);
+        } finally {
+          // Restore original OGP_HOME
+          if (originalOgpHome) {
+            process.env.OGP_HOME = originalOgpHome;
+          } else {
+            delete process.env.OGP_HOME;
+          }
+        }
+      }
+
+      console.log('\n✓ Multi-framework daemon startup complete');
+      return;
+    }
+
+    // Single framework mode
     const config = requireConfig();
     startServer(config, options.background);
   });
 
 program
   .command('stop')
-  .description('Stop the OGP daemon')
-  .action(() => {
+  .description('Stop the OGP daemon (use --for all to stop all framework daemons)')
+  .option('--all', 'Stop daemons for all frameworks')
+  .action(async (options) => {
+    const forFlag = program.opts().for;
+
+    // Handle --all flag (overrides --for)
+    if (options.all || forFlag === 'all') {
+      const metaConfig = loadMetaConfig();
+      const allFrameworks = metaConfig.frameworks; // Check all frameworks, not just enabled
+
+      if (allFrameworks.length === 0) {
+        console.error('Error: No frameworks configured. Run "ogp setup" first.');
+        process.exit(1);
+      }
+
+      console.log(`Stopping daemons for ${allFrameworks.length} framework(s)...\n`);
+
+      let stoppedCount = 0;
+      let notRunningCount = 0;
+
+      for (const framework of allFrameworks) {
+        // Set OGP_HOME for this framework
+        const originalOgpHome = process.env.OGP_HOME;
+        process.env.OGP_HOME = expandTilde(framework.configDir);
+
+        try {
+          // Check if running first
+          const status = await getDaemonStatus();
+          if (status.running) {
+            stopServer();
+            stoppedCount++;
+            console.log(`✓ Stopped daemon for '${framework.name}' (${framework.id})`);
+          } else {
+            notRunningCount++;
+            console.log(`• Framework '${framework.name}' (${framework.id}) daemon not running`);
+          }
+        } catch (error: any) {
+          console.error(`✗ Failed to stop daemon for '${framework.name}' (${framework.id}):`, error.message);
+        } finally {
+          // Restore original OGP_HOME
+          if (originalOgpHome) {
+            process.env.OGP_HOME = originalOgpHome;
+          } else {
+            delete process.env.OGP_HOME;
+          }
+        }
+      }
+
+      console.log(`\n✓ Stopped ${stoppedCount} daemon(s), ${notRunningCount} not running`);
+      return;
+    }
+
+    // Single framework mode
     stopServer();
   });
 
 program
   .command('status')
-  .description('Show daemon status')
-  .action(async () => {
+  .description('Show daemon status (use --for all to show all frameworks)')
+  .option('--all', 'Show status for all frameworks')
+  .action(async (options) => {
+    const forFlag = program.opts().for;
+
+    // Handle --all flag (overrides --for)
+    if (options.all || forFlag === 'all') {
+      const metaConfig = loadMetaConfig();
+      const allFrameworks = metaConfig.frameworks;
+
+      if (allFrameworks.length === 0) {
+        console.error('Error: No frameworks configured. Run "ogp setup" first.');
+        process.exit(1);
+      }
+
+      // Build status table
+      interface FrameworkStatus {
+        framework: string;
+        status: string;
+        pid: string;
+        port: string;
+        uptime: string;
+        gateway: string;
+      }
+
+      const rows: FrameworkStatus[] = [];
+
+      for (const framework of allFrameworks) {
+        const originalOgpHome = process.env.OGP_HOME;
+        process.env.OGP_HOME = expandTilde(framework.configDir);
+
+        try {
+          const config = loadConfig();
+          const status = await getDaemonStatus();
+
+          let statusStr = 'Stopped';
+          let pidStr = '-';
+          let uptimeStr = '-';
+
+          if (status.running) {
+            statusStr = status.portDetected ? 'Running*' : 'Running';
+            pidStr = status.pid ? status.pid.toString() : 'unknown';
+
+            // Calculate uptime if we have PID file
+            if (status.pid && !status.portDetected) {
+              try {
+                const pidFile = path.join(expandTilde(framework.configDir), 'daemon.pid');
+                const pidFileStat = fs.statSync(pidFile);
+                const uptimeMs = Date.now() - pidFileStat.mtimeMs;
+                const uptimeSeconds = Math.floor(uptimeMs / 1000);
+                const minutes = Math.floor(uptimeSeconds / 60);
+                const seconds = uptimeSeconds % 60;
+                uptimeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+              } catch {
+                uptimeStr = 'unknown';
+              }
+            }
+          }
+
+          const portStr = config?.daemonPort?.toString() || framework.daemonPort?.toString() || '-';
+          const gatewayStr = config?.gatewayUrl || framework.gatewayUrl || '-';
+
+          // Add enabled/disabled indicator
+          const frameworkName = framework.enabled ? framework.name : `${framework.name} [disabled]`;
+
+          rows.push({
+            framework: frameworkName,
+            status: statusStr,
+            pid: pidStr,
+            port: portStr,
+            uptime: uptimeStr,
+            gateway: gatewayStr
+          });
+        } catch (error: any) {
+          rows.push({
+            framework: `${framework.name} [error]`,
+            status: 'Error',
+            pid: '-',
+            port: '-',
+            uptime: '-',
+            gateway: error.message
+          });
+        } finally {
+          if (originalOgpHome) {
+            process.env.OGP_HOME = originalOgpHome;
+          } else {
+            delete process.env.OGP_HOME;
+          }
+        }
+      }
+
+      // Print table header
+      console.log('\nFramework Status Overview:');
+      console.log('─'.repeat(120));
+      console.log(
+        padRight('Framework', 20) +
+        padRight('Status', 12) +
+        padRight('PID', 10) +
+        padRight('Port', 8) +
+        padRight('Uptime', 12) +
+        'Gateway'
+      );
+      console.log('─'.repeat(120));
+
+      // Print rows
+      for (const row of rows) {
+        console.log(
+          padRight(row.framework, 20) +
+          padRight(row.status, 12) +
+          padRight(row.pid, 10) +
+          padRight(row.port, 8) +
+          padRight(row.uptime, 12) +
+          row.gateway
+        );
+      }
+
+      console.log('─'.repeat(120));
+      console.log('\n* Running (detected on port — started externally)');
+      console.log(`\nDefault framework: ${metaConfig.default || '(none set)'}`);
+
+      if (metaConfig.aliases && Object.keys(metaConfig.aliases).length > 0) {
+        console.log('\nAliases:');
+        Object.entries(metaConfig.aliases).forEach(([alias, id]) => {
+          console.log(`  ${alias} → ${id}`);
+        });
+      }
+
+      return;
+    }
+
+    // Single framework mode (existing behavior)
     const status = await getDaemonStatus();
 
     if (status.running) {
@@ -115,13 +483,20 @@ program
     console.log(`  Email: ${config.email}`);
   });
 
+/**
+ * Pad string to the right with spaces
+ */
+function padRight(str: string, width: number): string {
+  return str.length >= width ? str : str + ' '.repeat(width - str.length);
+}
+
 const federation = program
   .command('federation')
   .description('Manage federation');
 
 federation
   .command('list')
-  .description('List all peers')
+  .description('List all peers (use --for all to show all frameworks)')
   .option('-s, --status <status>', 'Filter by status (pending|approved|rejected)')
   .action(async (options) => {
     await federationList(options.status);
@@ -129,7 +504,7 @@ federation
 
 federation
   .command('status')
-  .description('Show federation status and alias → public key mappings')
+  .description('Show federation status and alias → public key mappings (use --for all for all frameworks)')
   .action(async () => {
     await federationStatus();
   });
@@ -373,25 +748,7 @@ program
     await uninstallLaunchAgent();
   });
 
-program
-  .command('config')
-  .description('View or update OGP configuration')
-  .option('--set <key=value>', 'Set a config value (e.g. --set gatewayUrl=https://xyz.trycloudflare.com)')
-  .option('--get <key>', 'Get a config value')
-  .action((opts) => {
-    const config = loadConfig() || {} as any;
-    if (opts.set) {
-      const [key, ...rest] = opts.set.split('=');
-      const value = rest.join('=');
-      (config as any)[key] = value;
-      saveConfig(config as any);
-      console.log(`✓ Set ${key} = ${value}`);
-    } else if (opts.get) {
-      console.log((config as any)[opts.get] ?? 'not set');
-    } else {
-      console.log(JSON.stringify(config, null, 2));
-    }
-  });
+program.addCommand(configCommand);
 
 // Agent-comms configuration commands
 const agentComms = program
@@ -694,6 +1051,18 @@ project
     }
     deleteProject(projectId);
     console.log(`✓ Deleted project '${proj.name}' (${projectId})`);
+  });
+
+// Completion commands
+const completion = program
+  .command('completion')
+  .description('Manage shell completion');
+
+completion
+  .command('install')
+  .description('Install shell completion for the current shell')
+  .action(async () => {
+    await installCompletion();
   });
 
 program.parse();
