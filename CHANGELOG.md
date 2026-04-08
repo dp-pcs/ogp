@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.3.3 (2026-04-07)
+
+### BUG-1: Fix 401 Unauthorized on Agent-Comms Send
+
+**Problem:** `ogp federation agent <peer> <topic> <message>` returned `401 Unauthorized` even when federation was approved and scopes were granted.
+
+**Root Cause:** `federationSendAgentComms()` was not including `messageStr` (the raw JSON string used for signing) in the POST body. The receiving peer's signature verification used `JSON.stringify()` on the received payload, which could produce different key ordering than the original signed string, causing signature mismatch.
+
+**Solution:**
+- Updated `federationSendAgentComms()` to extract `payloadStr` from `signObject()` result
+- Added `messageStr: payloadStr` to POST body (matching existing pattern in `federationSend()`)
+- Now matches the working signature verification flow used by other intent types
+
+**Impact:** Agent-comms messages now correctly verify on receiving peers. Bidirectional federation messaging works as intended.
+
+### BUG-4: Alias Resolution for All CLI Commands
+
+**Problem:** Using a peer alias (e.g., `ogp federation agent apollo general "test"`) failed with "Peer not found: apollo" even when alias was set during federation request.
+
+**Root Cause:** CLI commands only looked up peers by ID or public key prefix. No alias-to-ID resolution existed.
+
+**Solution:**
+- Added `resolvePeerId(identifier)` helper function that tries:
+  1. Exact ID or public key match via `getPeer()`
+  2. Alias lookup via `peers.find(p => p.alias === identifier)`
+- Applied to all CLI functions accepting peer identifiers:
+  - `federationSend()`
+  - `federationSendAgentComms()`
+  - `federationShowScopes()`
+  - `federationUpdateGrants()`
+  - `federationApprove()`
+  - `federationReject()`
+  - `federationRemove()`
+
+**Impact:** All federation CLI commands now support aliases, matching user expectations from `--alias` flag during `federation request`.
+
+---
+
 ## 0.2.31 (2026-04-02)
 
 ### BUILD-117: CLI Uses Public Key ID Format for New Peers
