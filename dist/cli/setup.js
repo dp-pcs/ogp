@@ -77,6 +77,32 @@ async function promptYesNo(rl, question, defaultYes = true) {
     }
     return trimmed === 'y' || trimmed === 'yes';
 }
+async function promptInboundFederationMode(rl) {
+    console.log('\nHow should this agent handle inbound federated requests by default?');
+    console.log('  1. forward           Tell me everything');
+    console.log('  2. summarize         Tell me only the important/actionable parts');
+    console.log('  3. autonomous        Act on your own unless blocked or asked to relay something');
+    console.log('  4. approval-required Do not act or reply without my approval');
+    const answer = await rl.question('\nChoose handling mode [2]: ');
+    const trimmed = answer.trim().toLowerCase();
+    switch (trimmed) {
+        case '1':
+        case 'forward':
+            return 'forward';
+        case '3':
+        case 'autonomous':
+            return 'autonomous';
+        case '4':
+        case 'approval-required':
+        case 'approval':
+            return 'approval-required';
+        case '2':
+        case '':
+        case 'summarize':
+        default:
+            return 'summarize';
+    }
+}
 async function promptMultiSelect(rl, frameworks) {
     console.log('\nAvailable frameworks:');
     frameworks.forEach((fw, idx) => {
@@ -127,6 +153,8 @@ async function setupFramework(rl, framework, agents) {
     }
     // Prompt for agent ID
     const agentId = await promptForAgentId(rl, agents);
+    const humanDeliveryTarget = await rl.question('Primary human delivery target for OGP followups (e.g. telegram:123456789, or leave blank to use notifyTarget/default): ');
+    const inboundFederationMode = await promptInboundFederationMode(rl);
     // Create framework configuration
     const frameworkConfig = {
         id: framework.id,
@@ -148,6 +176,10 @@ async function setupFramework(rl, framework, agents) {
         email: email.trim() || '',
         stateDir: framework.suggestedConfigDir,
         agentId,
+        humanDeliveryTarget: humanDeliveryTarget.trim() || undefined,
+        inboundFederationPolicy: {
+            mode: inboundFederationMode
+        },
         platform: framework.id === 'standalone' ? undefined : framework.id,
         hermesWebhookUrl: hermesWebhookUrl.trim() || undefined,
         hermesWebhookSecret: hermesWebhookSecret.trim() || undefined,
@@ -170,6 +202,10 @@ async function setupFramework(rl, framework, agents) {
         console.log(`  ✓ Ed25519 keypair generated`);
         console.log(`  ✓ Public key: ${keypair.publicKey.substring(0, 16)}...`);
         console.log(`  ✓ Agent: ${agentId}`);
+        if (humanDeliveryTarget.trim()) {
+            console.log(`  ✓ Human delivery target: ${humanDeliveryTarget.trim()}`);
+        }
+        console.log(`  ✓ Inbound federation mode: ${inboundFederationMode}`);
     }
     finally {
         // Restore original OGP_HOME

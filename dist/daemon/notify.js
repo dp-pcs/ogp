@@ -16,14 +16,49 @@ function resolveNotifyTarget(config, agent) {
     // Fall back to legacy notifyTarget
     return config.notifyTarget;
 }
-function resolveOpenClawSessionKey(config, agent) {
-    const agentId = config.agentId || 'main';
-    const notifyTarget = resolveNotifyTarget(config, agent);
-    if (notifyTarget?.startsWith('telegram:')) {
-        const chatId = notifyTarget.replace('telegram:', '');
+function resolveHumanDeliveryTarget(config, agent) {
+    return config.humanDeliveryTarget || resolveNotifyTarget(config, agent);
+}
+function targetToSessionKey(target, agentId) {
+    if (target.startsWith('agent:')) {
+        return target;
+    }
+    if (target.startsWith('session:')) {
+        return target.slice('session:'.length);
+    }
+    if (target.startsWith('telegram:')) {
+        const chatId = target.replace('telegram:', '');
         return `agent:${agentId}:telegram:direct:${chatId}`;
     }
     return `agent:${agentId}:main`;
+}
+function resolveOpenClawSessionKey(config, agent) {
+    const agentId = config.agentId || 'main';
+    const target = resolveHumanDeliveryTarget(config, agent);
+    if (target) {
+        return targetToSessionKey(target, agentId);
+    }
+    return `agent:${agentId}:main`;
+}
+function getInboundFederationMode(config) {
+    return config.inboundFederationPolicy?.mode;
+}
+function formatHandlingGuidance(config) {
+    const mode = getInboundFederationMode(config);
+    const target = resolveHumanDeliveryTarget(config);
+    const targetNote = target ? `Configured human delivery target: ${target}.` : '';
+    switch (mode) {
+        case 'forward':
+            return `Human preference: proactively forward inbound federated items to the configured human channel. Do not claim delivery unless you actually send it there. ${targetNote}`.trim();
+        case 'summarize':
+            return `Human preference: summarize inbound federated items and surface only action requests, uncertainty, or important updates. Do not assume that mentioning it in a different channel counts as delivery. ${targetNote}`.trim();
+        case 'autonomous':
+            return `Human preference: act autonomously when possible, but if a peer explicitly asks you to tell the human something, treat that as a delivery obligation to the configured human channel. ${targetNote}`.trim();
+        case 'approval-required':
+            return `Human preference: do not act on or reply to federated requests until the human explicitly approves. ${targetNote}`.trim();
+        default:
+            return '';
+    }
 }
 /**
  * OpenClaw notification backend.
@@ -36,7 +71,8 @@ class OpenClawBackend {
         const peerName = payload.peerDisplayName || payload.peerId || 'unknown peer';
         const intent = payload.intent || 'message';
         const topic = payload.topic || 'general';
-        const messageText = `[OGP Federation] From ${peerName} (${intent}/${topic}):\n${payload.text}`;
+        const handlingGuidance = formatHandlingGuidance(config);
+        const messageText = `[OGP Federation] From ${peerName} (${intent}/${topic}):\n${payload.text}${handlingGuidance ? `\n\n[OGP Handling Policy]\n${handlingGuidance}` : ''}`;
         // Route into the actual OpenClaw session so the message appears in the
         // human-visible channel, not just the agent wake/inbox path.
         try {
@@ -82,6 +118,8 @@ class HermesBackend {
             message: payload.text,
             priority: payload.priority || 'normal',
             conversation_id: payload.conversationId,
+            human_delivery_target: resolveHumanDeliveryTarget(config, payload.agent),
+            handling_mode: getInboundFederationMode(config),
             timestamp: new Date().toISOString(),
             payload: payload.metadata || {}
         };
