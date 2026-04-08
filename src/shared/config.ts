@@ -64,29 +64,34 @@ export interface OGPConfig {
   hermesWebhookSecret?: string;
 }
 
-const DEFAULT_CONFIG_DIR = process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');
-const CONFIG_FILE = path.join(DEFAULT_CONFIG_DIR, 'config.json');
-
-export function getConfigPath(): string {
-  return CONFIG_FILE;
+/**
+ * Get the config directory (computed dynamically based on OGP_HOME)
+ */
+export function getConfigDir(): string {
+  return process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');
 }
 
-export function getConfigDir(): string {
-  return DEFAULT_CONFIG_DIR;
+/**
+ * Get the config file path (computed dynamically based on OGP_HOME)
+ */
+export function getConfigPath(): string {
+  return path.join(getConfigDir(), 'config.json');
 }
 
 export function ensureConfigDir(): void {
-  if (!fs.existsSync(DEFAULT_CONFIG_DIR)) {
-    fs.mkdirSync(DEFAULT_CONFIG_DIR, { recursive: true });
+  const configDir = getConfigDir();
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
   }
 }
 
 export function loadConfig(): OGPConfig | null {
   try {
-    if (!fs.existsSync(CONFIG_FILE)) {
+    const configFile = getConfigPath();
+    if (!fs.existsSync(configFile)) {
       return null;
     }
-    const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
+    const data = fs.readFileSync(configFile, 'utf-8');
     return JSON.parse(data) as OGPConfig;
   } catch (error) {
     console.error('Failed to load config:', error);
@@ -96,7 +101,8 @@ export function loadConfig(): OGPConfig | null {
 
 export function saveConfig(config: OGPConfig): void {
   ensureConfigDir();
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  const configFile = getConfigPath();
+  fs.writeFileSync(configFile, JSON.stringify(config, null, 2), 'utf-8');
 }
 
 export function requireConfig(): OGPConfig {

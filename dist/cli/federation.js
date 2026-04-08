@@ -1,11 +1,23 @@
 import { listPeers, loadPeers, getPeer, approvePeer, rejectPeer, updatePeerGrantedScopes } from '../daemon/peers.js';
-import { requireConfig } from '../shared/config.js';
+import { requireConfig, loadConfig } from '../shared/config.js';
 import { lookupPeer } from '../daemon/rendezvous.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject, sign } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { createScopeBundle, createScopeGrant, parseRateLimit, formatRateLimit, DEFAULT_RATE_LIMIT } from '../daemon/scopes.js';
 import { loadIntents } from '../daemon/intent-registry.js';
+import { loadMetaConfig } from '../shared/meta-config.js';
+/**
+ * Expand tilde in paths
+ */
+function expandTilde(filePath) {
+    if (filePath.startsWith('~/') || filePath === '~') {
+        return path.join(os.homedir(), filePath.slice(2));
+    }
+    return filePath;
+}
 /**
  * Resolve a peer identifier (alias, ID, or public key) to a peer ID.
  * Returns the peer ID if found, or null.
@@ -25,6 +37,73 @@ function resolvePeerId(identifier) {
     return null;
 }
 export async function federationList(status) {
+    // Check if --for all was specified
+    if (process.env.OGP_FOR_ALL === 'true') {
+        const metaConfig = loadMetaConfig();
+        const enabledFrameworks = metaConfig.frameworks.filter(f => f.enabled);
+        if (enabledFrameworks.length === 0) {
+            console.error('Error: No enabled frameworks found. Run "ogp setup" first.');
+            process.exit(1);
+        }
+        // Print header
+        console.log('\n═══════════════════════════════════════════════════════════════');
+        console.log(`Federation Peers (All Frameworks)`);
+        console.log('═══════════════════════════════════════════════════════════════\n');
+        let totalPeers = 0;
+        // Iterate through each framework
+        for (const framework of enabledFrameworks) {
+            const originalOgpHome = process.env.OGP_HOME;
+            process.env.OGP_HOME = expandTilde(framework.configDir);
+            try {
+                const config = loadConfig();
+                if (!config) {
+                    console.log(`${framework.name} (${framework.displayName || framework.id})`);
+                    console.log('───────────────────────────────────────────────────────────────');
+                    console.log('  No config found - run setup');
+                    console.log('');
+                    continue;
+                }
+                // Load peers for this framework
+                const allPeers = loadPeers();
+                const peers = status ? allPeers.filter(p => p.status === status) : allPeers.filter(p => p.status !== 'removed');
+                // Print framework header
+                console.log(`${framework.name} (${framework.displayName || framework.id})`);
+                console.log('───────────────────────────────────────────────────────────────');
+                if (peers.length === 0) {
+                    console.log('  No peers found');
+                }
+                else {
+                    totalPeers += peers.length;
+                    peers.forEach(peer => {
+                        const aliasDisplay = peer.alias || peer.displayName || '-';
+                        const displayName = peer.alias ? peer.displayName : '';
+                        const keyShort = peer.publicKey?.substring(0, 16) || '-';
+                        const statusIcon = peer.status === 'approved' ? '✓' : peer.status === 'pending' ? '?' : '✗';
+                        console.log(`  ${statusIcon} ${aliasDisplay.padEnd(15)} ${(displayName || '').padEnd(25)} ${peer.status.padEnd(10)} ${peer.grantedScopes?.scopes.map(s => s.intent).join(', ') || 'none'}`);
+                    });
+                }
+                console.log('');
+            }
+            catch (error) {
+                console.log(`${framework.name} (${framework.displayName || framework.id})`);
+                console.log('───────────────────────────────────────────────────────────────');
+                console.log(`  Error: ${error.message}`);
+                console.log('');
+            }
+            finally {
+                // Restore original OGP_HOME
+                if (originalOgpHome) {
+                    process.env.OGP_HOME = originalOgpHome;
+                }
+                else {
+                    delete process.env.OGP_HOME;
+                }
+            }
+        }
+        console.log(`Total: ${totalPeers} peer${totalPeers !== 1 ? 's' : ''} across ${enabledFrameworks.length} framework${enabledFrameworks.length !== 1 ? 's' : ''}`);
+        return;
+    }
+    // Single framework mode (existing behavior)
     // listPeers() doesn't filter 'removed' — load all and filter manually if needed
     const allPeers = loadPeers();
     const peers = status ? allPeers.filter(p => p.status === status) : allPeers.filter(p => p.status !== 'removed');
@@ -48,6 +127,92 @@ export async function federationList(status) {
     });
 }
 export async function federationStatus() {
+    // Check if --for all was specified
+    if (process.env.OGP_FOR_ALL === 'true') {
+        const metaConfig = loadMetaConfig();
+        const enabledFrameworks = metaConfig.frameworks.filter(f => f.enabled);
+        if (enabledFrameworks.length === 0) {
+            console.error('Error: No enabled frameworks found. Run "ogp setup" first.');
+            process.exit(1);
+        }
+        // Print header
+        console.log('\n═══════════════════════════════════════════════════════════════');
+        console.log(`Federation Status (All Frameworks)`);
+        console.log('═══════════════════════════════════════════════════════════════\n');
+        let totalApproved = 0;
+        let totalPending = 0;
+        let totalRejected = 0;
+        let totalRemoved = 0;
+        // Iterate through each framework
+        for (const framework of enabledFrameworks) {
+            const originalOgpHome = process.env.OGP_HOME;
+            process.env.OGP_HOME = expandTilde(framework.configDir);
+            try {
+                const config = loadConfig();
+                if (!config) {
+                    console.log(`${framework.name} (${framework.displayName || framework.id})`);
+                    console.log('───────────────────────────────────────────────────────────────');
+                    console.log('  No config found - run setup');
+                    console.log('');
+                    continue;
+                }
+                // Load peers for this framework
+                const peers = listPeers();
+                const approvedPeers = peers.filter(p => p.status === 'approved');
+                const pendingPeers = peers.filter(p => p.status === 'pending');
+                const rejectedPeers = peers.filter(p => p.status === 'rejected');
+                const removedPeers = peers.filter(p => p.status === 'removed');
+                // Update totals
+                totalApproved += approvedPeers.length;
+                totalPending += pendingPeers.length;
+                totalRejected += rejectedPeers.length;
+                totalRemoved += removedPeers.length;
+                // Print framework header
+                console.log(`${framework.name} (${framework.displayName || framework.id})`);
+                console.log('───────────────────────────────────────────────────────────────');
+                if (peers.length === 0) {
+                    console.log('  No peers configured');
+                }
+                else {
+                    console.log(`  Total: ${peers.length} | Approved: ${approvedPeers.length} | Pending: ${pendingPeers.length} | Rejected: ${rejectedPeers.length} | Removed: ${removedPeers.length}`);
+                    // Show aliases for approved peers
+                    if (approvedPeers.length > 0) {
+                        console.log('\n  Approved peers:');
+                        for (const peer of approvedPeers) {
+                            const aliasDisplay = peer.alias || peer.displayName || 'no alias';
+                            const scopes = peer.grantedScopes?.scopes.map(s => s.intent).join(', ') || 'none';
+                            console.log(`    ${aliasDisplay.padEnd(20)} ${scopes}`);
+                        }
+                    }
+                }
+                console.log('');
+            }
+            catch (error) {
+                console.log(`${framework.name} (${framework.displayName || framework.id})`);
+                console.log('───────────────────────────────────────────────────────────────');
+                console.log(`  Error: ${error.message}`);
+                console.log('');
+            }
+            finally {
+                // Restore original OGP_HOME
+                if (originalOgpHome) {
+                    process.env.OGP_HOME = originalOgpHome;
+                }
+                else {
+                    delete process.env.OGP_HOME;
+                }
+            }
+        }
+        console.log('═══════════════════════════════════════════════════════════════');
+        console.log(`Total across all frameworks:`);
+        console.log(`  Approved: ${totalApproved}`);
+        console.log(`  Pending:  ${totalPending}`);
+        console.log(`  Rejected: ${totalRejected}`);
+        console.log(`  Removed:  ${totalRemoved}`);
+        console.log('');
+        return;
+    }
+    // Single framework mode (existing behavior)
     const peers = listPeers();
     const approvedPeers = peers.filter(p => p.status === 'approved');
     const pendingPeers = peers.filter(p => p.status === 'pending');

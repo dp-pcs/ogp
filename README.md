@@ -46,6 +46,16 @@ ogp-install-skills
 
 This auto-discovers and installs all OGP skills from the `skills/` directory.
 
+### Multi-Framework Support
+
+OGP supports running alongside multiple AI frameworks (OpenClaw, Hermes, etc.) with isolated configurations. During setup, OGP automatically detects installed frameworks and creates framework-specific configurations:
+
+- **OpenClaw**: `~/.ogp-openclaw/`
+- **Hermes**: `~/.ogp-hermes/`
+- **Standalone**: `~/.ogp/`
+
+All framework configurations are managed from a central meta-config at `~/.ogp-meta/config.json`.
+
 ## Quick Start
 
 ### 1. Setup
@@ -56,14 +66,32 @@ Run the interactive setup wizard:
 ogp setup
 ```
 
-You'll be prompted for:
-- **Agent ID** - Which OpenClaw agent owns this gateway (auto-discovers available agents from your OpenClaw config)
-- Daemon port (default: 18790)
-- OpenClaw URL (default: http://localhost:18789)
-- OpenClaw API token
+The wizard automatically detects installed frameworks and guides you through configuration. You'll be prompted for:
+- **Framework Selection** - Which AI frameworks to enable (OpenClaw, Hermes, or standalone)
+- **Agent ID** - Which agent owns each gateway (auto-discovers from framework config)
+- Daemon port (default: 18790 for OpenClaw, 18793 for Hermes)
+- Framework URL and API credentials
 - Your public gateway URL (can update later, or use rendezvous)
 - Rendezvous configuration (optional, v0.2.14+)
 - Display name and email
+
+**Working with Multiple Frameworks:**
+
+When multiple frameworks are configured, use the `--for` flag to specify which framework:
+
+```bash
+# Use specific framework
+ogp --for openclaw federation list
+ogp --for hermes federation list
+
+# Run on all frameworks
+ogp --for all status
+
+# Set a default framework (no --for needed)
+ogp config set-default openclaw
+```
+
+If only one framework is configured, it's automatically selected (no `--for` flag needed).
 
 ### 2. Start the Daemon
 
@@ -75,6 +103,17 @@ Or run in the background:
 
 ```bash
 ogp start --background
+```
+
+**Multi-framework usage:**
+
+```bash
+# Start daemon for specific framework
+ogp --for openclaw start --background
+ogp --for hermes start --background
+
+# Start all framework daemons
+ogp --for all start --background
 ```
 
 ### 3. Making Your Gateway Reachable
@@ -174,15 +213,39 @@ https://your-gateway-url.com/.well-known/ogp
 
 ## All Commands
 
+All commands support the `--for <framework>` flag to specify which framework configuration to use. Use `--for all` to run commands across all configured frameworks.
+
+**Quick Help:** Add `?` to any command for context-sensitive help:
+
+```bash
+ogp ?                      # Show all commands
+ogp federation ?           # Show federation commands
+ogp federation send ?      # Show send usage with examples
+```
+
+### Tab Completion
+
+Install shell completion for faster command entry:
+
+```bash
+# Bash
+ogp completion install bash
+
+# Zsh
+ogp completion install zsh
+```
+
+After installation, restart your shell or run `source ~/.bashrc` (bash) or `source ~/.zshrc` (zsh).
+
 ### Daemon Management
 
 | Command | Description |
 |---------|-------------|
-| `ogp setup` | Interactive setup wizard |
-| `ogp start` | Start daemon in foreground |
-| `ogp start --background` | Start daemon as background process |
-| `ogp stop` | Stop the daemon |
-| `ogp status` | Show daemon status and configuration |
+| `ogp setup` | Interactive setup wizard (auto-detects frameworks) |
+| `ogp start [--for <framework>]` | Start daemon in foreground |
+| `ogp start --background [--for <framework>]` | Start daemon as background process |
+| `ogp stop [--for <framework>]` | Stop the daemon |
+| `ogp status [--for <framework>]` | Show daemon status and configuration |
 
 ### Tunnel Management
 
@@ -200,11 +263,21 @@ https://your-gateway-url.com/.well-known/ogp
 | `ogp install` | Install LaunchAgent for auto-start on login |
 | `ogp uninstall` | Remove LaunchAgent |
 
+### Configuration Management
+
+| Command | Description |
+|---------|-------------|
+| `ogp config list` | List all configured frameworks |
+| `ogp config set-default <framework>` | Set default framework (no --for needed) |
+| `ogp config enable <framework>` | Enable a framework |
+| `ogp config disable <framework>` | Disable a framework |
+| `ogp config show [--for <framework>]` | Show current configuration |
+
 ### Federation Management
 
 | Command | Description |
 |---------|-------------|
-| `ogp federation list` | List all peers |
+| `ogp federation list [--for <framework>]` | List all peers |
 | `ogp federation list --status pending` | List pending federation requests |
 | `ogp federation list --status approved` | List approved peers |
 | `ogp federation request <url> [alias]` | Request federation (alias auto-resolves if omitted) |
@@ -271,54 +344,57 @@ When approving or granting scopes:
 ogp federation request https://peer.example.com
 
 # Or specify a custom alias for easier reference
-ogp federation request https://peer.example.com --alias big-papa
+ogp federation request https://peer.example.com --alias apollo
+
+# Multi-framework: Request from specific framework
+ogp --for openclaw federation request https://hermes.example.com --alias hermes-gateway
 
 # Check pending requests
 ogp federation list --status pending
 
 # Approve a peer (v0.1 mode - no scope restrictions)
-ogp federation approve alice
+ogp federation approve apollo
 
 # Approve with scope grants (v0.2.0+)
-ogp federation approve alice \
+ogp federation approve apollo \
   --intents message,agent-comms \
   --rate 100/3600 \
   --topics memory-management,task-delegation
 
 # View peer scopes
-ogp federation scopes alice
+ogp federation scopes apollo
 
 # Update grants for an existing peer
-ogp federation grant alice \
+ogp federation grant apollo \
   --intents agent-comms \
   --topics project-planning
 
 # Remove a peer from federation (asymmetric tear-down)
-ogp federation remove alice
+ogp federation remove apollo
 
 # Test connectivity
 ogp federation ping https://peer.example.com
 
 # Send a simple message
-ogp federation send alice message '{"text":"Hello!"}'
+ogp federation send apollo message '{"text":"Hello!"}'
 
 # Send agent-comms (v0.2.0+)
-ogp federation agent alice memory-management "How do you persist context?"
+ogp federation agent apollo memory-management "How do you persist context?"
 
 # Send agent-comms with priority
-ogp federation agent alice task-delegation "Schedule standup" --priority high
+ogp federation agent apollo task-delegation "Schedule standup" --priority high
 
 # Send agent-comms and wait for reply
-ogp federation agent alice queries "What's the status?" --wait --timeout 60000
+ogp federation agent apollo queries "What's the status?" --wait --timeout 60000
 
 # Send a task request
-ogp federation send alice task-request '{
+ogp federation send apollo task-request '{
   "taskType": "analysis",
   "description": "Analyze recent logs"
 }'
 
 # Send a status update
-ogp federation send alice status-update '{
+ogp federation send apollo status-update '{
   "status": "completed",
   "message": "Task finished"
 }'
@@ -399,6 +475,8 @@ ogp agent-comms activity stan --last 20
 
 ## How Federation Works
 
+### Single Framework Architecture
+
 ```
 ┌─────────────┐         ┌──────────────┐         ┌─────────────┐
 │  OpenClaw   │◄────────│  OGP Daemon  │◄────────│   Remote    │
@@ -407,12 +485,40 @@ ogp agent-comms activity stan --last 20
 └─────────────┘         └──────────────┘         └─────────────┘
 ```
 
+### Multi-Framework Architecture
+
+```
+┌─────────────┐         ┌──────────────────┐         ┌─────────────┐
+│  OpenClaw   │◄────────│  OGP Daemon      │◄────────│   Remote    │
+│  :18789     │  webhook│  :18790          │  signed │   Peer      │
+└─────────────┘         │ (~/.ogp-openclaw)│  message│  (OGP)      │
+                        └──────────────────┘         └─────────────┘
+                               ▲
+┌─────────────┐                │
+│   Hermes    │◄────────┌──────────────────┐         ┌─────────────┐
+│  :18792     │  webhook│  OGP Daemon      │◄────────│   Remote    │
+└─────────────┘         │  :18793          │  signed │   Peer      │
+                        │ (~/.ogp-hermes)  │  message│  (OGP)      │
+                        └──────────────────┘         └─────────────┘
+                               ▲
+                               │
+                        ┌──────────────────┐
+                        │   Meta Config    │
+                        │ (~/.ogp-meta/)   │
+                        │ - Framework list │
+                        │ - Default        │
+                        │ - Aliases        │
+                        └──────────────────┘
+```
+
+### Federation Flow
+
 1. **Discovery**: Peers discover each other via `/.well-known/ogp` endpoint or rendezvous server
 2. **Request**: Alice requests federation with Bob's OGP instance
 3. **Approval**: Bob approves (or rejects) the federation request
 4. **Messaging**: Approved peers can send cryptographically signed messages
 5. **Verification**: Recipient OGP daemon verifies signatures using sender's public key
-6. **Relay**: Valid messages are forwarded to the local OpenClaw agent via webhook
+6. **Relay**: Valid messages are forwarded to the local AI agent via webhook
 
 All messages are signed with Ed25519 cryptographic signatures to prevent tampering and impersonation.
 
@@ -945,11 +1051,21 @@ Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill pr
 
 ## Documentation
 
-- [Quick Start Guide](./docs/quickstart.md) - Detailed step-by-step setup
+### Getting Started
+- [Getting Started Guide](./docs/GETTING-STARTED.md) - Comprehensive setup guide for single and multi-framework setups
+- [Quick Start Guide](./docs/quickstart.md) - Fast-track setup for single framework
+- [CLI Reference](./docs/CLI-REFERENCE.md) - Complete command reference with examples
+- [Migration Guide](./docs/MIGRATION.md) - Upgrading from single to multi-framework setup
+
+### Core Features
 - [Federation Flow](./docs/federation-flow.md) - How federation works internally
 - [Scope Negotiation](./docs/scopes.md) - Per-peer scope configuration (v0.2.0)
 - [Agent Communications](./docs/agent-comms.md) - Agent-to-agent messaging (v0.2.0)
 - [Rendezvous & Invite Flow](./docs/rendezvous.md) - Zero-config peer discovery (v0.2.14+)
+
+### Advanced
+- [Multi-Framework Design](./docs/MULTI-FRAMEWORK-DESIGN.md) - Design principles for multi-framework support
+- [Multi-Framework Implementation](./docs/MULTI-FRAMEWORK-IMPL.md) - Implementation details
 - [Protocol Specification](https://github.com/dp-pcs/openclaw-federation) - Full OGP protocol spec
 
 ## Security

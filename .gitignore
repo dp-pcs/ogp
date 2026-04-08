@@ -22,3 +22,7 @@ tunnel.log
 *.pid
 daemon.pid
 tunnel.pid
+
+# Test coverage
+coverage/
+.vitest/
