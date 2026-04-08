@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.1 (2026-04-08)
+
+### Fixed
+- **CRITICAL (BUG-2)**: Fixed OpenClaw notification delivery - messages now enter agent conversation context
+  - **Problem**: Federation messages appeared in Telegram but agent couldn't see/respond (phantom messages)
+  - **Root Cause**: Using `/hooks/agent` endpoint which creates isolated sessions instead of injecting into main conversation
+  - **Solution**: Changed to `/hooks/wake` endpoint which properly injects messages into active agent session
+  - **Impact**: OpenClaw agents now see and can respond to federation requests and agent-comms messages
+  - **Locations fixed**: `src/daemon/notify.ts` OpenClaw backend (lines 81-94)
+  - Messages now formatted with peer/intent context: `[OGP Federation] From {peer} ({intent}/{topic}): {message}`
+
+---
+
 ## 0.4.0 (2026-04-08)
 
 ### 🎉 Major Feature: Multi-Framework Support

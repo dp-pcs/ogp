@@ -73,27 +73,24 @@ class OpenClawBackend implements NotificationBackend {
     const hooksToken = (config as any).openclawHooksToken;
     if (hooksToken && config.openclawUrl) {
       const openclawUrl = config.openclawUrl.replace(/\/$/, '');
+
+      // Format message with peer and intent context
+      const peerName = payload.peerDisplayName || payload.peerId || 'unknown peer';
+      const intent = payload.intent || 'message';
+      const topic = payload.topic || 'general';
+      const messageText = `[OGP Federation] From ${peerName} (${intent}/${topic}):\n${payload.text}`;
+
       try {
         const result = await new Promise<boolean>((resolve) => {
           import('node:https').then(({ request: httpsRequest }) => {
             import('node:http').then(({ request: httpRequest }) => {
               import('node:url').then(({ URL }) => {
-                const url = new URL(`${openclawUrl}/hooks/agent`);
+                const url = new URL(`${openclawUrl}/hooks/wake`);
                 const isHttps = url.protocol === 'https:';
-                const target = resolveNotifyTarget(config, payload.agent);
+
                 const hookPayload = {
-                  agentId: payload.agent || config.agentId || 'default',
-                  peerId: payload.peerId || payload.metadata?.ogp?.from || 'unknown',
-                  intent: payload.intent || payload.metadata?.ogp?.intent || 'unknown',
-                  topic: payload.topic || payload.metadata?.ogp?.topic || 'general',
-                  message: payload.text,
-                  notifyTarget: target || config.notifyTarget || null,
-                  timestamp: new Date().toISOString(),
-                  // Legacy fields for backward compatibility
-                  name: 'OGP',
-                  deliver: true,
-                  channel: (config as any).notifyChannel || 'last',
-                  ...(target ? { to: target } : {}),
+                  text: messageText,
+                  mode: 'now',
                 };
                 const body = JSON.stringify(hookPayload);
                 const reqFn = isHttps ? httpsRequest : httpRequest;
@@ -120,10 +117,10 @@ class OpenClawBackend implements NotificationBackend {
           });
         });
         if (result) {
-          console.log('[OGP] Notified OpenClaw via /hooks/agent:', payload.text);
+          console.log('[OGP] Notified OpenClaw via /hooks/wake:', messageText);
           return true;
         }
-        console.warn('[OGP] /hooks/agent call failed (non-2xx or error), falling back');
+        console.warn('[OGP] /hooks/wake call failed (non-2xx or error), falling back');
       } catch (error) {
         console.error('[OGP] /hooks/agent failed:', error);
       }
