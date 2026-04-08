@@ -6,6 +6,24 @@ import { signObject, sign } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
 import { createScopeBundle, createScopeGrant, parseRateLimit, formatRateLimit, DEFAULT_RATE_LIMIT } from '../daemon/scopes.js';
 import { loadIntents } from '../daemon/intent-registry.js';
+/**
+ * Resolve a peer identifier (alias, ID, or public key) to a peer ID.
+ * Returns the peer ID if found, or null.
+ */
+function resolvePeerId(identifier) {
+    // First try exact match by ID or public key
+    const exactPeer = getPeer(identifier);
+    if (exactPeer) {
+        return exactPeer.id;
+    }
+    // Then try alias lookup
+    const peers = loadPeers();
+    const aliasPeer = peers.find(p => p.alias === identifier);
+    if (aliasPeer) {
+        return aliasPeer.id;
+    }
+    return null;
+}
 export async function federationList(status) {
     // listPeers() doesn't filter 'removed' — load all and filter manually if needed
     const allPeers = loadPeers();
@@ -143,6 +161,13 @@ export async function federationRequest(peerUrl, peerId, alias) {
 }
 export async function federationApprove(peerId, options = {}) {
     const config = requireConfig();
+    // Resolve peer identifier (alias, ID, or public key)
+    const resolvedId = resolvePeerId(peerId);
+    if (!resolvedId) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    peerId = resolvedId;
     const peer = getPeer(peerId);
     if (!peer) {
         console.error(`Peer not found: ${peerId}`);
@@ -247,6 +272,13 @@ export async function federationApprove(peerId, options = {}) {
     }
 }
 export async function federationReject(peerId) {
+    // Resolve peer identifier (alias, ID, or public key)
+    const resolvedId = resolvePeerId(peerId);
+    if (!resolvedId) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    peerId = resolvedId;
     const peer = getPeer(peerId);
     if (!peer) {
         console.error(`Peer not found: ${peerId}`);
@@ -271,8 +303,14 @@ export async function federationReject(peerId) {
     }
 }
 export async function federationRemove(peerId) {
-    const peers = loadPeers();
-    const peer = peers.find(p => p.id === peerId);
+    // Resolve peer identifier (alias, ID, or public key)
+    const resolvedId = resolvePeerId(peerId);
+    if (!resolvedId) {
+        console.error(`Peer not found: ${peerId}`);
+        process.exit(1);
+    }
+    peerId = resolvedId;
+    const peer = getPeer(peerId);
     if (!peer) {
         console.error(`Peer not found: ${peerId}`);
         process.exit(1);
@@ -314,6 +352,13 @@ export async function federationRemove(peerId) {
 }
 export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
     const config = requireConfig();
+    // Resolve peer identifier (alias, ID, or public key)
+    const resolvedId = resolvePeerId(peerId);
+    if (!resolvedId) {
+        console.error(`Peer not found: ${peerId}`);
+        return null;
+    }
+    peerId = resolvedId;
     const peer = getPeer(peerId);
     if (!peer) {
         console.error(`Peer not found: ${peerId}`);
@@ -372,6 +417,13 @@ export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
  * Show scope grants for a peer
  */
 export async function federationShowScopes(peerId) {
+    // Resolve peer identifier (alias, ID, or public key)
+    const resolvedId = resolvePeerId(peerId);
+    if (!resolvedId) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    peerId = resolvedId;
     const peer = getPeer(peerId);
     if (!peer) {
         console.error(`Peer not found: ${peerId}`);
@@ -427,6 +479,13 @@ export async function federationShowScopes(peerId) {
  * Update scope grants for an existing peer
  */
 export async function federationUpdateGrants(peerId, options) {
+    // Resolve peer identifier (alias, ID, or public key)
+    const resolvedId = resolvePeerId(peerId);
+    if (!resolvedId) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    peerId = resolvedId;
     const peer = getPeer(peerId);
     if (!peer) {
         console.error(`Peer not found: ${peerId}`);
@@ -468,6 +527,13 @@ export async function federationUpdateGrants(peerId, options) {
  */
 export async function federationSendAgentComms(peerId, topic, messageText, options = {}) {
     const config = requireConfig();
+    // Resolve peer identifier (alias, ID, or public key)
+    const resolvedId = resolvePeerId(peerId);
+    if (!resolvedId) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    peerId = resolvedId;
     const peer = getPeer(peerId);
     if (!peer) {
         console.error(`Peer not found: ${peerId}`);
@@ -499,13 +565,14 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
             priority: options.priority || 'normal'
         }
     };
-    const { payload: signedPayload, signature } = signObject(message, getPrivateKey());
+    const { payload: signedPayload, payloadStr, signature } = signObject(message, getPrivateKey());
     try {
         const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message: signedPayload,
+                messageStr: payloadStr, // raw signed string for exact verification
                 signature
             })
         });
