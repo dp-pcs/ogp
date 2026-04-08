@@ -4,7 +4,7 @@ import {
   type OGPConfig
 } from '../shared/config.js';
 import crypto from 'node:crypto';
-import { injectMessage } from './openclaw-bridge.js';
+import { dispatchAgentHook, injectMessage } from './openclaw-bridge.js';
 
 export interface NotificationPayload {
   text: string;
@@ -98,6 +98,44 @@ function resolveOpenClawSessionKey(config: OGPConfig, agent?: string): string {
   return `agent:${agentId}:main`;
 }
 
+function resolveOpenClawDeliveryTarget(
+  config: OGPConfig,
+  agent?: string
+): { channel?: string; to?: string } | undefined {
+  const target = resolveHumanDeliveryTarget(config, agent);
+  if (!target) {
+    return undefined;
+  }
+
+  if (target.startsWith('telegram:')) {
+    return {
+      channel: 'telegram',
+      to: target.replace('telegram:', '')
+    };
+  }
+
+  const parts = target.split(':').filter(Boolean);
+  if (parts[0] !== 'agent') {
+    return undefined;
+  }
+
+  if (parts.length >= 5 && parts[2] === 'telegram' && parts[3] === 'direct') {
+    return {
+      channel: 'telegram',
+      to: parts[4]
+    };
+  }
+
+  if (parts.length >= 6 && parts[2] === 'telegram' && parts[4] === 'direct') {
+    return {
+      channel: 'telegram',
+      to: parts[5]
+    };
+  }
+
+  return undefined;
+}
+
 function getInboundFederationMode(config: OGPConfig): InboundFederationMode | undefined {
   return config.inboundFederationPolicy?.mode;
 }
@@ -129,25 +167,51 @@ class OpenClawBackend implements NotificationBackend {
   readonly name = 'openclaw';
 
   async notify(payload: NotificationPayload, config: OGPConfig): Promise<boolean> {
-    // Format message with peer and intent context
     const peerName = payload.peerDisplayName || payload.peerId || 'unknown peer';
     const intent = payload.intent || 'message';
     const topic = payload.topic || 'general';
     const handlingGuidance = formatHandlingGuidance(config);
-    const messageText = `[OGP Federation] From ${peerName} (${intent}/${topic}):\n${payload.text}${
+
+    const taskText = `Federated message from ${peerName} (${intent}/${topic}).
+
+Message:
+${payload.text}${
       handlingGuidance ? `\n\n[OGP Handling Policy]\n${handlingGuidance}` : ''
     }`;
 
-    // Route into the actual OpenClaw session so the message appears in the
-    // human-visible channel, not just the agent wake/inbox path.
+    const sessionMessageText = `[OGP Federation] From ${peerName} (${intent}/${topic}):\n${payload.text}${
+      handlingGuidance ? `\n\n[OGP Handling Policy]\n${handlingGuidance}` : ''
+    }`;
+
     try {
+      const deliveryTarget = resolveOpenClawDeliveryTarget(config, payload.agent);
+      const hookDelivered = await dispatchAgentHook(taskText, peerName, deliveryTarget);
+      if (hookDelivered) {
+        const sessionKey = resolveOpenClawSessionKey(config, payload.agent);
+        const syncNote = `[OGP Internal Sync]
+A federated request from ${peerName} (${intent}/${topic}) was handled via /hooks/agent and delivered to the configured human channel.
+
+Do not treat this as a new pending delivery obligation unless the human asks you to revisit it.
+
+Handled message summary:
+${payload.text}`;
+
+        const synced = await injectMessage(sessionKey, syncNote, peerName);
+        if (!synced) {
+          console.warn('[OGP] Hook delivery succeeded, but DM-session sync note failed for peer:', peerName);
+        }
+
+        console.log('[OGP] Message delivered to OpenClaw via /hooks/agent for peer:', peerName);
+        return true;
+      }
+
       const sessionKey = resolveOpenClawSessionKey(config, payload.agent);
-      const result = await injectMessage(sessionKey, messageText, peerName);
+      const result = await injectMessage(sessionKey, sessionMessageText, peerName);
       if (result) {
-        console.log('[OGP] Message delivered to OpenClaw session for peer:', peerName);
+        console.log('[OGP] Message delivered to OpenClaw session fallback for peer:', peerName);
         return true;
       } else {
-        console.error('[OGP] OpenClaw session delivery failed');
+        console.error('[OGP] OpenClaw notification delivery failed');
         return false;
       }
     } catch (err) {

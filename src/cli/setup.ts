@@ -36,6 +36,9 @@ interface OpenClawConfig {
   bindings?: AgentBinding[];
 }
 
+const DEFAULT_HERMES_WEBHOOK_URL = 'http://localhost:8644/webhooks/ogp_federation';
+const DEFAULT_HERMES_WEBHOOK_SECRET = 'ogp-test-secret-hermes-2026';
+
 function loadOpenClawConfig(): OpenClawConfig | null {
   try {
     const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
@@ -210,7 +213,10 @@ async function setupFramework(
     openclawToken = await rl.question('OpenClaw API token: ');
   } else if (framework.id === 'hermes') {
     const useDefaults = await promptYesNo(rl, 'Use default Hermes webhook settings?', true);
-    if (!useDefaults) {
+    if (useDefaults) {
+      hermesWebhookUrl = DEFAULT_HERMES_WEBHOOK_URL;
+      hermesWebhookSecret = DEFAULT_HERMES_WEBHOOK_SECRET;
+    } else {
       hermesWebhookUrl = await rl.question('Hermes webhook URL: ');
       hermesWebhookSecret = await rl.question('Hermes webhook secret: ');
     }
@@ -219,9 +225,14 @@ async function setupFramework(
   // Prompt for agent ID
   const agentId = await promptForAgentId(rl, agents);
 
-  const humanDeliveryTarget = await rl.question(
-    'Primary human delivery target for OGP followups (e.g. telegram:123456789, or leave blank to use notifyTarget/default): '
-  );
+  let humanDeliveryTarget = '';
+  if (framework.id !== 'hermes') {
+    humanDeliveryTarget = await rl.question(
+      'Primary human delivery target for OGP followups (e.g. telegram:123456789, or leave blank to use notifyTarget/default): '
+    );
+  } else {
+    console.log('  Hermes uses webhook delivery for OGP followups; skipping human delivery target prompt.');
+  }
   const inboundFederationMode = await promptInboundFederationMode(rl);
 
   // Create framework configuration
@@ -341,13 +352,16 @@ export async function runSetup(): Promise<void> {
 
     // Step 4: Load agents from OpenClaw config (if available)
     const openclawConfig = loadOpenClawConfig();
-    const agents = openclawConfig ? getAgentsFromConfig(openclawConfig) : [];
+    const openclawAgents = openclawConfig ? getAgentsFromConfig(openclawConfig) : [];
 
     // Step 5: Setup each selected framework
     const metaConfig: MetaConfig = loadMetaConfig();
 
     for (const framework of selectedFrameworks) {
-      const frameworkConfig = await setupFramework(rl, framework, agents);
+      // Only OpenClaw currently supports agent auto-discovery from local config.
+      // Other frameworks should not inherit the OpenClaw agent list.
+      const frameworkAgents = framework.id === 'openclaw' ? openclawAgents : [];
+      const frameworkConfig = await setupFramework(rl, framework, frameworkAgents);
 
       // Remove existing framework config if present
       const existingIndex = metaConfig.frameworks.findIndex(f => f.id === framework.id);
