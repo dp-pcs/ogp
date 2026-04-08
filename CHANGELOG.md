@@ -1,17 +1,37 @@
 # Changelog
 
-## 0.4.1 (2026-04-08)
+## 0.4.1 (2026-04-08) - UNRELEASED
 
-### Fixed
-- **CRITICAL (BUG-2)**: Fixed OpenClaw notification delivery - messages now enter agent conversation context
-  - **Problem**: Federation messages appeared in Telegram but agent couldn't see/respond (phantom messages)
-  - **Root Cause**: Webhook endpoints (`/hooks/wake`, `/hooks/agent`) create isolated sessions or system interjections instead of injecting into agent conversation queue
-  - **Solution**: Use `openclaw agent --agent <agentId> --message "..."` CLI command which properly injects messages into agent's conversation queue
-  - **Impact**: OpenClaw agents now see and can respond to federation requests and agent-comms messages as normal conversation messages
-  - **Scalability**: Works for all channels (Telegram, iMessage, TUI, Dashboard, etc.) - agent bindings handle routing automatically
+### Changed
+- **OpenClaw Bridge**: Replaced WebSocket approach with CLI-based `sessions.send` RPC
+  - New file: `src/daemon/openclaw-bridge.ts` - CLI-based bridge using `openclaw gateway call`
+  - Uses `sessions.send` RPC method instead of `chat.inject`
+  - Routes to correct Telegram session: `agent:main:telegram:direct:<chatId>`
+  - Graceful shutdown integration in `src/daemon/server.ts`
+
+### Fixed (Partial)
+- **BUG-2 (PARTIAL FIX)**: OGP messages now deliver to OpenClaw Telegram sessions
+  - **Problem**: Federation messages appeared in Telegram notifications but agent couldn't see/respond (phantom messages)
+  - **Investigation**: Tested multiple delivery methods:
+    - ❌ WebSocket `chat.inject` - handshake failed
+    - ✅ CLI `chat.inject` to TUI - works but TUI ≠ Telegram
+    - ✅ CLI `sessions.send` to Telegram - delivers but **sender shows as "cli"**
+    - ⏸️ `/hooks/agent` webhook - returns success but delivery unclear
+  - **Current Solution**: Use `openclaw gateway call ... sessions.send` with Telegram session key
+  - **Remaining Issue**: Messages deliver ✅ but sender identity shows as "cli" instead of peer ❌
+  - **Impact**: Agents can see and read message content, but can't identify sender as peer for direct replies
   - **Security**: Switched from `execSync` to `execFile` to prevent command injection
-  - **Locations fixed**: `src/daemon/notify.ts` OpenClaw backend (complete rewrite of notify method)
-  - Messages now formatted with peer/intent context: `[OGP Federation] From {peer} ({intent}/{topic}): {message}`
+  - **Files Modified**:
+    - `src/daemon/notify.ts` - Session key routing
+    - `src/daemon/openclaw-bridge.ts` - New CLI-based bridge
+    - `src/daemon/server.ts` - Bridge lifecycle integration
+  - Messages formatted with peer/intent context: `[OGP Federation] From {peer} ({intent}/{topic}): {message}`
+
+### Known Issues
+- **BUG-2 (Remaining)**: Sender identity not preserved - messages show sender="cli" instead of peer identity
+  - Agents can read message content but can't reply directly to peers
+  - Workaround: Agents can parse peer info from message content format
+  - Investigation ongoing: Testing `/hooks/agent` webhook and other delivery methods
 
 ---
 

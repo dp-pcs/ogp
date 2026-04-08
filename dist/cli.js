@@ -79,6 +79,10 @@ function selectFramework(forFlag) {
         return;
     }
     const enabledFrameworks = metaConfig.frameworks.filter(f => f.enabled);
+    // If OGP_HOME is already set, honor it (background child processes rely on this)
+    if (process.env.OGP_HOME) {
+        return;
+    }
     // If only one framework enabled, auto-select it
     if (enabledFrameworks.length === 1) {
         process.env.OGP_HOME = expandTilde(enabledFrameworks[0].configDir);
@@ -91,10 +95,6 @@ function selectFramework(forFlag) {
             process.env.OGP_HOME = expandTilde(defaultFramework.configDir);
             return;
         }
-    }
-    // If OGP_HOME is already set, use it (backward compatibility)
-    if (process.env.OGP_HOME) {
-        return;
     }
     // Otherwise, error: multiple frameworks, no default
     console.error('Error: Multiple frameworks configured but no default set.');

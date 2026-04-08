@@ -2,8 +2,12 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { requireConfig, getConfigDir } from '../shared/config.js';
-const TUNNEL_PID_FILE = path.join(getConfigDir(), 'tunnel.pid');
-const TUNNEL_LOG_FILE = path.join(getConfigDir(), 'tunnel.log');
+function getTunnelPidFile() {
+    return path.join(getConfigDir(), 'tunnel.pid');
+}
+function getTunnelLogFile() {
+    return path.join(getConfigDir(), 'tunnel.log');
+}
 export async function expose(method = 'cloudflared', background = false) {
     const config = requireConfig();
     console.log(`Exposing OGP daemon on port ${config.daemonPort}...`);
@@ -15,16 +19,17 @@ export async function expose(method = 'cloudflared', background = false) {
     }
 }
 export function stopExpose() {
-    if (!fs.existsSync(TUNNEL_PID_FILE)) {
+    const tunnelPidFile = getTunnelPidFile();
+    if (!fs.existsSync(tunnelPidFile)) {
         console.log('No tunnel is running');
         return;
     }
     try {
-        const pidStr = fs.readFileSync(TUNNEL_PID_FILE, 'utf-8').trim();
+        const pidStr = fs.readFileSync(tunnelPidFile, 'utf-8').trim();
         const pid = parseInt(pidStr, 10);
         if (isNaN(pid)) {
             console.error('Invalid PID in tunnel.pid file');
-            fs.unlinkSync(TUNNEL_PID_FILE);
+            fs.unlinkSync(tunnelPidFile);
             return;
         }
         // Check if process is running
@@ -33,12 +38,12 @@ export function stopExpose() {
         }
         catch (error) {
             console.log('Tunnel is not running (stale PID file)');
-            fs.unlinkSync(TUNNEL_PID_FILE);
+            fs.unlinkSync(tunnelPidFile);
             return;
         }
         // Send SIGTERM
         process.kill(pid, 'SIGTERM');
-        fs.unlinkSync(TUNNEL_PID_FILE);
+        fs.unlinkSync(tunnelPidFile);
         console.log('Tunnel stopped');
     }
     catch (error) {
@@ -49,15 +54,16 @@ async function exposeCloudflared(port, background) {
     console.log('Starting cloudflared tunnel...');
     console.log('Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/\n');
     if (background) {
-        const logStream = fs.openSync(TUNNEL_LOG_FILE, 'a');
+        const tunnelLogFile = getTunnelLogFile();
+        const logStream = fs.openSync(tunnelLogFile, 'a');
         const proc = spawn('cloudflared', ['tunnel', '--url', `http://localhost:${port}`], {
             detached: true,
             stdio: ['ignore', logStream, logStream]
         });
         proc.unref();
-        fs.writeFileSync(TUNNEL_PID_FILE, proc.pid.toString(), 'utf-8');
+        fs.writeFileSync(getTunnelPidFile(), proc.pid.toString(), 'utf-8');
         console.log(`Cloudflared tunnel started (PID: ${proc.pid})`);
-        console.log(`Logs: ${TUNNEL_LOG_FILE}`);
+        console.log(`Logs: ${tunnelLogFile}`);
         console.log('Run "ogp expose stop" to stop the tunnel');
     }
     else {
@@ -77,15 +83,16 @@ async function exposeNgrok(port, background) {
     console.log('Starting ngrok tunnel...');
     console.log('Install ngrok: https://ngrok.com/download\n');
     if (background) {
-        const logStream = fs.openSync(TUNNEL_LOG_FILE, 'a');
+        const tunnelLogFile = getTunnelLogFile();
+        const logStream = fs.openSync(tunnelLogFile, 'a');
         const proc = spawn('ngrok', ['http', port.toString()], {
             detached: true,
             stdio: ['ignore', logStream, logStream]
         });
         proc.unref();
-        fs.writeFileSync(TUNNEL_PID_FILE, proc.pid.toString(), 'utf-8');
+        fs.writeFileSync(getTunnelPidFile(), proc.pid.toString(), 'utf-8');
         console.log(`Ngrok tunnel started (PID: ${proc.pid})`);
-        console.log(`Logs: ${TUNNEL_LOG_FILE}`);
+        console.log(`Logs: ${tunnelLogFile}`);
         console.log('Run "ogp expose stop" to stop the tunnel');
     }
     else {

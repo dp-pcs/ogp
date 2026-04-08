@@ -41,4 +41,10 @@ export declare function notifyOpenClaw(payload: NotificationPayload): Promise<bo
  * @returns Promise<boolean> indicating success
  */
 export declare function notifyLocalAgent(payload: NotificationPayload): Promise<boolean>;
+/**
+ * Inject plain text into the local OpenClaw session without wrapping it as an
+ * inbound federation message. This is used to mirror local outbound actions
+ * into the agent's visible conversation state.
+ */
+export declare function deliverLocalSessionText(text: string, agent?: string): Promise<boolean>;
 //# sourceMappingURL=notify.d.ts.map

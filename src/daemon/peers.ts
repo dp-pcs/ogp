@@ -36,14 +36,17 @@ export interface Peer {
   agentId?: string;                  // which local agent "owns" this federation relationship
 }
 
-const PEERS_FILE = path.join(getConfigDir(), 'peers.json');
+function getPeersFile(): string {
+  return path.join(getConfigDir(), 'peers.json');
+}
 
 export function loadPeers(): Peer[] {
   ensureConfigDir();
-  if (!fs.existsSync(PEERS_FILE)) {
+  const peersFile = getPeersFile();
+  if (!fs.existsSync(peersFile)) {
     return [];
   }
-  const data = fs.readFileSync(PEERS_FILE, 'utf-8');
+  const data = fs.readFileSync(peersFile, 'utf-8');
   const peers = JSON.parse(data) as Peer[];
   
   // Migration: petname → alias (backward compatibility)
@@ -65,15 +68,16 @@ export function loadPeers(): Peer[] {
 
 export function savePeers(peers: Peer[]): boolean {
   ensureConfigDir();
+  const peersFile = getPeersFile();
   // Strip deprecated petname field from saved data (migration complete)
   const cleanPeers = peers.map(({ petname, ...peer }) => peer);
-  const tempFile = `${PEERS_FILE}.tmp`;
+  const tempFile = `${peersFile}.tmp`;
   
   try {
     // BUILD-116: Atomic write - write to temp file first, then rename
     // This prevents race conditions where concurrent reads get stale data
     fs.writeFileSync(tempFile, JSON.stringify(cleanPeers, null, 2), 'utf-8');
-    fs.renameSync(tempFile, PEERS_FILE);
+    fs.renameSync(tempFile, peersFile);
     return true;
   } catch (error) {
     console.error('[OGP] Failed to save peers:', error);
@@ -101,6 +105,11 @@ export function addPeer(peer: Peer): boolean {
 }
 
 export function getPeer(peerId: string): Peer | null {
+  // Handle null/undefined peerId gracefully
+  if (!peerId) {
+    return null;
+  }
+
   const peers = loadPeers();
   // Try exact match first
   let peer = peers.find(p => p.id === peerId) || null;

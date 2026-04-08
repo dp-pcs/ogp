@@ -1,13 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getConfigDir, ensureConfigDir } from '../shared/config.js';
-const PEERS_FILE = path.join(getConfigDir(), 'peers.json');
+function getPeersFile() {
+    return path.join(getConfigDir(), 'peers.json');
+}
 export function loadPeers() {
     ensureConfigDir();
-    if (!fs.existsSync(PEERS_FILE)) {
+    const peersFile = getPeersFile();
+    if (!fs.existsSync(peersFile)) {
         return [];
     }
-    const data = fs.readFileSync(PEERS_FILE, 'utf-8');
+    const data = fs.readFileSync(peersFile, 'utf-8');
     const peers = JSON.parse(data);
     // Migration: petname → alias (backward compatibility)
     let migrated = false;
@@ -25,14 +28,15 @@ export function loadPeers() {
 }
 export function savePeers(peers) {
     ensureConfigDir();
+    const peersFile = getPeersFile();
     // Strip deprecated petname field from saved data (migration complete)
     const cleanPeers = peers.map(({ petname, ...peer }) => peer);
-    const tempFile = `${PEERS_FILE}.tmp`;
+    const tempFile = `${peersFile}.tmp`;
     try {
         // BUILD-116: Atomic write - write to temp file first, then rename
         // This prevents race conditions where concurrent reads get stale data
         fs.writeFileSync(tempFile, JSON.stringify(cleanPeers, null, 2), 'utf-8');
-        fs.renameSync(tempFile, PEERS_FILE);
+        fs.renameSync(tempFile, peersFile);
         return true;
     }
     catch (error) {
@@ -61,6 +65,10 @@ export function addPeer(peer) {
     return savePeers(peers);
 }
 export function getPeer(peerId) {
+    // Handle null/undefined peerId gracefully
+    if (!peerId) {
+        return null;
+    }
     const peers = loadPeers();
     // Try exact match first
     let peer = peers.find(p => p.id === peerId) || null;

@@ -202,6 +202,12 @@ async function handleAgentComms(message, displayName) {
     const notificationText = `[OGP Agent-Comms] ${priorityIndicator}${displayName} → ${topic} ${policyTag}: ${messageText}`;
     await notifyOpenClaw({
         text: notificationText,
+        peerId: message.from,
+        peerDisplayName: displayName,
+        intent: 'agent-comms',
+        topic,
+        priority,
+        conversationId: message.conversationId,
         metadata: {
             ogp: {
                 from: message.from,

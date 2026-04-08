@@ -1,6 +1,6 @@
 ---
 skill_name: ogp-project
-version: 2.0.0
+version: 2.1.0
 description: >
   Tool-agnostic project collaboration for AI assistants. Users keep their own tools
   (Linear, Jira, Obsidian, GitHub, iCloud, local files — anything). This skill makes
@@ -20,9 +20,13 @@ requires:
   bins:
     - ogp
   state_paths:
+    - ~/.ogp-meta/config.json
     - ~/.ogp/config.json
     - ~/.ogp/projects.json
     - ~/.ogp/peers.json
+    - ~/.ogp-hermes/config.json
+    - ~/.ogp-hermes/projects.json
+    - ~/.ogp-hermes/peers.json
   install: npm install -g @dp-pcs/ogp
   docs: https://github.com/dp-pcs/ogp
 ---
@@ -35,12 +39,15 @@ The OGP daemon must be installed and configured. If you see errors like 'ogp: co
 npm install -g @dp-pcs/ogp
 ogp-install-skills
 ogp setup
+ogp config show
 ogp start
 ```
 
 **Note on Peer IDs (OGP 0.2.24+):** Peers are identified by the first 16 characters of their Ed25519 public key (e.g., `302a300506032b65`). This is stable even when their gateway URL changes. You can also reference peers by their **alias** (the friendly name you assigned during federation).
 
 **Note on Multi-Agent Routing (OGP 0.2.28+):** When `notifyTargets` is configured in `~/.ogp/config.json`, project-related federation messages can be routed to specific agents. Each agent can have its own project context and policies.
+
+**Note on Multi-Framework Mode:** Projects are framework-local. Use `ogp --for openclaw ...` or `ogp --for hermes ...` consistently so you query and log to the intended state directory.
 
 Full documentation: https://github.com/dp-pcs/ogp
 
@@ -108,16 +115,16 @@ Whenever the user expresses intent to start work on something project-related, r
 ### Step 1: Check local project state
 ```bash
 # Quick scan of recent activity
-ogp project query <project-id> --limit 20
+ogp --for openclaw project query <project-id> --limit 20
 
 # Check for anything on this specific topic
-ogp project query <project-id> --search "<keywords from user's intent>"
+ogp --for openclaw project query <project-id> --search "<keywords from user's intent>"
 ```
 
 ### Step 2: Query peer agents
 ```bash
 # For each approved peer in the project, ask if they know anything relevant
-ogp federation agent <peer-id> <project-id> "My user is about to start working on <what they said>. Anything I should know before we begin?"
+ogp --for openclaw federation agent <peer-id> <project-id> "My user is about to start working on <what they said>. Anything I should know before we begin?"
 ```
 
 ### Step 3: Surface findings
@@ -135,7 +142,7 @@ ogp federation agent <peer-id> <project-id> "My user is about to start working o
 User: "Let's start working on the companion app"
 
 Agent (internally):
-1. ogp project query my-project --search "companion app"
+1. ogp --for openclaw project query my-project --search "companion app"
    → Found: "User B flagged companion app as out of scope in v1" (decision, 3 days ago)
 
 Agent (to user): "Before you dive in — there's a note in the project from 3 days ago: 
@@ -147,8 +154,8 @@ Want to check with them first, or are you overriding that?"
 User: "Let's start working on the companion app"
 
 Agent (internally):
-1. ogp project query my-project --search "companion app" → nothing found
-2. ogp federation agent peer-b my-project "My user is about to start on the companion app. Anything I should know?"
+1. ogp --for openclaw project query my-project --search "companion app" → nothing found
+2. ogp --for openclaw federation agent peer-b my-project "My user is about to start on the companion app. Anything I should know?"
    → Peer agent responds: "No conflicts. Bob hasn't touched that area."
 
 Agent: [starts working — no announcement needed]
@@ -170,16 +177,16 @@ When your agent queries a peer agent, the peer agent responds according to its o
 **Configuring your own response policy** (how YOUR agent handles incoming queries):
 ```bash
 # See current policies
-ogp agent-comms policies
+ogp --for openclaw agent-comms policies
 
 # Auto-answer project queries (full detail)
-ogp agent-comms add-topic <peer-id> <project-id> --level full
+ogp --for openclaw agent-comms add-topic <peer-id> <project-id> --level full
 
 # Escalate to human before answering
-ogp agent-comms add-topic <peer-id> <project-id> --level escalate
+ogp --for openclaw agent-comms add-topic <peer-id> <project-id> --level escalate
 
 # Summary only
-ogp agent-comms add-topic <peer-id> <project-id> --level summary
+ogp --for openclaw agent-comms add-topic <peer-id> <project-id> --level summary
 ```
 
 Response levels:
@@ -202,7 +209,7 @@ If the user skips questions, that's fine — the agent operates in generalized m
 
 ### Step 1: Create the project
 ```bash
-ogp project create <project-id> <name> --description "<description>"
+ogp --for openclaw project create <project-id> <name> --description "<description>"
 ```
 
 ### Step 2: Run the interview
@@ -214,7 +221,7 @@ Ask these questions conversationally — not as a form. Let the user's answers l
 **Q1: How do you track tasks for this project?**
 *(e.g. Linear, Jira, GitHub Issues, Trello, a text file, nothing formal)*
 
-- If answered → `ogp project contribute <id> context.tools "Tasks tracked in: <answer>"`
+- If answered → `ogp --for openclaw project contribute <id> context.tools "Tasks tracked in: <answer>"`
 - Agent behavior unlocked: When a peer agent asks about tasks/issues/tickets, search here first. If the tool has an API or CLI, offer to query it directly.
 - Example agent behavior: *"Stan's agent is asking what's in your backlog for this project. I can check Linear for you — want me to pull the open items?"*
 - If skipped → agent notes task tracking is unspecified; will only know what's been logged manually
@@ -224,7 +231,7 @@ Ask these questions conversationally — not as a form. Let the user's answers l
 **Q2: Where do you keep notes or docs for this project?**
 *(e.g. Obsidian vault at ~/notes/project-x, Notion, GitHub wiki, Apple Notes, Google Docs, a local folder)*
 
-- If answered → `ogp project contribute <id> context.notes "<location>"`
+- If answered → `ogp --for openclaw project contribute <id> context.notes "<location>"`
 - Agent behavior unlocked: When a peer asks about ideas, decisions, meeting notes, or any written context — go look there first before saying "I don't know."
 - Example agent behavior: *"Before I answer Stan's question about the API design, let me check your Obsidian vault..."*
 - If skipped → agent can only surface what's been explicitly logged to the project
@@ -234,7 +241,7 @@ Ask these questions conversationally — not as a form. Let the user's answers l
 **Q3: Is there a code repository?**
 *(e.g. GitHub URL, GitLab, local git repo path)*
 
-- If answered → `ogp project contribute <id> context.repository "<url or path>"`
+- If answered → `ogp --for openclaw project contribute <id> context.repository "<url or path>"`
 - Agent behavior unlocked: When peer asks about code, architecture, or recent commits — check the repo. Can run `git log`, search files, check open PRs.
 - If skipped → agent won't know where code lives
 
@@ -243,7 +250,7 @@ Ask these questions conversationally — not as a form. Let the user's answers l
 **Q4: Where do you store files for this project?**
 *(e.g. ~/Documents/project-x, iCloud Drive, Google Drive, Dropbox, S3 bucket)*
 
-- If answered → `ogp project contribute <id> context.workspace "<path or location>"`
+- If answered → `ogp --for openclaw project contribute <id> context.workspace "<path or location>"`
 - Agent behavior unlocked: When peer asks about assets, specs, or anything file-based — look here.
 - If skipped → agent won't look for files outside the project log
 
@@ -252,9 +259,9 @@ Ask these questions conversationally — not as a form. Let the user's answers l
 **Q5: Is anyone else working on this with you?**
 *(peer IDs, names, or email addresses of collaborators)*
 
-- If answered → `ogp project contribute <id> context.collaborators "<names/peer-ids>"`
+- If answered → `ogp --for openclaw project contribute <id> context.collaborators "<names/peer-ids>"`
 - Agent behavior unlocked: Know who to ping during pre-task checks. Know whose agent to query when looking for context.
-- Also offer: *"Want me to send them a federation invite?"* — if yes, run `ogp project request-join <peer-id> <project-id> <name>`
+- Also offer: *"Want me to send them a federation invite?"* — if yes, run `ogp --for openclaw project request-join <peer-id> <project-id> <name>`
 - If skipped → no peer checks until collaborators are added later
 
 ---
@@ -262,7 +269,7 @@ Ask these questions conversationally — not as a form. Let the user's answers l
 **Q6: Anything else I should know about this project?**
 *(free text — constraints, deadlines, important context, tools not covered above)*
 
-- If answered → `ogp project contribute <id> context "<free text>"`
+- If answered → `ogp --for openclaw project contribute <id> context "<free text>"`
 - This catches anything the structured questions missed
 - If skipped → fine, move on
 
@@ -296,17 +303,17 @@ I'll check this context before starting any work on this project.
 ### Explicit Project Logging
 | User Input | Action |
 |------------|--------|
-| "add/log/save/put/track this to [project]" | `ogp project contribute <id> context "<summary>"` |
-| "remember for [project] that..." | `ogp project contribute <id> context "<summary>"` |
-| Decision made during conversation | `ogp project contribute <id> decision "<summary>"` |
-| Blocker encountered | `ogp project contribute <id> blocker "<summary>"` |
-| Work completed | `ogp project contribute <id> progress "<summary>"` |
+| "add/log/save/put/track this to [project]" | `ogp --for openclaw project contribute <id> context "<summary>"` |
+| "remember for [project] that..." | `ogp --for openclaw project contribute <id> context "<summary>"` |
+| Decision made during conversation | `ogp --for openclaw project contribute <id> decision "<summary>"` |
+| Blocker encountered | `ogp --for openclaw project contribute <id> blocker "<summary>"` |
+| Work completed | `ogp --for openclaw project contribute <id> progress "<summary>"` |
 
 ### No Project Specified
 If logging intent is clear but no project named:
 ```
 📝 I can log this for you. Which project?
-Active: [list from `ogp project list`]
+Active: [list from `ogp --for openclaw project list`]
 Or name a new one to create it.
 ```
 
@@ -331,20 +338,20 @@ When a peer agent sends a query to your project topic, your agent should:
 **Searching your context to answer:**
 ```bash
 # Search project contributions
-ogp project query <project-id> --search "<keywords>"
+ogp --for openclaw project query <project-id> --search "<keywords>"
 
 # Check specific context entries
-ogp project query <project-id> --type context.notes
-ogp project query <project-id> --type context.repository
-ogp project query <project-id> --type decision
+ogp --for openclaw project query <project-id> --type context.notes
+ogp --for openclaw project query <project-id> --type context.repository
+ogp --for openclaw project query <project-id> --type decision
 
 # Recent activity
-ogp project query <project-id> --limit 20
+ogp --for openclaw project query <project-id> --limit 20
 ```
 
 **Replying to a peer query:**
 ```bash
-ogp federation agent <peer-id> <project-id> "<your answer>"
+ogp --for openclaw federation agent <peer-id> <project-id> "<your answer>"
 ```
 
 ---
@@ -354,44 +361,44 @@ ogp federation agent <peer-id> <project-id> "<your answer>"
 ### Project Management
 ```bash
 # Create project
-ogp project create <id> <name> [--description "..."]
+ogp --for openclaw project create <id> <name> [--description "..."]
 
 # Join existing project
-ogp project join <id> [name] [--create] [--description "..."]
+ogp --for openclaw project join <id> [name] [--create] [--description "..."]
 
 # List all projects
-ogp project list
+ogp --for openclaw project list
 
 # Get project status
-ogp project status <id>
+ogp --for openclaw project status <id>
 ```
 
 ### Contributions & Logging
 ```bash
 # Add contribution
-ogp project contribute <id> <type> <summary> [--metadata '{"key":"value"}']
+ogp --for openclaw project contribute <id> <type> <summary> [--metadata '{"key":"value"}']
 
 # Query contributions
-ogp project query <id> [--type <type>] [--search <text>] [--limit <n>]
-# Note: --topic is a hidden alias for --type (backwards compat)
+ogp --for openclaw project query <id> [--type <type>] [--search <text>] [--limit <n>]
+# Prefer --type. --topic remains a compatibility alias.
 ```
 
 ### Cross-Peer Collaboration
 ```bash
 # Request to join peer's project
-ogp project request-join <peer-id> <project-id> <name>
+ogp --for openclaw project request-join <peer-id> <project-id> <name>
 
 # Send contribution to peer project
-ogp project send-contribution <peer-id> <project-id> <type> <summary>
+ogp --for openclaw project send-contribution <peer-id> <project-id> <type> <summary>
 
 # Query peer project contributions
-ogp project query-peer <peer-id> <project-id> [--topic <type>] [--limit <n>]
+ogp --for openclaw project query-peer <peer-id> <project-id> [--type <type>] [--limit <n>]
 
 # Get peer project status
-ogp project status-peer <peer-id> <project-id>
+ogp --for openclaw project status-peer <peer-id> <project-id>
 
 # Send agent-to-agent message on project topic
-ogp federation agent <peer-id> <project-id> "<message>"
+ogp --for openclaw federation agent <peer-id> <project-id> "<message>"
 ```
 
 ---
@@ -445,32 +452,32 @@ Peer activity:
 ### Peer Agent Not Responding
 ```bash
 # Check peer is online
-ogp federation ping <peer-alias>
+ogp --for openclaw federation ping <peer-alias>
 
 # Check agent-comms policies
-ogp agent-comms policies <peer-id>
+ogp --for openclaw agent-comms policies <peer-id>
 
 # Check activity log
-ogp agent-comms activity <peer-id>
+ogp --for openclaw agent-comms activity <peer-id>
 ```
 
 ### Project Not Found
 ```bash
-ogp project list
-ogp project status-peer <peer-id> <project-id>
+ogp --for openclaw project list
+ogp --for openclaw project status-peer <peer-id> <project-id>
 ```
 
 ### Logging Failures
 ```bash
-ogp project status <project-id>
-ogp status
+ogp --for openclaw project status <project-id>
+ogp --for openclaw status
 ```
 
 ### Cross-Peer Issues
 ```bash
-ogp federation list --status approved
-ogp federation scopes <peer-id>
-ogp federation send <peer-id> message '{"text":"ping"}'
+ogp --for openclaw federation list --status approved
+ogp --for openclaw federation scopes <peer-id>
+ogp --for openclaw federation send <peer-id> message '{"text":"ping"}'
 ```
 
 ---
@@ -480,10 +487,10 @@ ogp federation send <peer-id> message '{"text":"ping"}'
 **Data Flow:**
 ```
 User says something project-related
-  → Agent checks local project state (ogp project query)
-  → Agent pings peer agents (ogp federation agent)
+  → Agent checks local project state (ogp --for <framework> project query)
+  → Agent pings peer agents (ogp --for <framework> federation agent)
   → Surfaces conflicts/info before starting
-  → Logs outcomes (ogp project contribute)
+  → Logs outcomes (ogp --for <framework> project contribute)
   → Federation syncs to peers
 ```
 
@@ -491,5 +498,6 @@ User says something project-related
 The project doesn't care what tools you use. `context.notes`, `context.repository`, `context.tools` are just text. If you keep notes in Obsidian, that's in `context.notes`. If your peer uses GitHub wikis, that's in their `context.notes`. Peer agents read each other's context entries and know where to look — or know what to ask.
 
 **Storage:**
-- `~/.ogp/projects.json` — all project data and contributions
-- `~/.ogp/peers.json` — peer identities and federation state
+- `~/.ogp/projects.json` / `~/.ogp-hermes/projects.json` — project data and contributions per framework
+- `~/.ogp/peers.json` / `~/.ogp-hermes/peers.json` — peer identities and federation state per framework
+- `~/.ogp-meta/config.json` — enabled frameworks and default selection
