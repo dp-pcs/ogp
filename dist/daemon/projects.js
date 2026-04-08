@@ -1,18 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getConfigDir, ensureConfigDir } from '../shared/config.js';
-const PROJECTS_FILE = path.join(getConfigDir(), 'projects.json');
+function getProjectsFile() {
+    return path.join(getConfigDir(), 'projects.json');
+}
 export function loadProjects() {
     ensureConfigDir();
-    if (!fs.existsSync(PROJECTS_FILE)) {
+    const projectsFile = getProjectsFile();
+    if (!fs.existsSync(projectsFile)) {
         return [];
     }
-    const data = fs.readFileSync(PROJECTS_FILE, 'utf-8');
+    const data = fs.readFileSync(projectsFile, 'utf-8');
     return JSON.parse(data);
 }
 export function saveProjects(projects) {
     ensureConfigDir();
-    fs.writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2), 'utf-8');
+    fs.writeFileSync(getProjectsFile(), JSON.stringify(projects, null, 2), 'utf-8');
 }
 export function createProject(id, name, description, metadata) {
     const now = new Date().toISOString();

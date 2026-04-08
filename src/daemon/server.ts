@@ -15,6 +15,7 @@ import { notifyOpenClaw } from './notify.js';
 import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
 import { startReplyCleanup, stopReplyCleanup, getPendingReply, deletePendingReply, storePendingReply, type ReplyPayload } from './reply-handler.js';
 import { startRendezvous, stopRendezvous } from './rendezvous.js';
+import { connectBridge, disconnectBridge } from './openclaw-bridge.js';
 import type { ScopeBundle } from './scopes.js';
 import { loadIntents } from './intent-registry.js';
 
@@ -42,7 +43,8 @@ export function startServer(config?: OGPConfig, background = false): void {
     const logStream = fs.openSync(getDaemonLogFile(), 'a');
     const child = spawn(process.execPath, [process.argv[1], 'start'], {
       detached: true,
-      stdio: ['ignore', logStream, logStream]
+      stdio: ['ignore', logStream, logStream],
+      env: { ...process.env }
     });
 
     child.unref();
@@ -512,6 +514,11 @@ export function startServer(config?: OGPConfig, background = false): void {
     startReplyCleanup();
     console.log(`[OGP] Started doorman and reply cleanup timers`);
 
+    // Start OpenClaw WebSocket bridge (if using OpenClaw platform)
+    if (cfg.platform === 'openclaw' || !cfg.platform) {
+      connectBridge();
+    }
+
     // Start rendezvous registration (if configured)
     if (cfg.rendezvous?.enabled) {
       startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort).catch((err: Error) => {
@@ -520,9 +527,12 @@ export function startServer(config?: OGPConfig, background = false): void {
     }
   });
 
-  // Handle graceful shutdown — deregister from rendezvous
+  // Handle graceful shutdown — deregister from rendezvous and cleanup connections
   const gracefulShutdown = async () => {
+    disconnectBridge();
     await stopRendezvous();
+    stopDoormanCleanup();
+    stopReplyCleanup();
   };
 
   process.once('SIGTERM', () => { gracefulShutdown().catch(() => {}); });

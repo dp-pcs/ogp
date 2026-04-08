@@ -9,7 +9,9 @@ export interface Intent {
   handler?: string;              // handler script path or command
 }
 
-const INTENTS_FILE = path.join(getConfigDir(), 'intent-registry.json');
+function getIntentsFile(): string {
+  return path.join(getConfigDir(), 'intent-registry.json');
+}
 
 const DEFAULT_INTENTS: Intent[] = [
   {
@@ -119,12 +121,13 @@ const DEFAULT_INTENTS: Intent[] = [
 
 export function loadIntents(): Intent[] {
   ensureConfigDir();
-  if (!fs.existsSync(INTENTS_FILE)) {
+  const intentsFile = getIntentsFile();
+  if (!fs.existsSync(intentsFile)) {
     saveIntents(DEFAULT_INTENTS);
     return DEFAULT_INTENTS;
   }
 
-  const data = fs.readFileSync(INTENTS_FILE, 'utf-8');
+  const data = fs.readFileSync(intentsFile, 'utf-8');
   const existingIntents = JSON.parse(data) as Intent[];
 
   // Merge new default intents that don't exist in the file (upgrade path)
@@ -148,7 +151,7 @@ export function loadIntents(): Intent[] {
 
 export function saveIntents(intents: Intent[]): void {
   ensureConfigDir();
-  fs.writeFileSync(INTENTS_FILE, JSON.stringify(intents, null, 2), 'utf-8');
+  fs.writeFileSync(getIntentsFile(), JSON.stringify(intents, null, 2), 'utf-8');
 }
 
 export function registerIntent(intent: Intent): void {

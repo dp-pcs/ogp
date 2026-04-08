@@ -10,8 +10,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getConfigDir, ensureConfigDir, loadConfig, saveConfig } from '../shared/config.js';
 import { getPeer } from './peers.js';
-const ACTIVITY_LOG_FILE = path.join(getConfigDir(), 'activity.log');
 const MAX_LOG_LINES = 1000;
+function getActivityLogFile() {
+    return path.join(getConfigDir(), 'activity.log');
+}
 const DEFAULT_AGENT_COMMS_CONFIG = {
     globalPolicy: {
         'general': { level: 'summary' },
@@ -136,7 +138,7 @@ export function logActivity(entry) {
     const levelTag = entry.level ? ` [${entry.level.toUpperCase()}]` : '';
     const logLine = `${fullEntry.timestamp} ${dirSymbol} ${entry.peerName} ${arrow} ${entry.topic}:${levelTag} ${msgPreview}\n`;
     // Append to log file
-    fs.appendFileSync(ACTIVITY_LOG_FILE, logLine, 'utf-8');
+    fs.appendFileSync(getActivityLogFile(), logLine, 'utf-8');
     // Rotate if too large
     rotateActivityLog();
 }
@@ -144,23 +146,25 @@ export function logActivity(entry) {
  * Rotate activity log if it exceeds max lines
  */
 function rotateActivityLog() {
-    if (!fs.existsSync(ACTIVITY_LOG_FILE))
+    const activityLogFile = getActivityLogFile();
+    if (!fs.existsSync(activityLogFile))
         return;
-    const content = fs.readFileSync(ACTIVITY_LOG_FILE, 'utf-8');
+    const content = fs.readFileSync(activityLogFile, 'utf-8');
     const lines = content.split('\n').filter(l => l.trim());
     if (lines.length > MAX_LOG_LINES) {
         // Keep only the last MAX_LOG_LINES entries
         const trimmed = lines.slice(-MAX_LOG_LINES).join('\n') + '\n';
-        fs.writeFileSync(ACTIVITY_LOG_FILE, trimmed, 'utf-8');
+        fs.writeFileSync(activityLogFile, trimmed, 'utf-8');
     }
 }
 /**
  * Read activity log entries
  */
 export function readActivityLog(options) {
-    if (!fs.existsSync(ACTIVITY_LOG_FILE))
+    const activityLogFile = getActivityLogFile();
+    if (!fs.existsSync(activityLogFile))
         return [];
-    const content = fs.readFileSync(ACTIVITY_LOG_FILE, 'utf-8');
+    const content = fs.readFileSync(activityLogFile, 'utf-8');
     let lines = content.split('\n').filter(l => l.trim());
     // Filter by peer if specified
     if (options?.peerId) {
@@ -177,8 +181,9 @@ export function readActivityLog(options) {
  * Clear activity log
  */
 export function clearActivityLog() {
-    if (fs.existsSync(ACTIVITY_LOG_FILE)) {
-        fs.unlinkSync(ACTIVITY_LOG_FILE);
+    const activityLogFile = getActivityLogFile();
+    if (fs.existsSync(activityLogFile)) {
+        fs.unlinkSync(activityLogFile);
     }
 }
 /**

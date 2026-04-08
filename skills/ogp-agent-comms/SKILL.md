@@ -1,7 +1,7 @@
 ---
 skill_name: ogp-agent-comms
-version: 0.2.2
-description: Interactive wizard to configure agent-to-agent communication policies (updated for OGP 0.2.24+ peer identity and 0.2.28+ multi-agent routing)
+version: 0.3.0
+description: Interactive wizard to configure agent-to-agent communication policies (updated for multi-framework `--for` workflows, OGP 0.2.24+ peer identity, and 0.2.28+ multi-agent routing)
 trigger: Use when the user wants to configure how their agent responds to incoming agent-comms messages from federated peers
 ---
 ## Prerequisites
@@ -9,9 +9,10 @@ trigger: Use when the user wants to configure how their agent responds to incomi
 The OGP daemon must be installed. If you see errors like 'ogp: command not found', install it first:
 
 ```bash
-npm install -g github:dp-pcs/ogp --ignore-scripts
+npm install -g @dp-pcs/ogp
 ogp-install-skills
 ogp setup
+ogp config show
 ```
 
 Full documentation: https://github.com/dp-pcs/ogp
@@ -38,8 +39,12 @@ Agent-comms policies control HOW your agent responds to incoming messages (separ
 1. **Scope grants** (doorman) - Controls which intents/topics are ALLOWED
 2. **Response policies** (this skill) - Controls HOW your agent RESPONDS
 
+**Important default:** when a federation request is approved, OGP auto-enables the `general` topic for that peer. Everything else still needs explicit policy if the user wants something more restrictive or more open.
+
 **Multi-Agent Routing (v0.2.28+):**
 When using `notifyTargets` in your OGP config, federation messages can be routed to specific agents based on the message context. Each agent can have its own agent-comms policies.
+
+**Multi-Framework note:** Policies are framework-local. Use `ogp --for openclaw ...` for OpenClaw state and `ogp --for hermes ...` for Hermes state.
 
 ## Interactive Flow
 
@@ -49,8 +54,9 @@ When invoked, guide the user through this flow:
 
 ```bash
 # Verify OGP is running and has peers
-ogp status
-ogp federation list --status approved
+ogp config show
+ogp --for openclaw status
+ogp --for openclaw federation list --status approved
 ```
 
 If no approved peers, inform the user they need to federate first.
@@ -59,7 +65,7 @@ If no approved peers, inform the user they need to federate first.
 
 ```bash
 # Show current policies
-ogp agent-comms policies
+ogp --for openclaw agent-comms policies
 ```
 
 ### Step 3: Ask What to Configure
@@ -73,10 +79,13 @@ Present options:
 
 If configuring specific peers, show the list and allow multi-select:
 
+Use the peer list from:
+
 ```bash
-# List peers for selection
-ogp federation list --status approved --json
+ogp --for openclaw federation list --status approved
 ```
+
+Prefer the peer ID shown in the list. Some commands also accept a display-name match, but the peer ID is the safest input.
 
 Example interaction:
 ```
@@ -113,17 +122,18 @@ For each topic (or all topics), set the response level:
 | `summary` | High-level responses only, no specifics |
 | `escalate` | Ask human before responding |
 | `deny` | Politely decline to discuss |
+| `off` | Block the topic entirely |
 
 ### Step 7: Save Configuration
 
 ```bash
 # Save policies for selected peers
-ogp agent-comms configure <peer-id> \
+ogp --for openclaw agent-comms configure <peer-id> \
   --topics "memory-management,testing,general" \
   --level full
 
 # Or set global defaults
-ogp agent-comms configure --global \
+ogp --for openclaw agent-comms configure --global \
   --topics "general,testing" \
   --level summary
 ```
@@ -132,7 +142,7 @@ ogp agent-comms configure --global \
 
 ```bash
 # Show the updated configuration
-ogp agent-comms policies <peer-id>
+ogp --for openclaw agent-comms policies <peer-id>
 ```
 
 ## CLI Commands
@@ -140,7 +150,7 @@ ogp agent-comms policies <peer-id>
 ### View All Policies
 
 ```bash
-ogp agent-comms policies
+ogp --for openclaw agent-comms policies
 ```
 
 Shows global defaults and per-peer overrides.
@@ -148,7 +158,7 @@ Shows global defaults and per-peer overrides.
 ### View Peer Policy
 
 ```bash
-ogp agent-comms policies 302a300506032b65
+ogp --for openclaw agent-comms policies 302a300506032b65
 ```
 
 Shows effective policy for a specific peer (global + overrides).
@@ -156,7 +166,7 @@ Shows effective policy for a specific peer (global + overrides).
 ### Configure Global Defaults
 
 ```bash
-ogp agent-comms configure --global \
+ogp --for openclaw agent-comms configure --global \
   --topics "general,testing" \
   --level summary \
   --notes "Default: be helpful but don't overshare"
@@ -165,7 +175,7 @@ ogp agent-comms configure --global \
 ### Configure Specific Peer
 
 ```bash
-ogp agent-comms configure <peer-id> \
+ogp --for openclaw agent-comms configure <peer-id> \
   --topics "memory-management,testing,general" \
   --level full \
   --notes "Stan is a trusted collaborator"
@@ -174,29 +184,29 @@ ogp agent-comms configure <peer-id> \
 ### Configure Multiple Peers at Once
 
 ```bash
-ogp agent-comms configure stan,leonardo,alice \
+ogp --for openclaw agent-comms configure 302a300506032b65,5f8b2c,9d4e1f \
   --topics "testing" \
   --level full
 ```
 
-**Note:** Peers are referenced by their alias (the friendly name you assigned during federation), not their full peer ID.
+**Note:** Prefer peer IDs. Partial peer IDs or display-name matches may work, but peer IDs are canonical.
 
 ### Add Topic to Existing Policy
 
 ```bash
-ogp agent-comms add-topic <peer-id> calendar --level escalate
+ogp --for openclaw agent-comms add-topic <peer-id> calendar --level escalate
 ```
 
 ### Remove Topic
 
 ```bash
-ogp agent-comms remove-topic <peer-id> personal
+ogp --for openclaw agent-comms remove-topic <peer-id> personal
 ```
 
 ### Reset to Global Defaults
 
 ```bash
-ogp agent-comms reset <peer-id>
+ogp --for openclaw agent-comms reset <peer-id>
 ```
 
 ## Policy Inheritance
@@ -218,7 +228,7 @@ Effective for Stan:
 
 ## Response Policy Schema
 
-Stored in `~/.ogp/peers.json` under each peer:
+Stored in the active framework's `peers.json` under each peer:
 
 ```json
 {
@@ -240,9 +250,9 @@ Stored in `~/.ogp/peers.json` under each peer:
 }
 ```
 
-**Note:** The `alias` field (formerly `petname`) is the user-friendly name for the peer.
+**Note:** The `alias` field (formerly `petname`) is stored with the peer, but agent-comms commands should still prefer the peer ID shown by `ogp federation list`.
 
-Global defaults in `~/.ogp/config.json`:
+Global defaults live in the active framework config, for example `~/.ogp/config.json` or `~/.ogp-hermes/config.json`:
 
 ```json
 {
@@ -285,13 +295,13 @@ When enabled, all agent-comms interactions are logged:
 
 ```bash
 # View activity log
-ogp agent-comms activity
+ogp --for openclaw agent-comms activity
 
 # View for specific peer
-ogp agent-comms activity <peer-id>
+ogp --for openclaw agent-comms activity <peer-id>
 
 # View last N entries
-ogp agent-comms activity --last 20
+ogp --for openclaw agent-comms activity --last 20
 ```
 
 Log format:
@@ -307,7 +317,7 @@ Log format:
 ### Trusted Collaborator (Full Access)
 
 ```bash
-ogp agent-comms configure 302a300506032b65 \
+ogp --for openclaw agent-comms configure 302a300506032b65 \
   --topics "memory-management,testing,general,code-review" \
   --level full \
   --notes "Trusted peer, full collaboration"
@@ -316,7 +326,7 @@ ogp agent-comms configure 302a300506032b65 \
 ### Business Contact (Limited)
 
 ```bash
-ogp agent-comms configure 5f8b2c... \
+ogp --for openclaw agent-comms configure 5f8b2c... \
   --topics "general,status-updates" \
   --level summary \
   --notes "Professional contact, keep it high-level"
@@ -325,7 +335,7 @@ ogp agent-comms configure 5f8b2c... \
 ### New Federation (Cautious)
 
 ```bash
-ogp agent-comms configure --global \
+ogp --for openclaw agent-comms configure --global \
   --topics "general,testing" \
   --level escalate \
   --notes "Default: check with human for new peers"
@@ -352,24 +362,24 @@ Each agent can have independent policies. The main agent might have full access 
 
 1. Verify the policy is saved:
    ```bash
-   ogp agent-comms policies <peer-id>
+   ogp --for openclaw agent-comms policies <peer-id>
    ```
 
 2. Check if the topic is in scope grants (doorman):
    ```bash
-   ogp federation scopes <peer-id>
+   ogp --for openclaw federation scopes <peer-id>
    ```
 
 3. Restart daemon to reload config:
    ```bash
-   ogp stop && ogp start
+   ogp --for openclaw stop && ogp --for openclaw start --background
    ```
 
 ### Policy not taking effect for new peer
 
 New peers inherit global defaults. Configure them specifically:
 ```bash
-ogp agent-comms configure 302a300506032b65 --topics "..." --level "..."
+ogp --for openclaw agent-comms configure 302a300506032b65 --topics "..." --level "..."
 ```
 
 ### Multi-Agent Routing Issues

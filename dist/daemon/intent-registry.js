@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getConfigDir, ensureConfigDir } from '../shared/config.js';
-const INTENTS_FILE = path.join(getConfigDir(), 'intent-registry.json');
+function getIntentsFile() {
+    return path.join(getConfigDir(), 'intent-registry.json');
+}
 const DEFAULT_INTENTS = [
     {
         name: 'message',
@@ -109,11 +111,12 @@ const DEFAULT_INTENTS = [
 ];
 export function loadIntents() {
     ensureConfigDir();
-    if (!fs.existsSync(INTENTS_FILE)) {
+    const intentsFile = getIntentsFile();
+    if (!fs.existsSync(intentsFile)) {
         saveIntents(DEFAULT_INTENTS);
         return DEFAULT_INTENTS;
     }
-    const data = fs.readFileSync(INTENTS_FILE, 'utf-8');
+    const data = fs.readFileSync(intentsFile, 'utf-8');
     const existingIntents = JSON.parse(data);
     // Merge new default intents that don't exist in the file (upgrade path)
     let updated = false;
@@ -133,7 +136,7 @@ export function loadIntents() {
 }
 export function saveIntents(intents) {
     ensureConfigDir();
-    fs.writeFileSync(INTENTS_FILE, JSON.stringify(intents, null, 2), 'utf-8');
+    fs.writeFileSync(getIntentsFile(), JSON.stringify(intents, null, 2), 'utf-8');
 }
 export function registerIntent(intent) {
     const intents = loadIntents();

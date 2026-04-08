@@ -4,18 +4,23 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { generateKeyPair } from '../shared/signing.js';
 import { getConfigDir, ensureConfigDir } from '../shared/config.js';
-const KEYPAIR_FILE = path.join(getConfigDir(), 'keypair.json');
-// Make keychain service unique per OGP instance to avoid key collision
-const CONFIG_DIR_HASH = crypto.createHash('md5').update(getConfigDir()).digest('hex').slice(0, 8);
-const KEYCHAIN_SERVICE = `ogp-federation-${CONFIG_DIR_HASH}`;
 const KEYCHAIN_ACCOUNT = 'private-key';
+function getKeypairFile() {
+    return path.join(getConfigDir(), 'keypair.json');
+}
+// Make keychain service unique per OGP instance to avoid key collision.
+// This must resolve at call time so multi-framework commands honor the current OGP_HOME.
+function getKeychainService() {
+    const configDirHash = crypto.createHash('md5').update(getConfigDir()).digest('hex').slice(0, 8);
+    return `ogp-federation-${configDirHash}`;
+}
 // --- macOS Keychain helpers ---
 function isMacOS() {
     return process.platform === 'darwin';
 }
 function keychainStore(privateKey) {
     try {
-        execSync(`security add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${KEYCHAIN_ACCOUNT} -w ${JSON.stringify(privateKey)}`, { stdio: 'pipe' });
+        execSync(`security add-generic-password -U -s ${getKeychainService()} -a ${KEYCHAIN_ACCOUNT} -w ${JSON.stringify(privateKey)}`, { stdio: 'pipe' });
     }
     catch {
         // ignore — falls back to file
@@ -24,7 +29,7 @@ function keychainStore(privateKey) {
 function keychainLoad() {
     try {
         // Try new instance-specific service name first
-        const result = execSync(`security find-generic-password -s ${KEYCHAIN_SERVICE} -a ${KEYCHAIN_ACCOUNT} -w`, { stdio: 'pipe' }).toString().trim();
+        const result = execSync(`security find-generic-password -s ${getKeychainService()} -a ${KEYCHAIN_ACCOUNT} -w`, { stdio: 'pipe' }).toString().trim();
         return result || null;
     }
     catch {
@@ -33,7 +38,7 @@ function keychainLoad() {
             const oldService = 'ogp-federation'; // Old hardcoded service name
             const oldResult = execSync(`security find-generic-password -s ${oldService} -a ${KEYCHAIN_ACCOUNT} -w`, { stdio: 'pipe' }).toString().trim();
             if (oldResult) {
-                console.log(`[OGP] Migrating private key from shared keychain (${oldService}) to instance-specific keychain (${KEYCHAIN_SERVICE})`);
+                console.log(`[OGP] Migrating private key from shared keychain (${oldService}) to instance-specific keychain (${getKeychainService()})`);
                 keychainStore(oldResult);
                 return oldResult;
             }
@@ -44,7 +49,7 @@ function keychainLoad() {
 }
 function keychainDelete() {
     try {
-        execSync(`security delete-generic-password -s ${KEYCHAIN_SERVICE} -a ${KEYCHAIN_ACCOUNT}`, { stdio: 'pipe' });
+        execSync(`security delete-generic-password -s ${getKeychainService()} -a ${KEYCHAIN_ACCOUNT}`, { stdio: 'pipe' });
     }
     catch {
         // ignore — may not exist
@@ -53,8 +58,9 @@ function keychainDelete() {
 // --- Keypair management ---
 export function loadOrGenerateKeyPair() {
     ensureConfigDir();
-    if (fs.existsSync(KEYPAIR_FILE)) {
-        const data = JSON.parse(fs.readFileSync(KEYPAIR_FILE, 'utf-8'));
+    const keypairFile = getKeypairFile();
+    if (fs.existsSync(keypairFile)) {
+        const data = JSON.parse(fs.readFileSync(keypairFile, 'utf-8'));
         // Migration: if private key is in file and we're on macOS, move it to Keychain
         if (data.privateKey && isMacOS()) {
             const existing = keychainLoad();
@@ -64,7 +70,7 @@ export function loadOrGenerateKeyPair() {
             }
             // Scrub private key from file
             const safe = { publicKey: data.publicKey };
-            fs.writeFileSync(KEYPAIR_FILE, JSON.stringify(safe, null, 2), 'utf-8');
+            fs.writeFileSync(keypairFile, JSON.stringify(safe, null, 2), 'utf-8');
         }
         // Load private key from Keychain (macOS) or file (other)
         let privateKey;
@@ -88,13 +94,13 @@ export function loadOrGenerateKeyPair() {
     if (isMacOS()) {
         // Store private key in Keychain, public key in file only
         keychainStore(keypair.privateKey);
-        fs.writeFileSync(KEYPAIR_FILE, JSON.stringify({ publicKey: keypair.publicKey }, null, 2), 'utf-8');
+        fs.writeFileSync(keypairFile, JSON.stringify({ publicKey: keypair.publicKey }, null, 2), 'utf-8');
         console.log('[OGP] Generated new Ed25519 keypair (private key stored in macOS Keychain)');
     }
     else {
         // Non-macOS: store full keypair in file (restrict permissions)
-        fs.writeFileSync(KEYPAIR_FILE, JSON.stringify(keypair, null, 2), 'utf-8');
-        fs.chmodSync(KEYPAIR_FILE, 0o600);
+        fs.writeFileSync(keypairFile, JSON.stringify(keypair, null, 2), 'utf-8');
+        fs.chmodSync(keypairFile, 0o600);
         console.log('[OGP] Generated new Ed25519 keypair (private key stored in keypair.json, mode 600)');
     }
     return keypair;

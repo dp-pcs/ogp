@@ -9,6 +9,8 @@ import * as path from 'node:path';
 import { createScopeBundle, createScopeGrant, parseRateLimit, formatRateLimit, DEFAULT_RATE_LIMIT } from '../daemon/scopes.js';
 import { loadIntents } from '../daemon/intent-registry.js';
 import { loadMetaConfig } from '../shared/meta-config.js';
+import { logActivity } from '../daemon/agent-comms.js';
+import { deliverLocalSessionText } from '../daemon/notify.js';
 /**
  * Expand tilde in paths
  */
@@ -712,6 +714,7 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
     // Use 32-char public key prefix as our ID (avoids Ed25519 DER header collision with 16-char)
     const ourId = keypair.publicKey.substring(0, 32);
     const nonce = crypto.randomUUID();
+    const conversationId = options.conversationId || nonce;
     // Build replyTo URL if we want to receive callbacks
     const replyTo = options.waitForReply
         ? `${config.gatewayUrl}/federation/reply/${nonce}`
@@ -723,7 +726,7 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
         nonce,
         timestamp: new Date().toISOString(),
         replyTo,
-        conversationId: options.conversationId,
+        conversationId,
         payload: {
             topic,
             message: messageText,
@@ -756,6 +759,14 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
             return;
         }
         const result = await response.json();
+        logActivity({
+            direction: 'out',
+            peerId,
+            peerName: peer.displayName,
+            topic,
+            message: messageText
+        });
+        await deliverLocalSessionText(`[OGP Agent-Comms Sent] To ${peer.displayName} (${topic}): ${messageText}`);
         console.log(`✓ Agent-comms sent to ${peer.displayName}`);
         console.log(`  Topic: ${topic}`);
         console.log(`  Message: ${messageText}`);

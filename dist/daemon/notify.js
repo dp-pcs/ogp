@@ -1,5 +1,6 @@
 import { requireConfig } from '../shared/config.js';
 import crypto from 'node:crypto';
+import { injectMessage } from './openclaw-bridge.js';
 /**
  * Resolve the notification target for a given agent.
  * Priority:
@@ -15,9 +16,18 @@ function resolveNotifyTarget(config, agent) {
     // Fall back to legacy notifyTarget
     return config.notifyTarget;
 }
+function resolveOpenClawSessionKey(config, agent) {
+    const agentId = config.agentId || 'main';
+    const notifyTarget = resolveNotifyTarget(config, agent);
+    if (notifyTarget?.startsWith('telegram:')) {
+        const chatId = notifyTarget.replace('telegram:', '');
+        return `agent:${agentId}:telegram:direct:${chatId}`;
+    }
+    return `agent:${agentId}:main`;
+}
 /**
  * OpenClaw notification backend.
- * Uses the existing OpenClaw webhook and CLI integration.
+ * Uses the OpenClaw gateway RPC to deliver messages into the correct session.
  */
 class OpenClawBackend {
     name = 'openclaw';
@@ -27,24 +37,24 @@ class OpenClawBackend {
         const intent = payload.intent || 'message';
         const topic = payload.topic || 'general';
         const messageText = `[OGP Federation] From ${peerName} (${intent}/${topic}):\n${payload.text}`;
-        // Use openclaw agent CLI to inject message into agent's conversation queue
-        // This ensures the agent can see and respond to the message (not just a system interjection)
+        // Route into the actual OpenClaw session so the message appears in the
+        // human-visible channel, not just the agent wake/inbox path.
         try {
-            const { execFile } = await import('node:child_process');
-            const { promisify } = await import('node:util');
-            const execFileAsync = promisify(execFile);
-            const agentId = config.agentId || 'main';
-            await execFileAsync('openclaw', ['agent', '--agent', agentId, '--message', messageText], {
-                timeout: 10000,
-                env: { ...process.env }
-            });
-            console.log('[OGP] Notified OpenClaw agent via CLI:', messageText);
-            return true;
+            const sessionKey = resolveOpenClawSessionKey(config, payload.agent);
+            const result = await injectMessage(sessionKey, messageText, peerName);
+            if (result) {
+                console.log('[OGP] Message delivered to OpenClaw session for peer:', peerName);
+                return true;
+            }
+            else {
+                console.error('[OGP] OpenClaw session delivery failed');
+                return false;
+            }
         }
         catch (err) {
-            console.error('[OGP] OpenClaw agent CLI failed:', err);
+            console.error('[OGP] Message injection failed:', err);
+            return false;
         }
-        return false;
     }
 }
 /**
@@ -162,5 +172,18 @@ export async function notifyLocalAgent(payload) {
     const config = requireConfig();
     const backend = getNotificationBackend(config);
     return backend.notify(payload, config);
+}
+/**
+ * Inject plain text into the local OpenClaw session without wrapping it as an
+ * inbound federation message. This is used to mirror local outbound actions
+ * into the agent's visible conversation state.
+ */
+export async function deliverLocalSessionText(text, agent) {
+    const config = requireConfig();
+    if ((config.platform || 'openclaw') !== 'openclaw') {
+        return false;
+    }
+    const sessionKey = resolveOpenClawSessionKey(config, agent);
+    return injectMessage(sessionKey, text);
 }
 //# sourceMappingURL=notify.js.map

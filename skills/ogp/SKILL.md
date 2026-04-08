@@ -1,12 +1,12 @@
 ---
 skill_name: ogp
-version: 2.2.1
+version: 2.3.0
 description: >
   OGP (Open Gateway Protocol) — federated agent communication, peer management,
-  and project collaboration across OpenClaw gateways. Use when the user asks to
-  establish federation with a peer, send agent-to-agent messages, check peer status,
-  manage federation scopes, set up cross-gateway project collaboration, or use the
-  rendezvous/invite flow for zero-config peer discovery.
+  and project collaboration across OpenClaw and Hermes gateways. Use when the user
+  asks to establish federation with a peer, send agent-to-agent messages, check peer
+  status, manage federation scopes, clean stale federation state, set up cross-gateway
+  project collaboration, or use the rendezvous/invite flow for zero-config peer discovery.
 trigger: Use when the user asks to federate with a peer, connect to another gateway,
   send an OGP message, check peer status, grant scopes, manage OGP federation relationships,
   generate an invite code, or accept a federation invite.
@@ -14,8 +14,11 @@ requires:
   bins:
     - ogp
   state_paths:
+    - ~/.ogp-meta/config.json
     - ~/.ogp/config.json
     - ~/.ogp/peers.json
+    - ~/.ogp-hermes/config.json
+    - ~/.ogp-hermes/peers.json
   install: npm install -g @dp-pcs/ogp
   docs: https://github.com/dp-pcs/ogp
 ---
@@ -27,7 +30,8 @@ OGP must be installed and running:
 ```bash
 npm install -g @dp-pcs/ogp
 ogp setup          # interactive first-time setup
-ogp start          # starts the OGP daemon
+ogp config show    # verify enabled frameworks + default
+ogp start          # starts the default framework
 ogp status         # verify daemon is running
 ```
 
@@ -35,14 +39,44 @@ If `ogp: command not found`, install it first.
 
 ---
 
-## Known Peers (OGP 0.2.24+)
+## Framework Selection (Mandatory in Multi-Framework Setups)
 
-| Peer ID | Name | Gateway URL |
-|---------|------|-------------|
-| `302a300506032b65` | Stanislav | Dynamic — use invite flow |
-| `738064beab1ef8eb` | Clawporate (David) | https://david-proctor.gw.clawporate.elelem.expert |
+When more than one framework is enabled, always choose the correct one explicitly:
 
-> **Peer IDs are public key prefixes (first 16 chars).** They never change, even when tunnel URLs rotate. Gateway URL is just the address — the public key is the identity.
+```bash
+ogp --for openclaw status
+ogp --for hermes status
+ogp --for openclaw federation list
+ogp --for hermes federation list
+```
+
+- `openclaw` usually uses `~/.ogp`
+- `hermes` usually uses `~/.ogp-hermes`
+- `ogp config show` is the first command to run if the active framework is unclear
+
+If you are testing unreleased changes from a local repo checkout, prefer the local CLI:
+
+```bash
+node dist/cli.js --for openclaw status
+node dist/cli.js --for hermes federation list
+```
+
+---
+
+## Canonical Public Endpoint Rule
+
+Use one canonical public gateway URL per framework. The recommended production setup is a stable HTTPS hostname, typically behind a named Cloudflare tunnel or other reverse proxy.
+
+- Keep `gatewayUrl` pointed at the stable public hostname
+- Do not leave stale temporary tunnel residue in config
+- Verify the public discovery card matches the local framework you intend to use
+
+```bash
+curl -s https://ogp.example.com/.well-known/ogp
+curl -s https://hermes.example.com/.well-known/ogp
+```
+
+The public key on each discovery card must match the intended framework identity. If two frameworks advertise the same key unexpectedly, stop and fix framework selection/state isolation before federating.
 
 ---
 
@@ -163,28 +197,28 @@ This allows you to:
 
 ### List all peers
 ```bash
-ogp federation list
-ogp federation list --status pending
-ogp federation list --status approved
+ogp --for openclaw federation list
+ogp --for openclaw federation list --status pending
+ogp --for hermes federation list --status approved
 ```
 
 ### Request federation with a new peer
 ```bash
-ogp federation request <peer-gateway-url> [--alias <name>]
-# Example with alias:
-ogp federation request https://giving-produces-microphone-mild.trycloudflare.com --alias stanislav
+ogp --for <framework> federation request <peer-gateway-url> [--alias <name>]
+# Example:
+ogp --for openclaw federation request https://hermes.example.com --alias apollo
 
 # Alias auto-resolves from gateway's display name if omitted:
-ogp federation request https://giving-produces-microphone-mild.trycloudflare.com
+ogp --for openclaw federation request https://hermes.example.com
 ```
 
 ### Approve an inbound federation request
 ```bash
 # Auto-grants scopes that mirror peer's offered intents (symmetric federation)
-ogp federation approve <peer-id>
+ogp --for hermes federation approve <peer-id>
 
 # Or approve with specific custom scopes (asymmetric):
-ogp federation approve <peer-id> --intents "message,agent-comms,project.join,project.contribute,project.query,project.status"
+ogp --for hermes federation approve <peer-id> --intents "message,agent-comms,project.join,project.contribute,project.query,project.status"
 ```
 
 > **Note (OGP 0.2.24+):** Peer IDs are now public key prefixes (e.g., `302a300506032b65`). 
@@ -192,12 +226,12 @@ ogp federation approve <peer-id> --intents "message,agent-comms,project.join,pro
 
 ### Grant or update scopes for an existing peer
 ```bash
-ogp federation grant <peer-id> --intents "message,agent-comms,project.join,project.contribute,project.query,project.status"
+ogp --for openclaw federation grant <peer-id> --intents "message,agent-comms,project.join,project.contribute,project.query,project.status"
 ```
 
 ### Check what scopes are granted to/from a peer
 ```bash
-ogp federation scopes <peer-id>
+ogp --for openclaw federation scopes <peer-id>
 # Shows:
 # - GRANTED TO PEER (what they can call on your gateway)
 # - RECEIVED FROM PEER (what you can call on theirs)
@@ -205,19 +239,19 @@ ogp federation scopes <peer-id>
 
 ### Ping a peer
 ```bash
-ogp federation ping <peer-gateway-url>
+ogp --for openclaw federation ping <peer-gateway-url>
 ```
 
 ### Send a raw federation message
 ```bash
-ogp federation send <peer-id> <intent> '<json-payload>'
+ogp --for openclaw federation send <peer-id> <intent> '<json-payload>'
 ```
 
 ### Send an agent-to-agent message (agent-comms)
 ```bash
-ogp federation agent <peer-id> <topic> "<message>"
+ogp --for openclaw federation agent <peer-id> <topic> "<message>"
 # Example:
-ogp federation agent stanislav general "Hey, can you check on project synapse?"
+ogp --for openclaw federation agent apollo general "Hey, can you check on project synapse?"
 ```
 
 ### Manage agent-comms policies (what topics you'll respond to)
@@ -226,22 +260,22 @@ Federation scopes and agent-comms policies are **two separate layers**. Approval
 
 ```bash
 # Status page — shows what's allowed, blocked, and what to do about it
-ogp agent-comms policies <peer-id>
+ogp --for openclaw agent-comms policies <peer-id>
 
 # Global view of all peers
-ogp agent-comms policies
+ogp --for openclaw agent-comms policies
 
 # Allow a topic
-ogp agent-comms add-topic <peer-id> <topic> --level summary
+ogp --for openclaw agent-comms add-topic <peer-id> <topic> --level summary
 
 # Block a topic
-ogp agent-comms set-topic <peer-id> <topic> off
+ogp --for openclaw agent-comms set-topic <peer-id> <topic> off
 
 # Open all topics by default for a peer
-ogp agent-comms set-default <peer-id> summary
+ogp --for openclaw agent-comms set-default <peer-id> summary
 
 # View activity log
-ogp agent-comms activity [peer-id]
+ogp --for openclaw agent-comms activity [peer-id]
 ```
 
 Response levels: `full` (full content passed to agent), `summary` (condensed), `escalate` (route to user), `off` (blocked — sender gets a witty non-answer)
@@ -271,20 +305,20 @@ Default grant includes all of the above. Customize with `--intents` if needed.
 2. Share the code with your peer (Telegram, Slack, etc.)
 3. They run: ogp federation accept <code>
 4. Scopes auto-granted + "general" topic auto-enabled ✓
-5. Test: ogp federation agent <peer-id> general "hello"
+5. Test: ogp --for <framework> federation agent <peer-id> general "hello"
 ```
 
 ### Old way — manual URL exchange (still works)
 ```
 1. Get peer's gateway URL (they share it with you)
 2. Check their card: curl -s <url>/.well-known/ogp | python3 -m json.tool
-3. Request federation: ogp federation request <url>
+3. Request federation: ogp --for <framework> federation request <url>
 4. They approve on their side (or you approve if they requested)
    → Scopes auto-granted + "general" topic auto-enabled ✓
-5. Check agent-comms status: ogp agent-comms policies <peer-id>
-6. Add more topics if needed: ogp agent-comms add-topic <peer-id> <topic>
-7. Test: ogp federation ping <url>
-8. Test agent-comms: ogp federation agent <peer-id> general "hello"
+5. Check agent-comms status: ogp --for <framework> agent-comms policies <peer-id>
+6. Add more topics if needed: ogp --for <framework> agent-comms add-topic <peer-id> <topic>
+7. Test: ogp --for <framework> federation ping <url>
+8. Test agent-comms: ogp --for <framework> federation agent <peer-id> general "hello"
 9. (Optional) Create or join a shared project
 ```
 
@@ -296,21 +330,21 @@ For full project management, use the `ogp-project` skill. Quick reference:
 
 ```bash
 # Create a project
-ogp project create <id> "<name>" --description "<description>"
+ogp --for openclaw project create <id> "<name>" --description "<description>"
 
 # Invite a peer to join
-ogp project request-join <peer-id> <project-id> "<project-name>"
+ogp --for openclaw project request-join <peer-id> <project-id> "<project-name>"
 
 # Log a contribution
-ogp project contribute <project-id> <topic> "<summary>"
-# Topics: progress, decision, blocker, context, idea, context.description, context.repository
+ogp --for openclaw project contribute <project-id> <type> "<summary>"
+# Types: progress, decision, blocker, context, idea, context.description, context.repository
 
 # Query project activity
-ogp project query <project-id> [--topic <topic>] [--limit 10]
-ogp project status <project-id>
+ogp --for openclaw project query <project-id> [--type <type>] [--limit 10]
+ogp --for openclaw project status <project-id>
 
 # Query a peer's project data
-ogp project query-peer <peer-id> <project-id>
+ogp --for openclaw project query-peer <peer-id> <project-id>
 ```
 
 ---
@@ -326,19 +360,35 @@ ogp project query-peer <peer-id> <project-id>
 | `Send failed` on agent-comms | Topic blocked on receiver's side | Receiver runs `ogp agent-comms policies <peer-id>` — look for blocked/missing topics |
 | Agent-comms silently ignored | Receiver's default is `off`, topic not allowed | Receiver runs `ogp agent-comms add-topic <your-peer-id> <topic> --level summary` |
 | `ogp: command not found` | Not installed | `npm install -g @dp-pcs/ogp` |
-| Daemon not running | Process died | `ogp start --background` |
+| Daemon not running | Process died or wrong framework selected | `ogp config show`, then `ogp --for <framework> start --background` |
+| Public discovery card shows the wrong identity | Wrong framework home or stale daemon | Stop daemons, verify `ogp config show`, restart each framework explicitly with `--for` |
+| Peer list is obviously stale or cross-contaminated | Wrong framework state file or old federation residue | Back up then clear the relevant `peers.json` for the affected framework and re-form federation |
 
 ### Check OGP daemon status
 ```bash
-ogp status
-# Or check the log:
+ogp config show
+ogp --for openclaw status
+ogp --for hermes status
+# Or check the logs:
 tail -f ~/.ogp/daemon.log
+tail -f ~/.ogp-hermes/daemon.log
 ```
 
 ### Restart the daemon
 ```bash
-pkill -f "node.*ogp"
-ogp start --background
+ogp --for openclaw stop
+ogp --for openclaw start --background
+ogp --for hermes stop
+ogp --for hermes start --background
+```
+
+### Clean federation state for one framework
+```bash
+cp ~/.ogp/peers.json ~/.ogp/peers.json.backup.$(date +%Y%m%d-%H%M%S)
+printf '[]\n' > ~/.ogp/peers.json
+
+cp ~/.ogp-hermes/peers.json ~/.ogp-hermes/peers.json.backup.$(date +%Y%m%d-%H%M%S)
+printf '[]\n' > ~/.ogp-hermes/peers.json
 ```
 
 ---
@@ -347,21 +397,30 @@ ogp start --background
 
 | File | Purpose |
 |------|---------|
-| `~/.ogp/config.json` | Gateway config (URL, email, port, notifyTargets, agentId) |
-| `~/.ogp/keypair.json` | Ed25519 signing keypair |
-| `~/.ogp/peers.json` | All federation peers + scopes |
-| `~/.ogp/projects.json` | Local project data + contributions |
-| `~/.ogp/daemon.log` | Daemon logs |
-| `~/.ogp/activity.log` | Intent activity log |
+| `~/.ogp-meta/config.json` | Enabled frameworks, aliases, and default framework |
+| `~/.ogp/config.json` | OpenClaw gateway config |
+| `~/.ogp-hermes/config.json` | Hermes gateway config |
+| `~/.ogp/keypair.json` | OpenClaw public key file (private key is in Keychain on macOS) |
+| `~/.ogp-hermes/keypair.json` | Hermes public key file |
+| `~/.ogp/peers.json` | OpenClaw federation peers + scopes |
+| `~/.ogp-hermes/peers.json` | Hermes federation peers + scopes |
+| `~/.ogp/projects.json` | OpenClaw project data + contributions |
+| `~/.ogp-hermes/projects.json` | Hermes project data + contributions |
+| `~/.ogp/daemon.log` | OpenClaw daemon log |
+| `~/.ogp-hermes/daemon.log` | Hermes daemon log |
+| `~/.ogp/activity.log` | OpenClaw agent-comms activity log |
+| `~/.ogp-hermes/activity.log` | Hermes agent-comms activity log |
 
 ---
 
 ## Design Notes
 
 - **Peer Identity (OGP 0.2.24+):** Peers are identified by the first 16 characters of their Ed25519 public key (e.g., `302a300506032b65`). This is stable even when tunnel URLs rotate — the public key is the identity, the URL is just the address.
+- **Framework isolation matters:** In multi-framework mode, OpenClaw and Hermes must keep distinct state directories, keypairs, peers, projects, and logs. Always use `--for` when the active framework is not obvious.
 - **Intent Negotiation (OGP 0.2.24+):** Federation requests include `offeredIntents`. Approval automatically mirrors those intents back to the requester, creating symmetric capabilities by default.
 - **Scopes are bilateral:** Each side independently grants what the other can call. OGP 0.2.24+ auto-mirrors offered intents on approval.
 - **Project isolation:** Projects are scoped to their member list. Full mesh federation does NOT give all peers access to all projects. A peer only sees projects they are a member of.
 - **Signatures:** All federation messages are signed with Ed25519. Peer's public key is stored in `peers.json` at federation time.
 - **Rendezvous is optional:** Peers with a static IP or existing tunnel continue working unchanged. Rendezvous is an additional discovery path, not a requirement.
 - **Notification Routing:** The `notifyTargets` config enables multi-agent setups where different agents handle different types of federation messages.
+- **Stable public URLs win:** Use a canonical public hostname per framework. Treat ephemeral tunnel URLs as temporary diagnostics, not long-term identity.

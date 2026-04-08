@@ -1127,6 +1127,32 @@ skills/
   ogp-project/      # Project context management skill
 ```
 
+## Known Issues
+
+### OpenClaw Message Delivery (BUG-2 - Partial Fix)
+
+**Status**: Messages deliver to agents but sender identity is lost ⚠️
+
+**Symptom**: When OGP federation messages are sent to OpenClaw agents, the message content appears in the agent's conversation but the sender shows as "cli" instead of the actual peer identity (e.g., "Apollo @ Hermes").
+
+**Impact**:
+- ✅ Agents CAN see and read message content
+- ✅ Messages appear in correct channel (Telegram, iMessage, etc.)
+- ❌ Agents CANNOT identify the sender as a federated peer
+- ❌ Direct peer-to-peer replies not possible
+
+**Workaround**: Messages are formatted with peer context in the content itself:
+```
+[OGP Federation] From Apollo @ Hermes (agent-comms/general):
+Your message here
+```
+
+Agents can parse this format to understand which peer sent the message and reference it in their responses to the human.
+
+**Current Implementation**: Uses `openclaw gateway call ... sessions.send` RPC via CLI bridge.
+
+**Investigation**: See `CURRENT_WORK.md` for detailed technical investigation and next steps.
+
 ## License
 
 MIT

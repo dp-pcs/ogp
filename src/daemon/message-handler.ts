@@ -267,6 +267,12 @@ async function handleAgentComms(
 
   await notifyOpenClaw({
     text: notificationText,
+    peerId: message.from,
+    peerDisplayName: displayName,
+    intent: 'agent-comms',
+    topic,
+    priority,
+    conversationId: message.conversationId,
     metadata: {
       ogp: {
         from: message.from,
