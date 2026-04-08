@@ -1,6 +1,6 @@
 ---
 skill_name: ogp-agent-comms
-version: 0.3.0
+version: 0.4.0
 description: Interactive wizard to configure agent-to-agent communication policies (updated for multi-framework `--for` workflows, OGP 0.2.24+ peer identity, and 0.2.28+ multi-agent routing)
 trigger: Use when the user wants to configure how their agent responds to incoming agent-comms messages from federated peers
 ---
@@ -38,11 +38,15 @@ Agent-comms policies control HOW your agent responds to incoming messages (separ
 **Two layers:**
 1. **Scope grants** (doorman) - Controls which intents/topics are ALLOWED
 2. **Response policies** (this skill) - Controls HOW your agent RESPONDS
+3. **Human delivery preferences** - Controls WHERE and WHEN your agent surfaces federated requests back to the human
 
 **Important default:** when a federation request is approved, OGP auto-enables the `general` topic for that peer. Everything else still needs explicit policy if the user wants something more restrictive or more open.
 
 **Multi-Agent Routing (v0.2.28+):**
 When using `notifyTargets` in your OGP config, federation messages can be routed to specific agents based on the message context. Each agent can have its own agent-comms policies.
+
+**Human delivery behavior (v0.4.1+):**
+Use `humanDeliveryTarget` plus `inboundFederationPolicy.mode` to tell the agent whether it should forward everything, summarize, act autonomously, or wait for approval before replying.
 
 **Multi-Framework note:** Policies are framework-local. Use `ogp --for openclaw ...` for OpenClaw state and `ogp --for hermes ...` for Hermes state.
 
@@ -256,6 +260,10 @@ Global defaults live in the active framework config, for example `~/.ogp/config.
 
 ```json
 {
+  "humanDeliveryTarget": "telegram:123456789",
+  "inboundFederationPolicy": {
+    "mode": "summarize"
+  },
   "agentComms": {
     "globalPolicy": {
       "general": { "level": "summary" },
@@ -288,6 +296,8 @@ When an agent-comms message arrives:
    - `deny`: "I'm not able to discuss that topic"
 
 **Multi-Agent Routing:** When `notifyTargets` is configured, messages are routed to the appropriate agent who then applies their own policies.
+
+**Human Delivery:** When `humanDeliveryTarget` is configured, the agent should treat "tell my human X" as a delivery obligation to that configured channel, not merely as something to mention in whatever session happens to be active.
 
 ## Activity Logging
 
@@ -340,6 +350,15 @@ ogp --for openclaw agent-comms configure --global \
   --level escalate \
   --notes "Default: check with human for new peers"
 ```
+
+### Human Delivery Modes
+
+These live in config rather than the `agent-comms` CLI, but they are part of the same operational policy:
+
+- `forward` — forward all inbound federated requests/replies to the human
+- `summarize` — summarize and escalate only important/actionable items
+- `autonomous` — act independently unless blocked or explicitly told to relay something
+- `approval-required` — do not act or reply until the human approves
 
 ### Multi-Agent Setup
 

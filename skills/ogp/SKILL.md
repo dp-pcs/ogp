@@ -1,6 +1,6 @@
 ---
 skill_name: ogp
-version: 2.3.0
+version: 2.4.0
 description: >
   OGP (Open Gateway Protocol) — federated agent communication, peer management,
   and project collaboration across OpenClaw and Hermes gateways. Use when the user
@@ -190,6 +190,37 @@ This allows you to:
 - Route federation messages to different agents based on context
 - Maintain backward compatibility with existing single-agent setups
 - Gradually migrate to multi-agent routing without breaking existing configurations
+
+### Human Delivery Preferences (v0.4.1+)
+
+Do not assume that "whatever conversation is currently active" is the right place to satisfy a peer's request to notify the human.
+
+Use these config fields to separate routing from behavior:
+
+- **`humanDeliveryTarget`**: Explicit human-facing destination for OGP-triggered followups.
+  - Example: `"telegram:123456789"`
+  - Or a raw session key: `"agent:main:telegram:direct:123456789"`
+- **`inboundFederationPolicy.mode`**: Default handling mode for inbound federated requests.
+
+Supported modes:
+
+- `forward` — Tell me everything
+- `summarize` — Tell me only important/actionable items
+- `autonomous` — Act autonomously unless blocked or explicitly asked to relay something
+- `approval-required` — Do not act or reply until the human approves
+
+Example:
+
+```json
+{
+  "humanDeliveryTarget": "telegram:123456789",
+  "inboundFederationPolicy": {
+    "mode": "summarize"
+  }
+}
+```
+
+When a peer says "tell David X", that is a delivery obligation. Do not claim delivery unless you actually used the configured human-facing channel.
 
 ---
 

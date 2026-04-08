@@ -28,6 +28,10 @@ export interface RendezvousConfig {
     url: string;
     publicUrl?: string;
 }
+export type InboundFederationMode = 'forward' | 'summarize' | 'autonomous' | 'approval-required';
+export interface InboundFederationPolicy {
+    mode: InboundFederationMode;
+}
 export interface OGPConfig {
     daemonPort: number;
     openclawUrl: string;
@@ -40,6 +44,8 @@ export interface OGPConfig {
     rendezvous?: RendezvousConfig;
     notifyTarget?: string;
     notifyTargets?: Record<string, string>;
+    humanDeliveryTarget?: string;
+    inboundFederationPolicy?: InboundFederationPolicy;
     agentId?: string;
     platform?: 'openclaw' | 'hermes';
     hermesWebhookUrl?: string;

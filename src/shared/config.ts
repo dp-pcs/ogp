@@ -37,6 +37,16 @@ export interface RendezvousConfig {
   publicUrl?: string;
 }
 
+export type InboundFederationMode =
+  | 'forward'
+  | 'summarize'
+  | 'autonomous'
+  | 'approval-required';
+
+export interface InboundFederationPolicy {
+  mode: InboundFederationMode;
+}
+
 export interface OGPConfig {
   daemonPort: number;
   openclawUrl: string;
@@ -53,6 +63,11 @@ export interface OGPConfig {
   notifyTarget?: string;
   // Per-agent notification targets: { "main": "telegram:...", "scribe": "telegram:..." }
   notifyTargets?: Record<string, string>;
+  // Explicit human-facing delivery target for OGP-triggered followups.
+  // Examples: "telegram:123456789" or "agent:main:telegram:direct:123456789"
+  humanDeliveryTarget?: string;
+  // Policy describing how the local agent should handle inbound federated requests.
+  inboundFederationPolicy?: InboundFederationPolicy;
   // BUILD-115: Agent-specific notification routing — which agent owns this gateway
   agentId?: string;
 

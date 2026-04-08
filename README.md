@@ -934,6 +934,10 @@ Configuration is stored in `~/.ogp/config.json`:
   "email": "you@example.com",
   "stateDir": "~/.ogp",
   "agentId": "main",
+  "humanDeliveryTarget": "telegram:123456789",
+  "inboundFederationPolicy": {
+    "mode": "summarize"
+  },
   "notifyTarget": "telegram:123456789",
   "notifyTargets": {
     "main": "telegram:123456789",
@@ -969,6 +973,41 @@ Which agent owns this gateway? (number or ID) [1]:
 You can also specify a custom agent ID if needed.
 ```
 
+### Human Delivery Preferences (v0.4.1+)
+
+OGP has two separate questions to answer for inbound federation traffic:
+
+1. **Where should human-facing followups go?**
+2. **How should the agent behave when a peer asks it to do something?**
+
+Those should not be inferred from the currently active conversation.
+
+**Configuration fields:**
+- **`humanDeliveryTarget`**: Explicit human-facing destination for OGP-triggered followups. Examples: `telegram:123456789` or a raw session key like `agent:main:telegram:direct:123456789`.
+- **`inboundFederationPolicy.mode`**: Default behavior for how the local agent should handle inbound federated requests.
+
+**Supported behavior modes:**
+- **`forward`**: Tell me everything. Forward inbound federated items to my configured channel.
+- **`summarize`**: Summarize and surface only important, actionable, or uncertain items.
+- **`autonomous`**: Act autonomously when possible, but surface blockers, approvals, or explicit relay requests.
+- **`approval-required`**: Do not act on or reply to federated requests until I explicitly approve.
+
+**Example configuration:**
+
+```json
+{
+  "agentId": "main",
+  "humanDeliveryTarget": "telegram:123456789",
+  "inboundFederationPolicy": {
+    "mode": "autonomous"
+  }
+}
+```
+
+When you run `ogp setup`, the wizard now asks for both:
+- the primary human delivery target for OGP followups
+- the default inbound federation handling mode
+
 ### Notification Routing (v0.2.28+)
 
 The `notifyTargets` field enables per-agent notification routing. When OGP sends notifications to your OpenClaw instance, it routes to specific agents based on the message context.
@@ -976,6 +1015,7 @@ The `notifyTargets` field enables per-agent notification routing. When OGP sends
 **Configuration fields:**
 - **`notifyTarget`** (legacy, string): Single notification target for all messages. Maintained for backward compatibility.
 - **`notifyTargets`** (object): Map of agent names to notification targets. Example: `{"main": "telegram:...", "scribe": "telegram:..."}`
+- **`humanDeliveryTarget`** (preferred for human-facing followups): Explicit destination for OGP-triggered notifications and relay obligations.
 
 **Example configuration with multiple agents:**
 
@@ -989,6 +1029,10 @@ The `notifyTargets` field enables per-agent notification routing. When OGP sends
   "email": "alice@example.com",
   "stateDir": "~/.ogp",
   "notifyTarget": "telegram:123456789",
+  "humanDeliveryTarget": "telegram:123456789",
+  "inboundFederationPolicy": {
+    "mode": "summarize"
+  },
   "notifyTargets": {
     "main": "telegram:123456789",
     "scribe": "telegram:987654321",
@@ -1002,12 +1046,14 @@ The `notifyTargets` field enables per-agent notification routing. When OGP sends
 
 When routing notifications, OGP resolves the target in this order:
 
-1. **`notifyTargets[agent]`** — If the agent is specified and exists in `notifyTargets`, use that target
-2. **`notifyTarget`** — Fall back to the legacy single target for backward compatibility
-3. **Default** — If neither is set, the notification is sent without a specific target (OpenClaw routes to the default channel)
+1. **`humanDeliveryTarget`** — If set, use it as the explicit human-facing OGP destination
+2. **`notifyTargets[agent]`** — If the agent is specified and exists in `notifyTargets`, use that target
+3. **`notifyTarget`** — Fall back to the legacy single target for backward compatibility
+4. **Default** — If none are set, OGP falls back to the agent's default session
 
 This allows you to:
 - Route federation messages to different agents based on context
+- Explicitly separate "the agent that owns this gateway" from "the human-facing channel for OGP followups"
 - Maintain backward compatibility with existing single-agent setups
 - Gradually migrate to multi-agent routing without breaking existing configurations
 
