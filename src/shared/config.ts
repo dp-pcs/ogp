@@ -51,6 +51,7 @@ export interface OGPConfig {
   daemonPort: number;
   openclawUrl: string;
   openclawToken: string;
+  openclawHooksToken?: string;
   gatewayUrl: string;
   displayName: string;
   email: string;

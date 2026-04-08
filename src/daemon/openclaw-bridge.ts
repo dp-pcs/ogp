@@ -1,26 +1,27 @@
 /**
  * OpenClaw Bridge for OGP Notifications
  *
- * Injects OGP federation messages into OpenClaw sessions using the Gateway RPC.
- * For Telegram-backed agents, this is the delivery path that actually surfaces
- * the message in the human-visible conversation thread.
+ * Primary path: /hooks/agent so OpenClaw can run an isolated agent turn and
+ * deliver the result through its normal channel-routing logic.
+ *
+ * Secondary path: Gateway RPC sessions.send for direct session injection.
  */
 
-import { requireConfig } from '../shared/config.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { requireConfig } from '../shared/config.js';
 
 const execFileAsync = promisify(execFile);
 
-function toGatewayWsUrl(url: string): string {
-  if (url.startsWith('https://')) {
-    return `wss://${url.slice('https://'.length)}`;
-  }
-  if (url.startsWith('http://')) {
-    return `ws://${url.slice('http://'.length)}`;
-  }
-  return url;
-}
+type DeliveryTarget = {
+  channel?: string;
+  to?: string;
+};
 
 function extractJsonObject(output: string): Record<string, any> | null {
   const start = output.indexOf('{');
@@ -35,11 +36,223 @@ function extractJsonObject(output: string): Record<string, any> | null {
   }
 }
 
+function normalizeBaseUrl(url: string): URL {
+  if (url.startsWith('ws://')) {
+    return new URL(`http://${url.slice('ws://'.length)}`);
+  }
+  if (url.startsWith('wss://')) {
+    return new URL(`https://${url.slice('wss://'.length)}`);
+  }
+  return new URL(url);
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return (
+    normalized === 'localhost' ||
+    normalized === '127.0.0.1' ||
+    normalized === '::1'
+  );
+}
+
+function buildGatewayWsUrls(url: string): string[] {
+  const base = normalizeBaseUrl(url);
+  const wsProtocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+  const primary = `${wsProtocol}//${base.host}`;
+
+  // Current OpenClaw local gateway defaults to TLS on 18789, even if the
+  // OGP config still says http://localhost:18789.
+  if (base.protocol === 'http:' && isLoopbackHost(base.hostname) && base.port === '18789') {
+    return [`wss://${base.host}`, `ws://${base.host}`];
+  }
+
+  return [primary];
+}
+
+function buildHookBaseUrls(url: string): string[] {
+  const base = normalizeBaseUrl(url);
+  const primaryProtocol = base.protocol === 'https:' ? 'https:' : 'http:';
+  const primary = `${primaryProtocol}//${base.host}`;
+
+  if (base.protocol === 'http:' && isLoopbackHost(base.hostname) && base.port === '18789') {
+    return [`https://${base.host}`, `http://${base.host}`];
+  }
+
+  return [primary];
+}
+
+function resolveOpenClawConfigPath(): string {
+  return process.env.OPENCLAW_CONFIG_PATH || path.join(os.homedir(), '.openclaw', 'openclaw.json');
+}
+
+function loadHooksTokenFromOpenClawConfig(): string | undefined {
+  try {
+    const configPath = resolveOpenClawConfigPath();
+    if (!fs.existsSync(configPath)) {
+      return undefined;
+    }
+
+    const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as {
+      hooks?: { token?: string };
+    };
+    const token = raw.hooks?.token?.trim();
+    return token || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function callGatewayMethod(params: {
+  gatewayToken: string;
+  gatewayUrl: string;
+  method: string;
+  payload: Record<string, unknown>;
+}): Promise<boolean> {
+  const candidates = buildGatewayWsUrls(params.gatewayUrl);
+
+  for (const candidate of candidates) {
+    try {
+      const { stdout, stderr } = await execFileAsync('openclaw', [
+        'gateway',
+        'call',
+        '--token',
+        params.gatewayToken,
+        '--url',
+        candidate,
+        '--params',
+        JSON.stringify(params.payload),
+        '--json',
+        params.method
+      ], {
+        timeout: 10_000,
+        maxBuffer: 1024 * 1024
+      });
+
+      const response = extractJsonObject(stdout);
+      const ok = Boolean(
+        response &&
+        (response.runId || response.status === 'started' || response.messageSeq || response.ok)
+      );
+
+      if (ok) {
+        return true;
+      }
+
+      console.error(
+        `[OGP Bridge] ${params.method} returned unexpected output via ${candidate}:`,
+        stdout.trim() || stderr.trim()
+      );
+    } catch (err: any) {
+      console.error(`[OGP Bridge] ${params.method} failed via ${candidate}:`, err.message || err);
+    }
+  }
+
+  return false;
+}
+
+async function postJson(params: {
+  baseUrl: string;
+  path: string;
+  token: string;
+  body: Record<string, unknown>;
+}): Promise<boolean> {
+  const candidates = buildHookBaseUrls(params.baseUrl);
+  const body = JSON.stringify(params.body);
+
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(params.path, candidate);
+      const reqFn = url.protocol === 'https:' ? httpsRequest : httpRequest;
+
+      const ok = await new Promise<boolean>((resolve) => {
+        const req = reqFn(
+          {
+            hostname: url.hostname,
+            port: url.port || (url.protocol === 'https:' ? 443 : 80),
+            path: url.pathname,
+            method: 'POST',
+            rejectUnauthorized: false,
+            headers: {
+              Authorization: `Bearer ${params.token}`,
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(body)
+            }
+          },
+          (res) => {
+            let responseBody = '';
+            res.setEncoding('utf8');
+            res.on('data', (chunk) => {
+              responseBody += chunk;
+            });
+            res.on('end', () => {
+              const parsed = extractJsonObject(responseBody);
+              resolve(Boolean(res.statusCode && res.statusCode >= 200 && res.statusCode < 300 && parsed?.ok));
+            });
+          }
+        );
+
+        req.on('error', () => resolve(false));
+        req.setTimeout(10_000, () => {
+          req.destroy();
+          resolve(false);
+        });
+        req.write(body);
+        req.end();
+      });
+
+      if (ok) {
+        return true;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return false;
+}
+
 /**
- * Connect bridge (no-op for RPC-based implementation)
+ * Connect bridge (no-op for request-based implementation)
  */
 export function connectBridge(): void {
-  console.log('[OGP Bridge] Using OpenClaw Gateway RPC (sessions.send) for message delivery');
+  console.log('[OGP Bridge] Using OpenClaw hooks/agent for notifications and gateway RPC as fallback');
+}
+
+export async function dispatchAgentHook(
+  message: string,
+  from: string,
+  target?: DeliveryTarget
+): Promise<boolean> {
+  const config = requireConfig();
+  const hooksToken = config.openclawHooksToken || loadHooksTokenFromOpenClawConfig();
+  const baseUrl = config.openclawUrl || 'https://localhost:18789';
+
+  if (!hooksToken) {
+    console.error('[OGP Bridge] OpenClaw hooks token not configured');
+    return false;
+  }
+
+  const ok = await postJson({
+    baseUrl,
+    path: '/hooks/agent',
+    token: hooksToken,
+    body: {
+      message,
+      name: 'OGP Federation',
+      agentId: config.agentId || 'main',
+      wakeMode: 'now',
+      deliver: true,
+      ...(target?.channel ? { channel: target.channel } : {}),
+      ...(target?.to ? { to: target.to } : {})
+    }
+  });
+
+  if (ok) {
+    console.log('[OGP Bridge] Message delivered via /hooks/agent:', from, message.substring(0, 100));
+  } else {
+    console.error('[OGP Bridge] /hooks/agent delivery failed');
+  }
+  return ok;
 }
 
 /**
@@ -54,54 +267,35 @@ export async function injectMessage(
 ): Promise<boolean> {
   const config = requireConfig();
   const gatewayToken = config.openclawToken;
-  const gatewayUrl = toGatewayWsUrl(config.openclawUrl || 'https://localhost:18789');
+  const gatewayUrl = config.openclawUrl || 'https://localhost:18789';
 
   if (!gatewayToken) {
     console.error('[OGP Bridge] OpenClaw gateway token not configured');
     return false;
   }
 
-  try {
-    const { stdout, stderr } = await execFileAsync('openclaw', [
-      'gateway',
-      'call',
-      '--token',
-      gatewayToken,
-      '--url',
-      gatewayUrl,
-      '--params',
-      JSON.stringify({ key: sessionKey, message }),
-      '--json',
-      'sessions.send'
-    ], {
-      timeout: 10_000,
-      maxBuffer: 1024 * 1024
-    });
+  const ok = await callGatewayMethod({
+    gatewayToken,
+    gatewayUrl,
+    method: 'sessions.send',
+    payload: { key: sessionKey, message }
+  });
 
-    const response = extractJsonObject(stdout);
-    const ok = Boolean(response && (response.runId || response.status === 'started' || response.messageSeq));
-
-    if (!ok) {
-      console.error('[OGP Bridge] sessions.send returned unexpected output:', stdout.trim() || stderr.trim());
-      return false;
-    }
-
+  if (ok) {
     console.log(
       '[OGP Bridge] Message delivered via sessions.send:',
       sessionKey,
       from ? `from ${from}` : '',
       message.substring(0, 100)
     );
-    return true;
-  } catch (err: any) {
-    console.error('[OGP Bridge] sessions.send failed:', err.message || err);
-    return false;
   }
+
+  return ok;
 }
 
 /**
- * Disconnect bridge (no-op for RPC-based implementation)
+ * Disconnect bridge (no-op for request-based implementation)
  */
 export function disconnectBridge(): void {
-  console.log('[OGP Bridge] RPC-based bridge has no persistent connection');
+  console.log('[OGP Bridge] Request-based bridge has no persistent connection');
 }
