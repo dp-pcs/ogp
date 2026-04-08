@@ -1,10 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { generateKeyPair } from '../shared/signing.js';
 import { getConfigDir, ensureConfigDir } from '../shared/config.js';
 const KEYPAIR_FILE = path.join(getConfigDir(), 'keypair.json');
-const KEYCHAIN_SERVICE = 'ogp-federation';
+// Make keychain service unique per OGP instance to avoid key collision
+const CONFIG_DIR_HASH = crypto.createHash('md5').update(getConfigDir()).digest('hex').slice(0, 8);
+const KEYCHAIN_SERVICE = `ogp-federation-${CONFIG_DIR_HASH}`;
 const KEYCHAIN_ACCOUNT = 'private-key';
 // --- macOS Keychain helpers ---
 function isMacOS() {
@@ -20,10 +23,22 @@ function keychainStore(privateKey) {
 }
 function keychainLoad() {
     try {
+        // Try new instance-specific service name first
         const result = execSync(`security find-generic-password -s ${KEYCHAIN_SERVICE} -a ${KEYCHAIN_ACCOUNT} -w`, { stdio: 'pipe' }).toString().trim();
         return result || null;
     }
     catch {
+        // Migration: try old shared service name (pre-v0.3.4)
+        try {
+            const oldService = 'ogp-federation'; // Old hardcoded service name
+            const oldResult = execSync(`security find-generic-password -s ${oldService} -a ${KEYCHAIN_ACCOUNT} -w`, { stdio: 'pipe' }).toString().trim();
+            if (oldResult) {
+                console.log(`[OGP] Migrating private key from shared keychain (${oldService}) to instance-specific keychain (${KEYCHAIN_SERVICE})`);
+                keychainStore(oldResult);
+                return oldResult;
+            }
+        }
+        catch { }
         return null;
     }
 }

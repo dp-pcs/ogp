@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.4 (2026-04-08)
+
+### Fixed
+- **CRITICAL**: Fixed keychain service name collision causing multiple OGP instances to share the same private key
+  - Each instance now uses a unique keychain service name: `ogp-federation-${hash(configDir)}`
+  - Added migration logic to automatically move keys from shared keychain to instance-specific keychain
+  - **Impact**: Resolves 401 Unauthorized errors when multiple instances (e.g., default + Hermes) try to federate
+  - **Root Cause**: All instances used hardcoded `ogp-federation` keychain service, so Hermes instance was signing with Junior's private key
+- **CRITICAL**: Fixed peer ID format inconsistency in agent-comms messages (16-char → 32-char)
+  - Updated all `ourId` assignments to use `publicKey.substring(0, 32)` instead of `substring(0, 16)`
+  - **Impact**: Prevents duplicate peer entries (BUG-6) and ID mismatches
+  - **Locations fixed**: `federationSendAgentComms()`, `federationSend()`, `federationRequest()`
+  - Aligns with v0.3.0 fix (commit d695fe1) that increased peer ID prefix to avoid Ed25519 DER header collision
+
+### Changed
+- Keychain service name now includes config directory MD5 hash for multi-instance isolation
+- All outbound federation messages now use 32-char peer IDs consistently
+
 ## 0.3.3 (2026-04-07)
 
 ### BUG-1: Fix 401 Unauthorized on Agent-Comms Send

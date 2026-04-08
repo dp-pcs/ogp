@@ -319,7 +319,7 @@ export async function federationRemove(peerId) {
     try {
         const keypair = loadOrGenerateKeyPair();
         // BUILD-111: Use public key prefix as our ID (not hostname:port)
-        const ourId = keypair.publicKey.substring(0, 16);
+        const ourId = keypair.publicKey.substring(0, 32);
         const timestamp = new Date().toISOString();
         // Sign the removal payload
         const payload = { peerId: ourId, timestamp };
@@ -371,7 +371,7 @@ export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
     const payload = JSON.parse(payloadJson);
     const keypair = loadOrGenerateKeyPair();
     // BUILD-111: Use public key prefix as our ID (not hostname:port)
-    const ourId = keypair.publicKey.substring(0, 16);
+    const ourId = keypair.publicKey.substring(0, 32);
     const message = {
         intent,
         from: ourId,
@@ -544,8 +544,8 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
         return;
     }
     const keypair = loadOrGenerateKeyPair();
-    // BUILD-111: Use public key prefix as our ID (not hostname:port)
-    const ourId = keypair.publicKey.substring(0, 16);
+    // Use 32-char public key prefix as our ID (avoids Ed25519 DER header collision with 16-char)
+    const ourId = keypair.publicKey.substring(0, 32);
     const nonce = crypto.randomUUID();
     // Build replyTo URL if we want to receive callbacks
     const replyTo = options.waitForReply
