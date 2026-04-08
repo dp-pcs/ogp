@@ -55,6 +55,7 @@ export async function handleMessage(message, signature, messageStr // raw JSON s
     }
     // 2. Verify signature (use raw messageStr if provided to avoid JSON key-order drift)
     if (!verifyObject(message, signature, peer.publicKey, messageStr)) {
+        console.error(`[OGP] Signature verification failed for peer ${peer.displayName} (${peer.id})`);
         return {
             success: false,
             nonce: message.nonce,
