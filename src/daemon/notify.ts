@@ -69,75 +69,28 @@ class OpenClawBackend implements NotificationBackend {
   readonly name = 'openclaw';
 
   async notify(payload: NotificationPayload, config: OGPConfig): Promise<boolean> {
-    // Method 1: POST /hooks/agent
-    const hooksToken = (config as any).openclawHooksToken;
-    if (hooksToken && config.openclawUrl) {
-      const openclawUrl = config.openclawUrl.replace(/\/$/, '');
+    // Format message with peer and intent context
+    const peerName = payload.peerDisplayName || payload.peerId || 'unknown peer';
+    const intent = payload.intent || 'message';
+    const topic = payload.topic || 'general';
+    const messageText = `[OGP Federation] From ${peerName} (${intent}/${topic}):\n${payload.text}`;
 
-      // Format message with peer and intent context
-      const peerName = payload.peerDisplayName || payload.peerId || 'unknown peer';
-      const intent = payload.intent || 'message';
-      const topic = payload.topic || 'general';
-      const messageText = `[OGP Federation] From ${peerName} (${intent}/${topic}):\n${payload.text}`;
-
-      try {
-        const result = await new Promise<boolean>((resolve) => {
-          import('node:https').then(({ request: httpsRequest }) => {
-            import('node:http').then(({ request: httpRequest }) => {
-              import('node:url').then(({ URL }) => {
-                const url = new URL(`${openclawUrl}/hooks/wake`);
-                const isHttps = url.protocol === 'https:';
-
-                const hookPayload = {
-                  text: messageText,
-                  mode: 'now',
-                };
-                const body = JSON.stringify(hookPayload);
-                const reqFn = isHttps ? httpsRequest : httpRequest;
-                const req = (reqFn as typeof httpsRequest)({
-                  hostname: url.hostname,
-                  port: url.port || (isHttps ? 443 : 80),
-                  path: url.pathname,
-                  method: 'POST',
-                  rejectUnauthorized: false,
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${hooksToken}`,
-                    'Content-Length': Buffer.byteLength(body),
-                  },
-                }, (res) => {
-                  resolve(res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300);
-                });
-                req.on('error', () => resolve(false));
-                req.setTimeout(5000, () => { req.destroy(); resolve(false); });
-                req.write(body);
-                req.end();
-              });
-            });
-          });
-        });
-        if (result) {
-          console.log('[OGP] Notified OpenClaw via /hooks/wake:', messageText);
-          return true;
-        }
-        console.warn('[OGP] /hooks/wake call failed (non-2xx or error), falling back');
-      } catch (error) {
-        console.error('[OGP] /hooks/agent failed:', error);
-      }
-    }
-
-    // Method 2: openclaw system event --mode now (CLI fallback)
+    // Use openclaw agent CLI to inject message into agent's conversation queue
+    // This ensures the agent can see and respond to the message (not just a system interjection)
     try {
-      const { execSync } = await import('node:child_process');
-      const escaped = payload.text.replace(/'/g, "'\\''");
-      execSync(`openclaw system event --text '${escaped}' --mode now 2>/dev/null`, {
-        timeout: 5000,
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+
+      const agentId = config.agentId || 'main';
+      await execFileAsync('openclaw', ['agent', '--agent', agentId, '--message', messageText], {
+        timeout: 10000,
         env: { ...process.env }
       });
-      console.log('[OGP] Notified OpenClaw via system event CLI:', payload.text);
+      console.log('[OGP] Notified OpenClaw agent via CLI:', messageText);
       return true;
     } catch (err) {
-      console.error('[OGP] System event CLI failed:', err);
+      console.error('[OGP] OpenClaw agent CLI failed:', err);
     }
 
     return false;
