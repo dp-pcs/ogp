@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, cpSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, cpSync, readdirSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +54,13 @@ function detectPlatforms() {
 const availableSkills = readdirSync(skillsSrc, { withFileTypes: true })
   .filter(d => d.isDirectory() && existsSync(join(skillsSrc, d.name, 'SKILL.md')))
   .map(d => d.name);
+
+function getSkillVersion(skill) {
+  const skillFile = join(skillsSrc, skill, 'SKILL.md');
+  const content = readFileSync(skillFile, 'utf8');
+  const match = content.match(/^version:\s*(.+)$/m);
+  return match?.[1]?.trim() ?? 'unknown';
+}
 
 if (availableSkills.length === 0) {
   console.log('No skills found in the skills/ directory.');
@@ -176,6 +183,9 @@ async function main() {
       const src = join(skillsSrc, skill);
       const dest = join(platform.skillsDir, skill);
       try {
+        // Replace the installed skill directory wholesale so stale files from
+        // previous package versions do not survive upgrades.
+        rmSync(dest, { recursive: true, force: true });
         cpSync(src, dest, { recursive: true });
         console.log(`   ✓ ${skill}`);
         installed++;
@@ -190,6 +200,14 @@ async function main() {
 
   if (totalInstalled > 0) {
     console.log(`\n✅ Successfully installed ${totalInstalled} skill(s) to ${selectedPlatforms.length} platform(s)`);
+    console.log('');
+
+    const installedVersions = selectedSkills
+      .map(skill => `${skill}@${getSkillVersion(skill)}`)
+      .join(', ');
+    console.log(`Installed skill versions: ${installedVersions}`);
+    console.log('Verify installed copies with:');
+    console.log("  rg -n '^version:' ~/.openclaw/skills/ogp*/SKILL.md ~/.claude/skills/ogp*/SKILL.md 2>/dev/null");
     console.log('');
 
     // Platform-specific restart instructions

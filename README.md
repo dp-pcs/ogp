@@ -44,7 +44,18 @@ After installation, install the OGP skills for Claude Code:
 ogp-install-skills
 ```
 
-This auto-discovers and installs all OGP skills from the `skills/` directory.
+This auto-discovers and installs all OGP skills from the `skills/` directory. The installer now replaces each installed skill directory wholesale on upgrade so stale files from older package versions do not survive.
+
+Verify the installed copies after an upgrade:
+
+```bash
+rg -n '^version:' ~/.openclaw/skills/ogp*/SKILL.md ~/.claude/skills/ogp*/SKILL.md 2>/dev/null
+```
+
+For the current `0.4.2` release line, the changed skills should report:
+- `ogp` `2.6.0`
+- `ogp-agent-comms` `0.6.0`
+- `ogp-project` `2.2.0`
 
 ### Multi-Framework Support
 
@@ -725,25 +736,26 @@ ogp federation agent stan memory-management \
 
 ### 3. Project Intent System (v0.2.0+)
 
-Collaborative project management across federated peers with activity logging and cross-peer queries.
+Projects are optional collaboration boundaries layered on top of federation. They let each person keep their own tools while their agents log high-level project context and query collaborators through OGP when needed.
 
 **Features:**
 - Create projects with contextual setup (repo, workspace, notes, collaborators)
-- Log contributions by entry type (progress, decision, blocker, context)
-- Query local and peer contributions for unified team view
-- Agent-aware: proactive logging and context loading
+- Log high-level contributions by entry type (progress, decision, blocker, context)
+- Query local and peer contributions for project-aware coordination
+- Use project IDs as agent-comms topics for collaborator questions and summaries
 - **Auto-registration (v0.2.9+)**: Project IDs auto-register as agent-comms topics for all approved peers
 
 **Example:**
 ```bash
-# Create project (auto-registers as agent-comms topic for all peers)
+# Create project (auto-registers as agent-comms topic for approved peers)
 ogp project create my-app "My App" --description "Expense tracker"
 
 # Log work by entry type
 ogp project contribute my-app progress "Completed authentication"
 ogp project contribute my-app decision "Using PostgreSQL"
 
-# Query peer's project
+# Ask a collaborator or query peer project state
+ogp federation agent alice my-app "My user is about to work on auth. Anything already decided?"
 ogp project query-peer alice shared-app --limit 10
 ```
 
@@ -1130,6 +1142,17 @@ OGP includes skills for Claude Code agents. Install them with:
 ogp-install-skills
 ```
 
+After upgrading, verify the installed skill headers:
+
+```bash
+rg -n '^version:' ~/.openclaw/skills/ogp*/SKILL.md ~/.claude/skills/ogp*/SKILL.md 2>/dev/null
+```
+
+Expected changed skill versions for the `0.4.2` release line:
+- `ogp` `2.6.0`
+- `ogp-agent-comms` `0.6.0`
+- `ogp-project` `2.2.0`
+
 ### Available Skills
 
 | Skill | Purpose |
@@ -1137,9 +1160,9 @@ ogp-install-skills
 | **ogp** | Core protocol: federation setup, peer management, sending messages |
 | **ogp-expose** | Tunnel setup: cloudflared/ngrok configuration |
 | **ogp-agent-comms** | Interactive wizard: configure response policies plus delegated-authority / human-delivery interview |
-| **ogp-project** | Agent-aware project context: interviews, logging, cross-peer summarization |
+| **ogp-project** | Agent-aware project context: interviews, logging, and project-aware peer coordination |
 
-Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill now uses `ogp agent-comms interview` as the canonical conversational path for delegated-authority / human-delivery configuration, plus the existing per-peer policy commands. The `ogp-project` skill enables conversational project management with context interviews and proactive logging.
+Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill now uses `ogp agent-comms interview` as the canonical conversational path for delegated-authority / human-delivery configuration, plus the existing per-peer policy commands. The `ogp-project` skill enables conversational project management with context interviews, high-level project logging, and project-aware peer coordination.
 
 ## Documentation
 

@@ -1,21 +1,22 @@
 ---
 skill_name: ogp-project
-version: 2.1.0
+version: 2.2.0
 description: >
   Tool-agnostic project collaboration for AI assistants. Users keep their own tools
   (Linear, Jira, Obsidian, GitHub, iCloud, local files — anything). This skill makes
   agents aware of what each collaborator's agent knows and where it lives, so agents
-  can query each other proactively rather than making the human relay information.
-  Supports project creation with context interviews, freeform activity logging,
-  proactive pre-task peer checks, and cross-peer summarization.
+  can query each other through OGP project boundaries rather than making the human
+  relay information. Supports project creation with context interviews, freeform
+  activity logging, project-topic agent-comms, and cross-peer queries.
 trigger: >
   Use when the user wants to create, manage, log to, or summarize OGP projects.
-  ALSO use proactively — before starting any project-related work — to check shared
-  project state and query peer agents. Triggers on natural logging phrases like
+  ALSO use proactively when project context is clearly relevant — check local project
+  state first and query peer agents when that would reduce human relay or duplicate
+  work. Triggers on natural logging phrases like
   "remember this for project X", "account for this", "make note of", "track this",
   "jot this down", "save this to", "document this" when a project context is active or named.
-  The goal is to eliminate human-as-messenger friction: agents surface conflicts and
-  overlaps automatically so users don't have to ask.
+  The goal is to reduce human-as-messenger friction while preserving federation and
+  project boundaries.
 requires:
   bins:
     - ogp
@@ -56,22 +57,30 @@ Full documentation: https://github.com/dp-pcs/ogp
 
 ## The Core Idea
 
-People work differently. One person tracks tasks in Linear, keeps notes in GitHub, stores files locally. Another uses a different issue tracker, writes in Obsidian, stores files in iCloud. In the past, collaboration meant forcing everyone onto the same tools.
+Federation is the base relationship in OGP. A project is an optional collaboration boundary layered on top of that federation.
 
-**This skill changes that.** Each user keeps their own tools and workflow. Their agent knows what they're working on and where everything lives. When two people collaborate on a project, their agents communicate directly — surfacing conflicts, sharing context, and answering each other's questions — without the human having to relay anything.
+People work differently. One person tracks tasks in Linear, keeps notes in GitHub, stores files locally. Another uses a different issue tracker, writes in Obsidian, stores files in iCloud. The project model is meant to let both people keep those tools while their agents exchange high-level project context through OGP.
+
+The important distinction is that a project is **not** "everyone must use the same repo" and **not** "share everything verbatim." It is a bounded context for collaboration:
+
+- log high-level facts such as decisions, progress, blockers, questions, and important context
+- let agents ask each other about that context over federation
+- preserve visibility boundaries when project membership is broader than pairwise federation
+
+That means a project can include multiple collaborators even when they are not all federated with each other. OGP should help each side coordinate through their own agent and tools, not force a full mesh of shared systems.
 
 The human-as-messenger problem:
 > Coworker wants to know something → asks you → you ask your agent → agent finds answer → you tell coworker
 
-What this skill enables:
-> Coworker's agent asks your agent → answer flows back → coworker just knows
+What this skill is aiming for:
+> Coworker's agent asks your agent about project context → answer flows back with the right policy and boundaries
 
 ---
 
 ## When to Use
 
 - User wants to create a new OGP project with contextual setup
-- **User is about to start work on something project-related** → check shared state first (see Proactive Pre-Task Check below)
+- User is about to start work on something project-related and it is worth checking local or peer project context first
 - User expresses logging intent: "add this to project X", "log that", "remember this", "track this", etc.
 - User asks about project status, activity, or what a collaborator has been working on
 - A peer agent sends a query about something in your project context
@@ -87,30 +96,35 @@ What this skill enables:
 
 ### 2. Freeform Activity Logging
 - Monitors for logging intent (any natural phrasing)
-- Logs decisions, progress, blockers, context — all queryable later
+- Logs high-level decisions, progress, blockers, questions, and context — all queryable later
 - Auto-registers project ID as agent-comms topic for all approved peers
 
-### 3. Proactive Pre-Task Check ← KEY BEHAVIOR
-- Before starting project-related work, automatically check local state AND ping peer agents
-- Surfaces "heads up — your collaborator is already working on that" moments
-- Eliminates duplicate work and uncovers conflicts early
+### 3. Project-Aware Coordination Workflow
+- Before starting project-related work, the agent should consider checking local state first
+- If the question or task depends on collaborator context, query the relevant peer agent on the project topic
+- Surface "heads up — your collaborator already logged something relevant" moments when they are actually found
 
 ### 4. Peer Response Policy Awareness
 - Peer agents have their own response policies (auto-answer vs. escalate to human)
 - Your agent respects those policies and adjusts behavior accordingly
 - This preserves each user's autonomy over how their agent handles interruptions
 
-### 5. Cross-Peer Summarization
-- Unified view of contributions across local + all peer agents
-- Deduplication and synthesis
+### 5. Cross-Peer Querying
+- Query peer project state when that context would help answer a question or avoid duplicate work
+- Summarize the relevant result for the user instead of dumping raw logs by default
+
+### 6. Current Implementation Boundary
+- The CLI and daemon currently provide project CRUD, contribution logging, peer project queries, and project-topic agent-comms
+- The "check peers before starting work" behavior is a workflow expectation for the agent using this skill, not a daemon-enforced guarantee
+- Multi-party project visibility rules are still evolving; do not assume that project membership automatically implies transitive sharing between peers
 
 ---
 
-## Proactive Pre-Task Check (MANDATORY)
+## Suggested Pre-Task Check
 
-**This is the most important behavior in this skill.**
+Use this flow when project context is likely to matter. Treat it as recommended agent behavior, not as a guaranteed runtime mechanism.
 
-Whenever the user expresses intent to start work on something project-related, run this flow BEFORE starting:
+Whenever the user expresses intent to start work on something project-related, consider this flow before starting:
 
 ### Step 1: Check local project state
 ```bash
@@ -121,9 +135,9 @@ ogp --for openclaw project query <project-id> --limit 20
 ogp --for openclaw project query <project-id> --search "<keywords from user's intent>"
 ```
 
-### Step 2: Query peer agents
+### Step 2: Query relevant peer agents
 ```bash
-# For each approved peer in the project, ask if they know anything relevant
+# Ask the specific collaborator whose context is likely to matter
 ogp --for openclaw federation agent <peer-id> <project-id> "My user is about to start working on <what they said>. Anything I should know before we begin?"
 ```
 
@@ -260,7 +274,7 @@ Ask these questions conversationally — not as a form. Let the user's answers l
 *(peer IDs, names, or email addresses of collaborators)*
 
 - If answered → `ogp --for openclaw project contribute <id> context.collaborators "<names/peer-ids>"`
-- Agent behavior unlocked: Know who to ping during pre-task checks. Know whose agent to query when looking for context.
+- Agent behavior unlocked: Know who to ping during pre-task checks and whose agent to query when looking for context.
 - Also offer: *"Want me to send them a federation invite?"* — if yes, run `ogp --for openclaw project request-join <peer-id> <project-id> <name>`
 - If skipped → no peer checks until collaborators are added later
 
@@ -289,7 +303,7 @@ After the interview, summarize what you now know:
   👥 Collaborators: <answer or "none yet">
 
 For anything I don't know yet, you can tell me later and I'll update the project context.
-I'll check this context before starting any work on this project.
+I'll use this context when project questions come up and can check it before starting related work.
 ```
 
 > **Why this matters:** The `context.*` entries do two jobs. They tell peer agents where your stuff lives (so they know what to ask you about). And they tell YOUR agent where to actually look when answering questions — not just what's been logged to `projects.json`.
@@ -487,11 +501,11 @@ ogp --for openclaw federation send <peer-id> message '{"text":"ping"}'
 **Data Flow:**
 ```
 User says something project-related
-  → Agent checks local project state (ogp --for <framework> project query)
-  → Agent pings peer agents (ogp --for <framework> federation agent)
-  → Surfaces conflicts/info before starting
+  → Agent may check local project state (ogp --for <framework> project query)
+  → Agent may ping relevant peer agents (ogp --for <framework> federation agent)
+  → Surfaces relevant conflicts/info before or during work
   → Logs outcomes (ogp --for <framework> project contribute)
-  → Federation syncs to peers
+  → Shares or queries peer context through project-aware federation flows when appropriate
 ```
 
 **The tool-agnostic principle:**

@@ -44,6 +44,14 @@ Install OGP skills for Claude Code integration:
 ogp-install-skills
 ```
 
+Verify the installed copies after an upgrade:
+
+```bash
+rg -n '^version:' ~/.openclaw/skills/ogp*/SKILL.md ~/.claude/skills/ogp*/SKILL.md 2>/dev/null
+```
+
+For the current `0.4.2` release line, the changed skills should report `ogp` `2.6.0`, `ogp-agent-comms` `0.6.0`, and `ogp-project` `2.2.0`.
+
 ### 3. Run Setup
 
 ```bash
@@ -696,7 +704,7 @@ ogp agent-comms activity apollo
 
 ### Project Collaboration Workflow
 
-Managing collaborative projects:
+Projects sit on top of federation. Use them to capture high-level collaboration context while each person keeps their own tools and workflow:
 
 ```bash
 # Create a project
@@ -707,6 +715,9 @@ ogp project create expense-app "Expense Tracker App" \
 ogp project contribute expense-app progress "Completed authentication system"
 ogp project contribute expense-app decision "Using PostgreSQL for persistence"
 ogp project contribute expense-app blocker "Waiting for API key approval"
+
+# Ask a collaborator about project context
+ogp federation agent apollo expense-app "I'm about to work on auth. Anything I should know?"
 
 # Share with peer
 ogp project send-contribution apollo expense-app progress "Deployed staging environment"
