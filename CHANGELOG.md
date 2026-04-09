@@ -1,37 +1,62 @@
 # Changelog
 
-## 0.4.1 (2026-04-08) - UNRELEASED
+## 0.4.2 (2026-04-09)
+
+### Release Posture
+- **BUG-2 release decision**: `v0.4.2` no longer treats native sender-identity parity inside OpenClaw/Telegram as a ship blocker.
+- **Closure criteria for `v0.4.2`**:
+  - inbound federated work reaches the local agent
+  - the local agent can read and reason over it
+  - OpenClaw prefers `/hooks/agent` with explicit human-delivery targeting
+  - fallback delivery still reaches the configured human-facing session when hook delivery is unavailable
+- **BUG-11 clarification**: macOS private keys live in instance-specific Keychain entries; `keypair.json` is only the public-key cache there, so deleting the file alone does not rotate identity.
 
 ### Changed
-- **OpenClaw Bridge**: Replaced WebSocket approach with CLI-based `sessions.send` RPC
-  - New file: `src/daemon/openclaw-bridge.ts` - CLI-based bridge using `openclaw gateway call`
-  - Uses `sessions.send` RPC method instead of `chat.inject`
-  - Routes to correct Telegram session: `agent:main:telegram:direct:<chatId>`
-  - Graceful shutdown integration in `src/daemon/server.ts`
+- **Delegated authority / notification runtime**:
+  - explicit precedence across legacy mode, global defaults, peer defaults, class rules, and topic rules
+  - lifecycle events now surface through the same notification path as federated work
+  - policy handling no longer lets peer defaults erase more specific global class rules
+- **Peer persistence cleanup**:
+  - remove/reject now persist tombstones instead of stale mutable peer state
+  - refederation replaces removed/rejected records with fresh pending state
+- **OpenClaw bridge grounding**:
+  - `/hooks/agent` now requests the actual human session key only when OpenClaw allows it
+  - warning logs make the fallback-to-default-session limitation explicit
+- **Rendezvous posture**:
+  - docs now describe rendezvous as optional discovery/invite sugar, not NAT traversal
+  - shutdown now deregisters and exits cleanly instead of leaving the daemon alive after stop
+- **Conversational config path**:
+  - new `ogp agent-comms interview` command re-runs the delegated-authority / human-delivery interview for the active framework without repeating full setup
+  - `ogp-agent-comms` skill now points at this command as the canonical in-agent configuration path
 
-### Fixed (Partial)
-- **BUG-2 (PARTIAL FIX)**: OGP messages now deliver to OpenClaw Telegram sessions
-  - **Problem**: Federation messages appeared in Telegram notifications but agent couldn't see/respond (phantom messages)
-  - **Investigation**: Tested multiple delivery methods:
-    - ❌ WebSocket `chat.inject` - handshake failed
-    - ✅ CLI `chat.inject` to TUI - works but TUI ≠ Telegram
-    - ✅ CLI `sessions.send` to Telegram - delivers but **sender shows as "cli"**
-    - ⏸️ `/hooks/agent` webhook - returns success but delivery unclear
-  - **Current Solution**: Use `openclaw gateway call ... sessions.send` with Telegram session key
-  - **Remaining Issue**: Messages deliver ✅ but sender identity shows as "cli" instead of peer ❌
-  - **Impact**: Agents can see and read message content, but can't identify sender as peer for direct replies
-  - **Security**: Switched from `execSync` to `execFile` to prevent command injection
-  - **Files Modified**:
-    - `src/daemon/notify.ts` - Session key routing
-    - `src/daemon/openclaw-bridge.ts` - New CLI-based bridge
-    - `src/daemon/server.ts` - Bridge lifecycle integration
-  - Messages formatted with peer/intent context: `[OGP Federation] From {peer} ({intent}/{topic}): {message}`
+### Fixed
+- **BUG-2 / BUG-3 shipping posture**:
+  - OpenClaw and Hermes now complete clean re-federation, proactive lifecycle surfacing, bidirectional `agent-comms`, and human relay in the validated Junior/Apollo end-to-end flow
+- **BUG-5 / BUG-7**:
+  - stale alias/display-name/policy baggage no longer revives after remove/reject + refederation
+- **BUG-8**:
+  - delegated-authority precedence now respects specificity order consistently
+- **BUG-10**:
+  - graceful shutdown stops rendezvous heartbeats, deregisters, closes the HTTP listener, and exits cleanly
+- **BUG-11**:
+  - clarified macOS key storage source of truth and reset workflow
+
+### Testing
+- `npm test` now passes with the stabilization + shutdown + policy regression suite
+- Added targeted regression coverage:
+  - `test/notify-policy.test.ts`
+  - `test/peers-tombstone.test.ts`
+  - `test/server-shutdown.test.ts`
+  - `test/setup-agent-comms-interview.test.ts`
 
 ### Known Issues
-- **BUG-2 (Remaining)**: Sender identity not preserved - messages show sender="cli" instead of peer identity
-  - Agents can read message content but can't reply directly to peers
-  - Workaround: Agents can parse peer info from message content format
-  - Investigation ongoing: Testing `/hooks/agent` webhook and other delivery methods
+- **Accepted limitation in `v0.4.2`**: Sender identity may still appear as injected/system/`cli` content rather than a native peer sender inside OpenClaw/Telegram
+  - Peer identity remains available in OGP message content/metadata
+  - This is no longer considered a release blocker for `v0.4.2`
+- **Remaining follow-up work**:
+  - first-turn relay continuity on Hermes could still be stronger after an initial surfaced relay message
+  - any future attempt to achieve native sender-identity parity in the Telegram surface
+- **Hooks session-key grounding**: When `hooks.allowRequestSessionKey=true` and the requested key matches the configured prefixes, `/hooks/agent` now runs with the actual human session key so Telegram deliveries land in the human-visible session. Most installs still have `allowRequestSessionKey=false`, so OGP logs a warning and continues using the default hook session when the override is blocked; the Telegram sender still reads as the injected `cli` sender in that case.
 
 ---
 

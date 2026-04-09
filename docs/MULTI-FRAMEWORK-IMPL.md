@@ -2,6 +2,11 @@
 
 **Status:** ✅ Implemented in OGP v0.4.0+
 
+> Historical note, April 9, 2026: this file is primarily an implementation log.
+> Some unchecked items below were not maintained after features landed.
+> In particular, completion and `?` help are present in the codebase even though later checklist sections still show them as pending.
+> Do not use this file as the canonical active backlog.
+
 This document tracks the implementation status of multi-framework support.
 
 ## Phase 1: Core Infrastructure ✅ COMPLETED

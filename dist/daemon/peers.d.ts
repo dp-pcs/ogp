@@ -12,6 +12,8 @@ export interface Peer {
     status: 'pending' | 'approved' | 'rejected' | 'removed';
     requestedAt: string;
     approvedAt?: string;
+    rejectedAt?: string;
+    removedAt?: string;
     metadata?: Record<string, any>;
     protocolVersion?: string;
     grantedScopes?: ScopeBundle;
@@ -21,6 +23,12 @@ export interface Peer {
     defaultLevel?: ResponseLevel;
     agentId?: string;
 }
+type PendingPeerInput = Pick<Peer, 'id' | 'displayName' | 'email' | 'gatewayUrl' | 'publicKey'> & {
+    agentId?: string;
+    offeredIntents?: string[];
+    requestedAt?: string;
+};
+export declare function createPendingPeerRecord(input: PendingPeerInput): Peer;
 export declare function loadPeers(): Peer[];
 export declare function savePeers(peers: Peer[]): boolean;
 export declare function addPeer(peer: Peer): boolean;

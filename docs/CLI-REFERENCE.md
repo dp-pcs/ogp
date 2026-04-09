@@ -97,6 +97,27 @@ ogp setup
 5. Gateway URL (your public URL)
 6. Rendezvous configuration (optional)
 7. Display name and email
+8. Delegated-authority / human-delivery interview
+
+### ogp agent-comms interview
+
+Re-run the delegated-authority / human-delivery interview for the active framework without repeating full setup.
+
+**Syntax:**
+```bash
+ogp agent-comms interview [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp --for openclaw agent-comms interview
+ogp --for hermes agent-comms interview
+```
+
+**What it updates:**
+- `humanDeliveryTarget` (OpenClaw-style human destination)
+- `inboundFederationPolicy.mode`
+- delegated-authority defaults for human surfacing, relay handling, approval-required topics, and trusted-peer autonomy posture
 
 ### ogp config list
 
@@ -568,7 +589,7 @@ ogp federation ping https://peer.example.com
 
 ### ogp federation invite
 
-Generate a short-lived invite code for easy federation setup (v0.2.15+).
+Generate a short-lived invite code using the optional rendezvous service (v0.2.15+).
 
 **Syntax:**
 ```bash
@@ -596,7 +617,7 @@ Share this with your peer — they run: ogp federation accept a3f7k2
 
 ### ogp federation accept
 
-Accept an invite code and auto-connect to peer (v0.2.15+).
+Accept an invite code from the optional rendezvous service and auto-connect to a peer (v0.2.15+).
 
 **Syntax:**
 ```bash
@@ -621,7 +642,7 @@ ogp federation accept a3f7k2 --alias apollo
 
 ### ogp federation connect
 
-Connect to a peer by public key via rendezvous (v0.2.14+).
+Connect to a peer by public key via the optional rendezvous discovery service (v0.2.14+).
 
 **Syntax:**
 ```bash
@@ -642,6 +663,21 @@ ogp federation connect 302a300506... --alias apollo
 ```
 
 ## Agent Communications
+
+### ogp agent-comms interview
+
+Run the delegated-authority / human-delivery interview.
+
+**Syntax:**
+```bash
+ogp agent-comms interview [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp agent-comms interview
+ogp --for hermes agent-comms interview
+```
 
 ### ogp agent-comms policies
 

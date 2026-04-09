@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { runSetup } from './cli/setup.js';
+import { runAgentCommsInterview, runSetup } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig, saveConfig } from './shared/config.js';
 import { loadMetaConfig } from './shared/meta-config.js';
@@ -754,6 +754,13 @@ program.addCommand(configCommand);
 const agentComms = program
   .command('agent-comms')
   .description('Configure agent-to-agent communication policies');
+
+agentComms
+  .command('interview')
+  .description('Run the delegated-authority and human-delivery interview for the active framework')
+  .action(async () => {
+    await runAgentCommsInterview();
+  });
 
 agentComms
   .command('policies')

@@ -19,6 +19,10 @@ function resolveNotifyTarget(config, agent) {
 function resolveHumanDeliveryTarget(config, agent) {
     return config.humanDeliveryTarget || resolveNotifyTarget(config, agent);
 }
+function resolveInternalOpenClawSessionKey(config) {
+    const agentId = config.agentId || 'main';
+    return `agent:${agentId}:main`;
+}
 function targetToSessionKey(target, agentId) {
     if (target.startsWith('agent:')) {
         return target;
@@ -72,11 +76,185 @@ function resolveOpenClawDeliveryTarget(config, agent) {
 function getInboundFederationMode(config) {
     return config.inboundFederationPolicy?.mode;
 }
-function formatHandlingGuidance(config) {
-    const mode = getInboundFederationMode(config);
+function getPayloadMetadata(payload) {
+    return payload.metadata ?? {};
+}
+function getOgpMetadata(payload) {
+    const metadata = getPayloadMetadata(payload);
+    return metadata.ogp ?? {};
+}
+function resolvePayloadIntent(payload) {
+    return payload.intent || getOgpMetadata(payload).intent;
+}
+function resolvePayloadTopic(payload) {
+    return payload.topic || getOgpMetadata(payload).topic;
+}
+function resolvePayloadPeerId(payload) {
+    const ogp = getOgpMetadata(payload);
+    return payload.peerId || ogp.from || ogp.peer?.id;
+}
+function resolvePayloadPeerDisplayName(payload) {
+    const ogp = getOgpMetadata(payload);
+    return payload.peerDisplayName || ogp.peer?.displayName;
+}
+function mergeRule(target, rule) {
+    if (!rule) {
+        return;
+    }
+    if (rule.mode !== undefined) {
+        target.mode = rule.mode;
+    }
+    if (rule.relayMode !== undefined) {
+        target.relayMode = rule.relayMode;
+    }
+    if (rule.surfaceToHuman !== undefined) {
+        target.surfaceToHuman = rule.surfaceToHuman;
+    }
+    if (rule.allowDirectPeerReply !== undefined) {
+        target.allowDirectPeerReply = rule.allowDirectPeerReply;
+    }
+}
+function applyDelegatedAuthorityPrecedence(accumulated, config, messageClass, topic, peerId) {
+    const legacyMode = getInboundFederationMode(config);
+    if (legacyMode) {
+        accumulated.mode = legacyMode;
+    }
+    const delegatedAuthority = config.delegatedAuthority;
+    if (!delegatedAuthority) {
+        return;
+    }
+    const peerScope = peerId ? delegatedAuthority.peers?.[peerId] : undefined;
+    // Deterministic precedence contract:
+    // 1. Legacy coarse mode as baseline fallback
+    // 2. Default rules: global, then peer
+    // 3. Message-class rules: global, then peer
+    // 4. Topic rules: global, then peer
+    //
+    // This prevents peer defaults from accidentally erasing a more specific
+    // global class rule such as "human-relay must not allow direct peer reply."
+    mergeRule(accumulated, delegatedAuthority.global.defaultRule);
+    mergeRule(accumulated, peerScope?.defaultRule);
+    mergeRule(accumulated, delegatedAuthority.global.classRules?.[messageClass]);
+    mergeRule(accumulated, peerScope?.classRules?.[messageClass]);
+    if (topic) {
+        mergeRule(accumulated, delegatedAuthority.global.topicRules?.[topic]);
+        mergeRule(accumulated, peerScope?.topicRules?.[topic]);
+    }
+}
+export function classifyFederatedMessage(payload) {
+    if (payload.messageClass) {
+        return payload.messageClass;
+    }
+    const ogp = getOgpMetadata(payload);
+    const intent = resolvePayloadIntent(payload);
+    if (ogp.messageClass) {
+        return ogp.messageClass;
+    }
+    switch (ogp.type) {
+        case 'federation_request':
+        case 'approval_request':
+            return 'approval-request';
+        case 'federation_removed':
+            return 'status-update';
+    }
+    if (ogp.requestedHumanRelay === true) {
+        return 'human-relay';
+    }
+    if (intent === 'status-update') {
+        return 'status-update';
+    }
+    if (intent === 'agent-comms') {
+        return 'agent-work';
+    }
+    return 'agent-work';
+}
+function defaultRelayModeForMode(mode) {
+    switch (mode) {
+        case 'approval-required':
+            return 'approval-required';
+        case 'summarize':
+            return 'summarize';
+        case 'forward':
+        case 'autonomous':
+        default:
+            return 'deliver';
+    }
+}
+function defaultSurfaceToHumanForMode(mode) {
+    switch (mode) {
+        case 'forward':
+            return 'always';
+        case 'autonomous':
+            return 'important-only';
+        case 'approval-required':
+            return 'always';
+        case 'summarize':
+        default:
+            return 'summary-only';
+    }
+}
+export function resolveFederatedHandlingPolicy(config, payload) {
+    const messageClass = classifyFederatedMessage(payload);
+    const topic = resolvePayloadTopic(payload);
+    const peerId = resolvePayloadPeerId(payload);
+    const accumulated = {};
+    applyDelegatedAuthorityPrecedence(accumulated, config, messageClass, topic, peerId);
+    if (messageClass === 'approval-request') {
+        return {
+            messageClass,
+            topic,
+            mode: accumulated.mode ?? 'approval-required',
+            relayMode: accumulated.relayMode ?? 'approval-required',
+            surfaceToHuman: accumulated.surfaceToHuman ?? 'always',
+            allowDirectPeerReply: accumulated.allowDirectPeerReply ?? false
+        };
+    }
+    const mode = accumulated.mode ?? 'summarize';
+    const relayMode = accumulated.relayMode ?? (messageClass === 'human-relay'
+        ? defaultRelayModeForMode(mode)
+        : defaultRelayModeForMode(mode));
+    const surfaceToHuman = accumulated.surfaceToHuman ?? (messageClass === 'human-relay' && relayMode === 'deliver'
+        ? 'always'
+        : messageClass === 'status-update'
+            ? 'summary-only'
+            : defaultSurfaceToHumanForMode(mode));
+    const allowDirectPeerReply = accumulated.allowDirectPeerReply ?? (messageClass === 'agent-work' && mode !== 'approval-required');
+    return {
+        messageClass,
+        topic,
+        mode,
+        relayMode,
+        surfaceToHuman,
+        allowDirectPeerReply
+    };
+}
+function shouldDeliverToHuman(policy) {
+    if (policy.messageClass === 'approval-request') {
+        return true;
+    }
+    return policy.surfaceToHuman !== 'never';
+}
+export function formatHandlingGuidance(config, payload) {
+    const policy = resolveFederatedHandlingPolicy(config, payload);
     const target = resolveHumanDeliveryTarget(config);
     const targetNote = target ? `Configured human delivery target: ${target}.` : '';
-    switch (mode) {
+    switch (policy.messageClass) {
+        case 'approval-request':
+            return `Message class: approval-request. Human preference: hold action and peer replies until the human explicitly approves. Surface this request to the human now. ${targetNote}`.trim();
+        case 'human-relay':
+            switch (policy.relayMode) {
+                case 'summarize':
+                    return `Message class: human-relay. Human preference: summarize the requested relay for the human instead of claiming verbatim delivery. Do not tell the peer the human was notified unless that actually happened. ${targetNote}`.trim();
+                case 'approval-required':
+                    return `Message class: human-relay. Human preference: hold this relay for approval before treating it as delivered. Do not claim delivery to the peer until the human approves and the delivery actually happens. ${targetNote}`.trim();
+                case 'deliver':
+                default:
+                    return `Message class: human-relay. Human preference: treat this as a delivery obligation to the configured human channel. Do not claim delivery to the peer unless you actually deliver it there. ${targetNote}`.trim();
+            }
+        case 'status-update':
+            return `Message class: status-update. Human preference: keep this lightweight and summarize it unless it becomes urgent or approval-related. ${targetNote}`.trim();
+    }
+    switch (policy.mode) {
         case 'forward':
             return `Human preference: proactively forward inbound federated items to the configured human channel. Do not claim delivery unless you actually send it there. ${targetNote}`.trim();
         case 'summarize':
@@ -96,19 +274,34 @@ function formatHandlingGuidance(config) {
 class OpenClawBackend {
     name = 'openclaw';
     async notify(payload, config) {
-        const peerName = payload.peerDisplayName || payload.peerId || 'unknown peer';
-        const intent = payload.intent || 'message';
-        const topic = payload.topic || 'general';
-        const handlingGuidance = formatHandlingGuidance(config);
+        const peerName = resolvePayloadPeerDisplayName(payload) || resolvePayloadPeerId(payload) || 'unknown peer';
+        const intent = resolvePayloadIntent(payload) || 'message';
+        const topic = resolvePayloadTopic(payload) || 'general';
+        const handlingGuidance = formatHandlingGuidance(config, payload);
+        const policy = resolveFederatedHandlingPolicy(config, payload);
+        const deliverToHuman = shouldDeliverToHuman(policy);
         const taskText = `Federated message from ${peerName} (${intent}/${topic}).
 
 Message:
 ${payload.text}${handlingGuidance ? `\n\n[OGP Handling Policy]\n${handlingGuidance}` : ''}`;
         const sessionMessageText = `[OGP Federation] From ${peerName} (${intent}/${topic}):\n${payload.text}${handlingGuidance ? `\n\n[OGP Handling Policy]\n${handlingGuidance}` : ''}`;
         try {
-            const deliveryTarget = resolveOpenClawDeliveryTarget(config, payload.agent);
-            const hookDelivered = await dispatchAgentHook(taskText, peerName, deliveryTarget);
+            const deliveryTarget = deliverToHuman
+                ? resolveOpenClawDeliveryTarget(config, payload.agent)
+                : undefined;
+            const deliverySessionKey = deliverToHuman
+                ? resolveOpenClawSessionKey(config, payload.agent)
+                : resolveInternalOpenClawSessionKey(config);
+            const hookDelivered = await dispatchAgentHook(taskText, peerName, {
+                deliver: deliverToHuman,
+                target: deliveryTarget,
+                sessionKey: deliverySessionKey
+            });
             if (hookDelivered) {
+                if (!deliverToHuman) {
+                    console.log('[OGP] Message delivered to OpenClaw via /hooks/agent without proactive human delivery for peer:', peerName);
+                    return true;
+                }
                 const sessionKey = resolveOpenClawSessionKey(config, payload.agent);
                 const syncNote = `[OGP Internal Sync]
 A federated request from ${peerName} (${intent}/${topic}) was handled via /hooks/agent and delivered to the configured human channel.
@@ -124,7 +317,9 @@ ${payload.text}`;
                 console.log('[OGP] Message delivered to OpenClaw via /hooks/agent for peer:', peerName);
                 return true;
             }
-            const sessionKey = resolveOpenClawSessionKey(config, payload.agent);
+            const sessionKey = deliverToHuman
+                ? resolveOpenClawSessionKey(config, payload.agent)
+                : resolveInternalOpenClawSessionKey(config);
             const result = await injectMessage(sessionKey, sessionMessageText, peerName);
             if (result) {
                 console.log('[OGP] Message delivered to OpenClaw session fallback for peer:', peerName);
@@ -148,6 +343,7 @@ ${payload.text}`;
 class HermesBackend {
     name = 'hermes';
     async notify(payload, config) {
+        const policy = resolveFederatedHandlingPolicy(config, payload);
         const webhookUrl = config.hermesWebhookUrl || 'http://localhost:8644/webhooks/ogp_federation';
         const secret = config.hermesWebhookSecret;
         if (!secret) {
@@ -156,18 +352,21 @@ class HermesBackend {
         }
         // Build webhook payload
         // Note: event_type is required by Hermes webhook event filter ("events" subscription list)
-        const intentStr = payload.intent || 'message';
+        const intentStr = resolvePayloadIntent(payload) || 'message';
         const body = {
             event_type: intentStr, // required for Hermes event filter ("*" is not a wildcard there)
-            peer_id: payload.peerId || 'unknown',
-            peer_display_name: payload.peerDisplayName || payload.peerId || 'Unknown Peer',
+            peer_id: resolvePayloadPeerId(payload) || 'unknown',
+            peer_display_name: resolvePayloadPeerDisplayName(payload) || resolvePayloadPeerId(payload) || 'Unknown Peer',
             intent: intentStr,
-            topic: payload.topic || 'general',
+            topic: resolvePayloadTopic(payload) || 'general',
             message: payload.text,
             priority: payload.priority || 'normal',
             conversation_id: payload.conversationId,
             human_delivery_target: resolveHumanDeliveryTarget(config, payload.agent),
-            handling_mode: getInboundFederationMode(config),
+            handling_mode: policy.mode,
+            message_class: classifyFederatedMessage(payload),
+            human_surfacing_mode: policy.surfaceToHuman,
+            relay_mode: policy.relayMode,
             timestamp: new Date().toISOString(),
             payload: payload.metadata || {}
         };

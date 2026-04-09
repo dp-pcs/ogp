@@ -1,7 +1,9 @@
+import { type FederatedMessageClass, type HumanSurfacingMode, type RelayHandlingMode, type InboundFederationMode, type OGPConfig } from '../shared/config.js';
 export interface NotificationPayload {
     text: string;
     sessionKey?: string;
     metadata?: Record<string, any>;
+    messageClass?: FederatedMessageClass;
     /**
      * Target agent for routing the notification.
      * If specified, looks up notifyTargets[agent] first, then falls back to legacy notifyTarget.
@@ -32,6 +34,17 @@ export interface NotificationPayload {
      */
     conversationId?: string;
 }
+export interface EffectiveFederatedHandlingPolicy {
+    messageClass: FederatedMessageClass;
+    topic?: string;
+    mode: InboundFederationMode;
+    relayMode: RelayHandlingMode;
+    surfaceToHuman: HumanSurfacingMode;
+    allowDirectPeerReply: boolean;
+}
+export declare function classifyFederatedMessage(payload: NotificationPayload): FederatedMessageClass;
+export declare function resolveFederatedHandlingPolicy(config: OGPConfig, payload: NotificationPayload): EffectiveFederatedHandlingPolicy;
+export declare function formatHandlingGuidance(config: OGPConfig, payload: NotificationPayload): string;
 export declare function notifyOpenClaw(payload: NotificationPayload): Promise<boolean>;
 /**
  * Send notification to the local AI agent using the configured platform backend.

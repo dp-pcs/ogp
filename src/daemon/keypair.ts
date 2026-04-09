@@ -98,7 +98,7 @@ export function loadOrGenerateKeyPair(): KeyPair {
     if (isMacOS()) {
       const fromKeychain = keychainLoad();
       if (!fromKeychain) {
-        throw new Error('[OGP] Private key not found in Keychain. Run `ogp setup --reset-keypair` to regenerate.');
+        throw new Error('[OGP] Private key not found in macOS Keychain. On macOS, keypair.json stores only the public key cache. Run `ogp setup --reset-keypair` to regenerate.');
       }
       privateKey = fromKeychain;
     } else {
@@ -118,7 +118,7 @@ export function loadOrGenerateKeyPair(): KeyPair {
     // Store private key in Keychain, public key in file only
     keychainStore(keypair.privateKey);
     fs.writeFileSync(keypairFile, JSON.stringify({ publicKey: keypair.publicKey }, null, 2), 'utf-8');
-    console.log('[OGP] Generated new Ed25519 keypair (private key stored in macOS Keychain)');
+    console.log(`[OGP] Generated new Ed25519 keypair (private key stored in macOS Keychain service ${getKeychainService()}, public key cached in keypair.json)`);
   } else {
     // Non-macOS: store full keypair in file (restrict permissions)
     fs.writeFileSync(keypairFile, JSON.stringify(keypair, null, 2), 'utf-8');

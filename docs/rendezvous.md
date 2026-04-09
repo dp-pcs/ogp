@@ -1,28 +1,27 @@
-# Rendezvous — Zero-Config Peer Discovery
+# Rendezvous — Optional Discovery And Invite Layer
 
 > Available in v0.2.14+
 
-OGP's rendezvous service lets gateways discover each other by public key — no port forwarding, no third-party tunnels, no manual URL exchange required.
+OGP's rendezvous service is an optional convenience layer for pubkey lookup and invite codes. It helps peers find each other more easily once each gateway is already publicly reachable.
 
-## The Problem It Solves
+## What It Solves
 
-For two OGP gateways to federate, both need to be publicly reachable. Without rendezvous, that means:
+For two OGP gateways to federate, both still need to be publicly reachable. Rendezvous helps by reducing coordination overhead:
 
-- Signing up for ngrok or Cloudflare Tunnel
-- Manually sharing your tunnel URL with each peer
-- Re-sharing every time the URL rotates (free tier ngrok rotates on restart)
-- Opening router ports or dealing with NAT
+- peer discovery by public key
+- invite-code UX
+- avoiding manual URL/pubkey exchange when a peer is already advertising a reachable endpoint
 
-Rendezvous collapses all of that to zero config.
+Rendezvous does **not** provide NAT traversal, UDP hole punching, or relay delivery.
 
 ## How It Works
 
-1. Your OGP daemon starts and auto-registers with the rendezvous server (`POST /register`) using your public key and current IP:port
+1. Your OGP daemon starts and auto-registers with the rendezvous server (`POST /register`) using your public key and connection hints
 2. A 30-second heartbeat keeps your registration alive (90-second TTL on the server)
 3. When you want to connect to a peer, your daemon looks them up by public key (`GET /peer/:pubkey`) and connects directly
 4. On shutdown, your daemon deregisters (`DELETE /peer/:pubkey`)
 
-The rendezvous server **never touches message content** — it only stores connection hints (IP + port). All OGP messages remain end-to-end signed between peers.
+The rendezvous server **never touches message content** — it only stores connection hints. All OGP messages remain end-to-end signed between peers.
 
 ## Configuration
 
@@ -40,7 +39,7 @@ Add the `rendezvous` block to `~/.ogp/config.json`:
 }
 ```
 
-The OGP setup wizard (`ogp setup`) will prompt for rendezvous configuration going forward.
+Rendezvous is optional. If you already have stable public URLs or are happy sharing them directly, you do not need it.
 
 ## Federation Invite Flow (v0.2.15+)
 
@@ -69,7 +68,7 @@ Output:
 Connected to a3f7k2... via rendezvous ✅
 ```
 
-That's the full flow. No pubkey, no URL, no coordination overhead.
+That's the full flow. No pubkey exchange and less coordination overhead, but the peer still needs a reachable gateway endpoint behind the lookup.
 
 ### How invite codes work
 
@@ -102,7 +101,7 @@ Public instance: `https://rendezvous.elelem.expert`
 
 ## Privacy & Trust
 
-- The rendezvous server stores only: public key, IP address, port, and last-seen timestamp
+- The rendezvous server stores only: public key, connection hints, and last-seen timestamp
 - No message content ever passes through rendezvous
 - Registrations expire after 90 seconds without a heartbeat
 - The server is open source — you can self-host if you prefer

@@ -23,6 +23,18 @@ type DeliveryTarget = {
   to?: string;
 };
 
+type HookDispatchOptions = {
+  deliver?: boolean;
+  target?: DeliveryTarget;
+  sessionKey?: string;
+};
+
+interface OpenClawHooksConfigSnapshot {
+  token?: string;
+  allowRequestSessionKey: boolean;
+  allowedSessionKeyPrefixes?: string[];
+}
+
 function extractJsonObject(output: string): Record<string, any> | null {
   const start = output.indexOf('{');
   if (start === -1) {
@@ -85,7 +97,7 @@ function resolveOpenClawConfigPath(): string {
   return process.env.OPENCLAW_CONFIG_PATH || path.join(os.homedir(), '.openclaw', 'openclaw.json');
 }
 
-function loadHooksTokenFromOpenClawConfig(): string | undefined {
+function loadHooksConfigFromOpenClawConfig(): OpenClawHooksConfigSnapshot | undefined {
   try {
     const configPath = resolveOpenClawConfigPath();
     if (!fs.existsSync(configPath)) {
@@ -93,13 +105,34 @@ function loadHooksTokenFromOpenClawConfig(): string | undefined {
     }
 
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as {
-      hooks?: { token?: string };
+      hooks?: {
+        token?: string;
+        allowRequestSessionKey?: boolean;
+        allowedSessionKeyPrefixes?: string[];
+      };
     };
     const token = raw.hooks?.token?.trim();
-    return token || undefined;
+    const allowedSessionKeyPrefixes = Array.isArray(raw.hooks?.allowedSessionKeyPrefixes)
+      ? raw.hooks.allowedSessionKeyPrefixes
+          .map(prefix => typeof prefix === 'string' ? prefix.trim() : '')
+          .filter(Boolean)
+      : undefined;
+
+    return {
+      token: token || undefined,
+      allowRequestSessionKey: raw.hooks?.allowRequestSessionKey === true,
+      allowedSessionKeyPrefixes: allowedSessionKeyPrefixes?.length ? allowedSessionKeyPrefixes : undefined
+    };
   } catch {
     return undefined;
   }
+}
+
+function isAllowedHookSessionKey(sessionKey: string, allowedPrefixes?: string[]): boolean {
+  if (!allowedPrefixes || allowedPrefixes.length === 0) {
+    return true;
+  }
+  return allowedPrefixes.some(prefix => sessionKey.startsWith(prefix));
 }
 
 async function callGatewayMethod(params: {
@@ -221,15 +254,32 @@ export function connectBridge(): void {
 export async function dispatchAgentHook(
   message: string,
   from: string,
-  target?: DeliveryTarget
+  options?: HookDispatchOptions
 ): Promise<boolean> {
   const config = requireConfig();
-  const hooksToken = config.openclawHooksToken || loadHooksTokenFromOpenClawConfig();
+  const hooksConfig = loadHooksConfigFromOpenClawConfig();
+  const hooksToken = config.openclawHooksToken || hooksConfig?.token;
   const baseUrl = config.openclawUrl || 'https://localhost:18789';
 
   if (!hooksToken) {
     console.error('[OGP Bridge] OpenClaw hooks token not configured');
     return false;
+  }
+
+  let requestedSessionKey: string | undefined;
+  const trimmedSessionKey = options?.sessionKey?.trim();
+  if (trimmedSessionKey) {
+    if (hooksConfig?.allowRequestSessionKey === true) {
+      if (isAllowedHookSessionKey(trimmedSessionKey, hooksConfig.allowedSessionKeyPrefixes)) {
+        requestedSessionKey = trimmedSessionKey;
+      } else {
+        console.warn('[OGP Bridge] Hook sessionKey override blocked by OpenClaw allowedSessionKeyPrefixes:', trimmedSessionKey);
+      }
+    } else {
+      console.warn(
+        '[OGP Bridge] OpenClaw hooks.allowRequestSessionKey=false; /hooks/agent cannot be pinned to the target session and may run in the default hook session instead.'
+      );
+    }
   }
 
   const ok = await postJson({
@@ -241,9 +291,10 @@ export async function dispatchAgentHook(
       name: 'OGP Federation',
       agentId: config.agentId || 'main',
       wakeMode: 'now',
-      deliver: true,
-      ...(target?.channel ? { channel: target.channel } : {}),
-      ...(target?.to ? { to: target.to } : {})
+      deliver: options?.deliver ?? true,
+      ...(requestedSessionKey ? { sessionKey: requestedSessionKey } : {}),
+      ...(options?.target?.channel ? { channel: options.target.channel } : {}),
+      ...(options?.target?.to ? { to: options.target.to } : {})
     }
   });
 

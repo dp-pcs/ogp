@@ -4,6 +4,33 @@ import { getConfigDir, ensureConfigDir } from '../shared/config.js';
 function getPeersFile() {
     return path.join(getConfigDir(), 'peers.json');
 }
+function createPeerTombstone(peer, status, changedAt = new Date().toISOString()) {
+    return {
+        id: peer.id,
+        displayName: peer.displayName,
+        email: peer.email,
+        gatewayUrl: peer.gatewayUrl,
+        publicKey: peer.publicKey,
+        status,
+        requestedAt: peer.requestedAt,
+        ...(peer.approvedAt ? { approvedAt: peer.approvedAt } : {}),
+        ...(peer.agentId ? { agentId: peer.agentId } : {}),
+        ...(status === 'rejected' ? { rejectedAt: changedAt } : { removedAt: changedAt })
+    };
+}
+export function createPendingPeerRecord(input) {
+    return {
+        id: input.id,
+        displayName: input.displayName,
+        email: input.email,
+        gatewayUrl: input.gatewayUrl,
+        publicKey: input.publicKey,
+        status: 'pending',
+        requestedAt: input.requestedAt ?? new Date().toISOString(),
+        ...(input.agentId ? { agentId: input.agentId } : {}),
+        ...(input.offeredIntents && input.offeredIntents.length > 0 ? { offeredIntents: input.offeredIntents } : {})
+    };
+}
 export function loadPeers() {
     ensureConfigDir();
     const peersFile = getPeersFile();
@@ -112,22 +139,21 @@ export function approvePeer(peerId) {
 }
 export function rejectPeer(peerId) {
     const peers = loadPeers();
-    const peer = peers.find(p => p.id === peerId);
-    if (!peer)
+    const peerIndex = peers.findIndex(p => p.id === peerId);
+    if (peerIndex === -1)
         return false;
-    peer.status = 'rejected';
-    savePeers(peers);
-    return true;
+    peers[peerIndex] = createPeerTombstone(peers[peerIndex], 'rejected');
+    return savePeers(peers);
 }
 export function removePeer(peerId) {
     const peers = loadPeers();
     const peerIndex = peers.findIndex(p => p.id === peerId);
     if (peerIndex === -1)
         return false;
-    // Mark as removed instead of deleting to maintain audit trail
-    peers[peerIndex].status = 'removed';
-    savePeers(peers);
-    return true;
+    // Keep an auditable tombstone, but clear mutable relationship state so it
+    // cannot leak into later federation attempts.
+    peers[peerIndex] = createPeerTombstone(peers[peerIndex], 'removed');
+    return savePeers(peers);
 }
 export function listPeers(status) {
     const peers = loadPeers();

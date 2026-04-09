@@ -71,7 +71,7 @@ The wizard automatically detects installed frameworks and guides you through con
 - **Agent ID** - Which agent owns each gateway (auto-discovers from framework config)
 - Daemon port (default: 18790 for OpenClaw, 18793 for Hermes)
 - Framework URL and API credentials
-- Your public gateway URL (can update later, or use rendezvous)
+- Your public gateway URL (can update later; rendezvous is optional discovery/invite sugar, not a replacement for reachability)
 - Rendezvous configuration (optional, v0.2.14+)
 - Display name and email
 
@@ -328,6 +328,7 @@ When approving or granting scopes:
 
 | Command | Description |
 |---------|-------------|
+| `ogp agent-comms interview` | Re-run the delegated-authority / human-delivery interview |
 | `ogp agent-comms policies [peer-id]` | Show response policies |
 | `ogp agent-comms configure [peer-ids] [options]` | Configure response policies |
 | `ogp agent-comms add-topic <peer> <topic> [options]` | Add topic policy |
@@ -522,17 +523,18 @@ ogp agent-comms activity stan --last 20
 
 All messages are signed with Ed25519 cryptographic signatures to prevent tampering and impersonation.
 
-## Rendezvous — Zero-Config Peer Discovery (v0.2.14+)
+## Rendezvous — Optional Discovery And Invite Layer (v0.2.14+)
 
-OGP's rendezvous service eliminates the need for manual URL exchange and tunnel configuration. Gateways auto-register by public key, enabling peers to discover and connect to each other with a single command.
+Rendezvous is an optional convenience layer for pubkey lookup and short invite codes. It is useful when you want easier onboarding for gateways that are already publicly reachable.
 
-### The Problem It Solves
+### What It Actually Solves
 
-Traditional federation requires both peers to be publicly reachable and manually exchange gateway URLs. With rendezvous:
-- No tunnel setup required (ngrok, Cloudflare Tunnel, port forwarding)
-- No manual URL sharing
-- No URL rotation issues (free ngrok tiers)
-- Automatic peer discovery by public key
+Traditional federation still requires the peer you are trying to reach to be publicly reachable. Rendezvous helps with:
+- pubkey discovery
+- short invite codes instead of sharing long URLs or raw pubkeys
+- reducing manual coordination once each gateway already has a stable public endpoint
+
+Rendezvous does **not** provide NAT traversal, hole punching, or message relay.
 
 ### How It Works
 
@@ -541,7 +543,7 @@ Traditional federation requires both peers to be publicly reachable and manually
 3. Peers can look you up by public key (`GET /peer/:pubkey`) and connect directly
 4. On shutdown, your daemon auto-deregisters (`DELETE /peer/:pubkey`)
 
-The rendezvous server **never touches message content** — it only stores connection hints (IP + port). All OGP messages remain end-to-end signed between peers.
+The rendezvous server **never touches message content** — it only stores connection hints. All OGP messages remain end-to-end signed between peers.
 
 ### Configuration
 
@@ -559,7 +561,7 @@ Add the `rendezvous` block to `~/.ogp/config.json`:
 }
 ```
 
-The setup wizard (`ogp setup`) prompts for rendezvous configuration.
+Rendezvous is optional. OGP works without it if peers can share public URLs directly.
 
 **For cloud/ECS gateways behind load balancers**, set the `OGP_PUBLIC_URL` environment variable to override automatic IP detection:
 
@@ -582,7 +584,7 @@ Or add `publicUrl` to the rendezvous config:
 
 ### Federation Invite Flow (v0.2.15+)
 
-The invite flow removes the need to exchange public keys. One command generates a short-lived token; your peer uses it to connect instantly.
+The invite flow removes the need to exchange public keys manually. One command generates a short-lived token; your peer uses it to connect instantly.
 
 **Generate an invite:**
 ```bash
@@ -618,7 +620,7 @@ Connect to any peer registered on rendezvous by their public key:
 ogp federation connect <pubkey>
 ```
 
-This looks up the peer on the rendezvous server and establishes federation directly.
+This looks up the peer on the rendezvous server and establishes federation directly. The peer still needs a reachable gateway endpoint behind that lookup.
 
 ### Privacy & Self-Hosting
 
@@ -773,11 +775,26 @@ ogp federation request https://peer.example.com --alias alice
 ogp federation request https://peer.example.com
 ```
 
-### 6. OpenClaw Human Delivery (v0.2.3+, refined in v0.4.1+)
+### 6. OpenClaw Human Delivery (v0.2.3+, refined in v0.4.2+)
 
 For OpenClaw-backed agents, OGP now prefers `POST /hooks/agent` for inbound federated work that should be interpreted and surfaced by the local agent. This lets OpenClaw run a real agent turn, apply the configured human-delivery policy, and deliver through the correct channel surface (Telegram, iMessage, etc.).
 
 When OGP needs direct session injection, it uses Gateway RPC with the correct secure WebSocket transport (`wss://`) when the OpenClaw gateway is TLS-enabled.
+
+### 6.1 Delegated-Authority Precedence (v0.4.2)
+
+Policy evaluation now follows a fixed order so more specific rules cannot be silently overwritten. The runtime in `src/daemon/notify.ts` applies:
+1. Legacy `inboundFederationPolicy` mode as a safety fallback
+2. Global default rule from the delegated-authority config
+3. Peer-specific default rule (per-peer overrides)
+4. Global message-class rule (e.g., `agent-work`, `human-relay`, `approval-request`, `status-update`)
+5. Peer message-class override for that same class
+6. Global topic-level rule
+7. Peer topic-level override
+
+Approval requests receive immediate `approval-required` handling and `human-relay` obligations are treated according to their relay mode (deliver, summarize, or approval) before human delivery is asserted. This ordering guarantees peer defaults cannot erase more specific class/topic safeguards, so `human-relay` stays strict even when a trusted peer asks for more autonomy and topic overrides continue to behave predictably.
+
+OGP now tries to pin `/hooks/agent` to the actual human session key when the local OpenClaw `hooks.allowRequestSessionKey` setting allows it (see `~/.openclaw/openclaw.json`). If the value is `false` or the requested key does not match the allowed prefixes, the hook still runs but falls back to the default hook session, so downstream heuristics must still parse peer identity from the injected payload. Native sender identity parity in Telegram therefore remains a known limitation for `v0.4.2`; the runtime will log a warning whenever it cannot request a session override so that the human knows the limitation is intentional.
 
 ### 7. Enhanced Daemon Status (v0.2.3+)
 
@@ -882,6 +899,9 @@ The `off` level enables a default-deny security posture. When a topic hits `off`
 # View all policies
 ogp agent-comms policies
 
+# Re-run the delegated-authority / human-delivery interview
+ogp agent-comms interview
+
 # View policies for a specific peer
 ogp agent-comms policies stan
 
@@ -975,7 +995,7 @@ Which agent owns this gateway? (number or ID) [1]:
 You can also specify a custom agent ID if needed.
 ```
 
-### Human Delivery Preferences (v0.4.1+)
+### Human Delivery Preferences (v0.4.2+)
 
 OGP has two separate questions to answer for inbound federation traffic:
 
@@ -1011,9 +1031,18 @@ For OpenClaw specifically, this configuration feeds the `/hooks/agent` delivery 
 }
 ```
 
-When you run `ogp setup`, the wizard now asks for both:
+When you run `ogp setup`, the wizard asks for both:
 - the primary human delivery target for OGP followups
 - the default inbound federation handling mode
+
+If the user wants to revisit just this part later, use:
+
+```bash
+ogp --for openclaw agent-comms interview
+ogp --for hermes agent-comms interview
+```
+
+That command re-runs the delegated-authority / human-delivery interview for the active framework without repeating the rest of first-time setup.
 
 ### Notification Routing (v0.2.28+)
 
@@ -1085,11 +1114,13 @@ If you are debugging OpenClaw integration directly:
 
 ### State Files
 
-- `~/.ogp/keypair.json` - Ed25519 keypair (keep secure! migrated to macOS Keychain on v0.2.13+)
+- `~/.ogp/keypair.json` - Public key cache for the OpenClaw instance. On macOS the private key lives in an instance-specific Keychain entry; on non-macOS the file contains the full keypair.
 - `~/.ogp/peers.json` - Federated peer list with scope grants
 - `~/.ogp/intents.json` - Intent registry (built-in + custom)
 - `~/.ogp/projects.json` - Project contexts and contributions
 - `~/.ogp/agent-comms-config.json` - Response policies and activity log
+
+On macOS, deleting `keypair.json` by itself does **not** rotate the gateway identity if the matching private key is still present in Keychain. Use `ogp setup --reset-keypair` when you intentionally want a new identity.
 
 ## Skills (Claude Code)
 
@@ -1105,10 +1136,10 @@ ogp-install-skills
 |-------|---------|
 | **ogp** | Core protocol: federation setup, peer management, sending messages |
 | **ogp-expose** | Tunnel setup: cloudflared/ngrok configuration |
-| **ogp-agent-comms** | Interactive wizard: configure response policies per-peer |
+| **ogp-agent-comms** | Interactive wizard: configure response policies plus delegated-authority / human-delivery interview |
 | **ogp-project** | Agent-aware project context: interviews, logging, cross-peer summarization |
 
-Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill provides an interactive wizard for multi-peer policy configuration. The `ogp-project` skill enables conversational project management with context interviews and proactive logging.
+Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill now uses `ogp agent-comms interview` as the canonical conversational path for delegated-authority / human-delivery configuration, plus the existing per-peer policy commands. The `ogp-project` skill enables conversational project management with context interviews and proactive logging.
 
 ## Documentation
 
@@ -1122,7 +1153,7 @@ Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill pr
 - [Federation Flow](./docs/federation-flow.md) - How federation works internally
 - [Scope Negotiation](./docs/scopes.md) - Per-peer scope configuration (v0.2.0)
 - [Agent Communications](./docs/agent-comms.md) - Agent-to-agent messaging (v0.2.0)
-- [Rendezvous & Invite Flow](./docs/rendezvous.md) - Zero-config peer discovery (v0.2.14+)
+- [Rendezvous & Invite Flow](./docs/rendezvous.md) - Optional discovery and invite service (v0.2.14+)
 
 ### Advanced
 - [Multi-Framework Design](./docs/MULTI-FRAMEWORK-DESIGN.md) - Design principles for multi-framework support
@@ -1138,7 +1169,9 @@ Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill pr
 - **Nonce tracking**: Prevents replay attacks
 
 **Best practices:**
-- Keep `~/.ogp/keypair.json` secure with proper file permissions (`chmod 600`)
+- Treat `~/.ogp/keypair.json` as identity material even when it contains only the public key cache on macOS.
+- On macOS, remember the private key source of truth is the instance-specific Keychain entry, not `keypair.json`; use `ogp setup --reset-keypair` for intentional rotation.
+- On non-macOS, keep `~/.ogp/keypair.json` secure with proper file permissions (`chmod 600`)
 - Verify peer identity out-of-band before approving federation requests
 - Always use HTTPS tunnels (never expose raw HTTP)
 - Monitor OpenClaw logs for suspicious peer activity

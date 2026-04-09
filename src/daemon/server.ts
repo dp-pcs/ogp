@@ -8,7 +8,7 @@ const _require = createRequire(import.meta.url);
 const OGP_VERSION: string = _require('../../package.json').version;
 import { requireConfig, loadConfig, type OGPConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey, getPrivateKey } from './keypair.js';
-import { addPeer, getPeer, approvePeer, listPeers, updatePeer, updatePeerReceivedScopes, type Peer, removePeer, loadPeers, savePeers } from './peers.js';
+import { addPeer, getPeer, approvePeer, listPeers, updatePeer, updatePeerReceivedScopes, type Peer, removePeer, createPendingPeerRecord } from './peers.js';
 import { handleMessage, type FederationMessage } from './message-handler.js';
 import { signObject, verify } from '../shared/signing.js';
 import { notifyOpenClaw } from './notify.js';
@@ -20,6 +20,58 @@ import type { ScopeBundle } from './scopes.js';
 import { loadIntents } from './intent-registry.js';
 
 let server: any = null;
+let shutdownInProgress = false;
+
+interface ShutdownDeps {
+  disconnectBridge: () => void;
+  stopDoormanCleanup: () => void;
+  stopReplyCleanup: () => void;
+  stopRendezvous: () => Promise<void>;
+  getServer: () => { close: (cb: (error?: Error) => void) => void } | null;
+  exit: (code: number) => never;
+  setTimer: typeof setTimeout;
+  clearTimer: typeof clearTimeout;
+  logError: (message?: any, ...optionalParams: any[]) => void;
+}
+
+export function createGracefulShutdownHandler(deps: ShutdownDeps) {
+  return async (signal: 'SIGTERM' | 'SIGINT') => {
+    if (shutdownInProgress) {
+      return;
+    }
+    shutdownInProgress = true;
+
+    deps.disconnectBridge();
+    deps.stopDoormanCleanup();
+    deps.stopReplyCleanup();
+    await deps.stopRendezvous().catch(() => {});
+
+    const activeServer = deps.getServer();
+    if (!activeServer) {
+      deps.exit(0);
+      return;
+    }
+
+    const forceExitTimer = deps.setTimer(() => {
+      deps.exit(1);
+    }, 5000);
+    forceExitTimer.unref?.();
+
+    activeServer.close((error?: Error) => {
+      deps.clearTimer(forceExitTimer);
+      if (error) {
+        deps.logError(`[OGP] Error during ${signal} shutdown:`, error);
+        deps.exit(1);
+        return;
+      }
+      deps.exit(0);
+    });
+  };
+}
+
+export function resetGracefulShutdownStateForTests(): void {
+  shutdownInProgress = false;
+}
 
 /**
  * Get the daemon PID file path (computed dynamically based on OGP_HOME)
@@ -36,6 +88,7 @@ function getDaemonLogFile(): string {
 }
 
 export function startServer(config?: OGPConfig, background = false): void {
+  shutdownInProgress = false;
   const cfg = config || requireConfig();
 
   // If background mode requested, fork and exit parent
@@ -101,17 +154,7 @@ export function startServer(config?: OGPConfig, background = false): void {
       const existingPeer = getPeer(peerIdFromKey);
       if (existingPeer) {
         // Allow re-federation if previously removed or rejected
-        if (existingPeer.status === 'removed' || existingPeer.status === 'rejected') {
-          // Reset to pending so the request can be approved fresh
-          const prevStatus = existingPeer.status;
-          existingPeer.status = 'pending';
-          existingPeer.requestedAt = new Date().toISOString();
-          existingPeer.displayName = peer.displayName;
-          existingPeer.email = peer.email;
-          existingPeer.gatewayUrl = peer.gatewayUrl;
-          savePeers(loadPeers().map((p: Peer) => p.id === existingPeer.id ? existingPeer : p));
-          console.log(`[OGP] Re-federation request from ${peer.displayName} (${peerIdFromKey}) — reset from ${prevStatus} to pending`);
-        } else {
+        if (existingPeer.status !== 'removed' && existingPeer.status !== 'rejected') {
           return res.status(200).json({ 
             received: true, 
             status: 'already-pending-or-approved',
@@ -120,29 +163,28 @@ export function startServer(config?: OGPConfig, background = false): void {
         }
       }
 
-      const peerData: Peer = {
+      // Store offered intents if provided (BUILD-110: intent negotiation)
+      const offeredIntents = req.body.offeredIntents as string[] | undefined;
+      const peerData: Peer = createPendingPeerRecord({
         id: peerIdFromKey,  // Always use derived ID, never sender's
         displayName: peer.displayName,
         email: peer.email,
         gatewayUrl: peer.gatewayUrl,
         publicKey: peer.publicKey,
-        status: 'pending',
-        requestedAt: new Date().toISOString(),
+        offeredIntents,
         // BUILD-115: Record which agent owns this federation relationship
         agentId: cfg.agentId
-      };
-
-      // Store offered intents if provided (BUILD-110: intent negotiation)
-      const offeredIntents = req.body.offeredIntents as string[] | undefined;
+      });
       if (offeredIntents && offeredIntents.length > 0) {
-        peerData.offeredIntents = offeredIntents;
         console.log(`[OGP] Peer ${peer.displayName} offers intents: ${offeredIntents.join(', ')}`);
       }
 
-      // BUILD-111 CRITICAL FIX: Actually persist the peer to disk!
-      // This was missing - the peer was created but never saved
       addPeer(peerData);
-      console.log(`[OGP] Peer ${peer.displayName} (${peerIdFromKey}) added to peers.json`);
+      if (existingPeer && (existingPeer.status === 'removed' || existingPeer.status === 'rejected')) {
+        console.log(`[OGP] Re-federation request from ${peer.displayName} (${peerIdFromKey}) — reset from ${existingPeer.status} to pending with fresh peer state`);
+      } else {
+        console.log(`[OGP] Peer ${peer.displayName} (${peerIdFromKey}) added to peers.json`);
+      }
 
       console.log(`[OGP] Federation request from ${peer.displayName} (${peerIdFromKey})`);
 
@@ -159,11 +201,16 @@ export function startServer(config?: OGPConfig, background = false): void {
       const notificationPayload = {
         text: notificationText,
         sessionKey: 'agent:main:main', // Default main agent session
+        peerId: peerData.id,
+        peerDisplayName: peerData.displayName,
+        intent: 'federation-request',
+        topic: 'federation',
+        messageClass: 'approval-request' as const,
         metadata: {
           ogp: {
             type: 'federation_request',
             peer: {
-              id: peer.id,
+              id: peerData.id,
               displayName: peer.displayName,
               email: peer.email,
               gatewayUrl: peer.gatewayUrl
@@ -171,7 +218,7 @@ export function startServer(config?: OGPConfig, background = false): void {
             requestedAt: peerData.requestedAt,
             federationType: 'bidirectional',
             offeredIntents: peerData.offeredIntents || ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'],
-            approvalCommand: `ogp federation approve ${peer.id}`
+            approvalCommand: `ogp federation approve ${peerData.id}`
           }
         }
       };
@@ -268,6 +315,46 @@ export function startServer(config?: OGPConfig, background = false): void {
 
       approvePeer(peer.id);
       console.log(`[OGP] Federation approved by ${peer.displayName} (v${protocolVersion})`);
+
+      const approvalNotificationText = `[OGP Federation Approved] ${peer.displayName} (${peer.id}) approved your federation request\n` +
+        `Gateway: ${peer.gatewayUrl}\n` +
+        `Protocol: v${protocolVersion}\n` +
+        `Status: Federation is now active.`;
+
+      const approvalNotificationPayload = {
+        text: approvalNotificationText,
+        sessionKey: 'agent:main:main',
+        peerId: peer.id,
+        peerDisplayName: peer.displayName,
+        intent: 'status-update',
+        topic: 'federation',
+        messageClass: 'status-update' as const,
+        metadata: {
+          ogp: {
+            type: 'federation_approved',
+            peer: {
+              id: peer.id,
+              displayName: peer.displayName,
+              email: peer.email,
+              gatewayUrl: peer.gatewayUrl
+            },
+            approvedAt: new Date().toISOString(),
+            protocolVersion,
+            scopeGrantsReceived: Boolean(scopeGrants)
+          }
+        }
+      };
+
+      try {
+        const notified = await notifyOpenClaw(approvalNotificationPayload);
+        if (notified) {
+          console.log(`[OGP] Agent session proactively notified of federation approval by ${peer.displayName}`);
+        } else {
+          console.warn(`[OGP] Failed to proactively notify agent session of federation approval by ${peer.displayName}`);
+        }
+      } catch (error) {
+        console.error(`[OGP] Error notifying agent session of approval:`, error);
+      }
 
       // BUILD-99/100: Auto-grant default scopes back to the approving peer if they have none yet
       // This ensures bidirectional scope negotiation happens in a single handshake
@@ -382,6 +469,11 @@ export function startServer(config?: OGPConfig, background = false): void {
       const notificationPayload = {
         text: notificationText,
         sessionKey: 'agent:main:main',
+        peerId: peer.id,
+        peerDisplayName: peer.displayName,
+        intent: 'status-update',
+        topic: 'federation',
+        messageClass: 'status-update' as const,
         metadata: {
           ogp: {
             type: 'federation_removed',
@@ -527,16 +619,22 @@ export function startServer(config?: OGPConfig, background = false): void {
     }
   });
 
-  // Handle graceful shutdown — deregister from rendezvous and cleanup connections
-  const gracefulShutdown = async () => {
-    disconnectBridge();
-    await stopRendezvous();
-    stopDoormanCleanup();
-    stopReplyCleanup();
-  };
+  // Handle graceful shutdown — deregister from rendezvous, stop timers, and
+  // close the HTTP listener so the daemon actually exits.
+  const gracefulShutdown = createGracefulShutdownHandler({
+    disconnectBridge,
+    stopDoormanCleanup,
+    stopReplyCleanup,
+    stopRendezvous,
+    getServer: () => server,
+    exit: (code: number) => process.exit(code),
+    setTimer: setTimeout,
+    clearTimer: clearTimeout,
+    logError: console.error
+  });
 
-  process.once('SIGTERM', () => { gracefulShutdown().catch(() => {}); });
-  process.once('SIGINT', () => { gracefulShutdown().catch(() => {}); });
+  process.once('SIGTERM', () => { gracefulShutdown('SIGTERM').catch(() => process.exit(1)); });
+  process.once('SIGINT', () => { gracefulShutdown('SIGINT').catch(() => process.exit(1)); });
 }
 
 export function stopServer(): void {
