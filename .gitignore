@@ -8,6 +8,7 @@ node_modules/
 *.log
 daemon.log
 tunnel.log
+*.tgz
 
 # macOS
 .DS_Store
