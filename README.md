@@ -773,9 +773,11 @@ ogp federation request https://peer.example.com --alias alice
 ogp federation request https://peer.example.com
 ```
 
-### 6. Telegram Integration (v0.2.3+)
+### 6. OpenClaw Human Delivery (v0.2.3+, refined in v0.4.1+)
 
-Federation requests fire OpenClaw notifications via sessions_send, delivering directly to Telegram.
+For OpenClaw-backed agents, OGP now prefers `POST /hooks/agent` for inbound federated work that should be interpreted and surfaced by the local agent. This lets OpenClaw run a real agent turn, apply the configured human-delivery policy, and deliver through the correct channel surface (Telegram, iMessage, etc.).
+
+When OGP needs direct session injection, it uses Gateway RPC with the correct secure WebSocket transport (`wss://`) when the OpenClaw gateway is TLS-enabled.
 
 ### 7. Enhanced Daemon Status (v0.2.3+)
 
@@ -986,6 +988,11 @@ Those should not be inferred from the currently active conversation.
 - **`humanDeliveryTarget`**: Explicit human-facing destination for OGP-triggered followups. Examples: `telegram:123456789` or a raw session key like `agent:main:telegram:direct:123456789`.
 - **`inboundFederationPolicy.mode`**: Default behavior for how the local agent should handle inbound federated requests.
 
+For OpenClaw specifically, this configuration feeds the `/hooks/agent` delivery path. In other words:
+- `humanDeliveryTarget` tells OGP where human-facing followups should go
+- `inboundFederationPolicy.mode` tells the local agent how to treat federated requests once they arrive
+- OGP should not infer either of those from "whatever session is active right now"
+
 **Supported behavior modes:**
 - **`forward`**: Tell me everything. Forward inbound federated items to my configured channel.
 - **`summarize`**: Summarize and surface only important, actionable, or uncertain items.
@@ -1056,6 +1063,14 @@ This allows you to:
 - Explicitly separate "the agent that owns this gateway" from "the human-facing channel for OGP followups"
 - Maintain backward compatibility with existing single-agent setups
 - Gradually migrate to multi-agent routing without breaking existing configurations
+
+### OpenClaw Transport Notes
+
+If you are debugging OpenClaw integration directly:
+
+- **Hooks path**: `https://localhost:18789/hooks/agent` is the preferred local delivery path for human-facing federated work.
+- **Gateway RPC path**: when using `openclaw gateway call` against a TLS-enabled local gateway, use `wss://localhost:18789`, not `ws://localhost:18789`.
+- A plain session injection succeeding does not necessarily mean the agent has interpreted the task the way you want; `/hooks/agent` is the path designed for that agentic behavior.
 
 ### Environment Variables
 
@@ -1156,7 +1171,7 @@ src/
     projects.ts       # Project storage and management (v0.2.0+)
     intent-registry.ts # Intent definitions and custom registry
     message-handler.ts # Message verification and routing
-    notify.ts         # OpenClaw integration (sessions_send + webhooks)
+    notify.ts         # OpenClaw/Hermes delivery backends
   cli/
     setup.ts          # Setup wizard
     federation.ts     # Federation commands (scopes, agent-comms)
@@ -1175,29 +1190,19 @@ skills/
 
 ## Known Issues
 
-### OpenClaw Message Delivery (BUG-2 - Partial Fix)
+### OpenClaw Delivery Model
 
-**Status**: Messages deliver to agents but sender identity is lost ⚠️
+**Current implementation:**
+- **Primary:** `POST /hooks/agent` for inbound federated requests that should be processed by the local OpenClaw agent
+- **Fallback / sync:** `openclaw gateway call ... sessions.send` over `wss://` when direct session injection is needed
 
-**Symptom**: When OGP federation messages are sent to OpenClaw agents, the message content appears in the agent's conversation but the sender shows as "cli" instead of the actual peer identity (e.g., "Apollo @ Hermes").
+Why this split exists:
+- `/hooks/agent` is the right primitive for "an external federated task arrived; let the agent interpret it, act on it, and deliver the result through the configured human channel."
+- `sessions.send` is still useful for direct session injection and compact synchronization notes, but it is not the primary delivery mechanism for human-facing federated work.
 
-**Impact**:
-- ✅ Agents CAN see and read message content
-- ✅ Messages appear in correct channel (Telegram, iMessage, etc.)
-- ❌ Agents CANNOT identify the sender as a federated peer
-- ❌ Direct peer-to-peer replies not possible
-
-**Workaround**: Messages are formatted with peer context in the content itself:
-```
-[OGP Federation] From Apollo @ Hermes (agent-comms/general):
-Your message here
-```
-
-Agents can parse this format to understand which peer sent the message and reference it in their responses to the human.
-
-**Current Implementation**: Uses `openclaw gateway call ... sessions.send` RPC via CLI bridge.
-
-**Investigation**: See `CURRENT_WORK.md` for detailed technical investigation and next steps.
+Important nuance:
+- OpenClaw may still render direct session injections with sender metadata like `cli`, so OGP continues to include peer identity in message content where needed.
+- Hook-run awareness and human-DM continuity are related but not identical. OGP can mirror a compact sync note into the DM session, but the important success criterion is correct delivery and behavior, not whether raw internal transport artifacts are visible in the user-facing transcript.
 
 ## License
 

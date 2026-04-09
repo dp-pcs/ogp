@@ -1,6 +1,6 @@
 ---
 skill_name: ogp-agent-comms
-version: 0.4.0
+version: 0.5.0
 description: Interactive wizard to configure agent-to-agent communication policies (updated for multi-framework `--for` workflows, OGP 0.2.24+ peer identity, and 0.2.28+ multi-agent routing)
 trigger: Use when the user wants to configure how their agent responds to incoming agent-comms messages from federated peers
 ---
@@ -47,6 +47,8 @@ When using `notifyTargets` in your OGP config, federation messages can be routed
 
 **Human delivery behavior (v0.4.1+):**
 Use `humanDeliveryTarget` plus `inboundFederationPolicy.mode` to tell the agent whether it should forward everything, summarize, act autonomously, or wait for approval before replying.
+
+On OpenClaw, human-facing federated work should be handled through the platform's hook-driven agent turn (`/hooks/agent`). Direct `sessions.send` injection is a lower-level fallback or sync mechanism, not the primary behavioral path.
 
 **Multi-Framework note:** Policies are framework-local. Use `ogp --for openclaw ...` for OpenClaw state and `ogp --for hermes ...` for Hermes state.
 
@@ -284,7 +286,7 @@ Global defaults live in the active framework config, for example `~/.ogp/config.
 When an agent-comms message arrives:
 
 1. **Doorman** checks if the intent/topic is allowed (scope grants)
-2. **Your agent** receives the message via notification
+2. **Your agent** receives the message via the local platform backend
 3. **Your agent** looks up the response policy:
    - Check peer-specific policy for this topic
    - Fall back to global policy for this topic
@@ -294,6 +296,8 @@ When an agent-comms message arrives:
    - `summary`: Brief, high-level response
    - `escalate`: "Let me check with my human and get back to you"
    - `deny`: "I'm not able to discuss that topic"
+
+**OpenClaw delivery path:** OGP should hand human-facing federated work to OpenClaw through `/hooks/agent`, letting the agent run a real turn and deliver via the configured human channel. A compact `sessions.send` note may still be used to keep session state synchronized, but that is secondary.
 
 **Multi-Agent Routing:** When `notifyTargets` is configured, messages are routed to the appropriate agent who then applies their own policies.
 
@@ -360,6 +364,13 @@ These live in config rather than the `agent-comms` CLI, but they are part of the
 - `autonomous` — act independently unless blocked or explicitly told to relay something
 - `approval-required` — do not act or reply until the human approves
 
+Make the user's intent explicit during setup and documentation. Examples:
+
+- "Tell me everything that comes in from peers."
+- "Summarize most things, but escalate if you need me."
+- "Act on your own unless you are blocked."
+- "Never reply to a peer without clearing it with me first."
+
 ### Multi-Agent Setup
 
 With `notifyTargets` configured in `~/.ogp/config.json`:
@@ -404,6 +415,8 @@ ogp --for openclaw agent-comms configure 302a300506032b65 --topics "..." --level
 ### Multi-Agent Routing Issues
 
 If notifications aren't reaching the right agent:
-1. Check `notifyTargets` in `~/.ogp/config.json`
-2. Verify the target format: `telegram:chat_id` or `session:session_id`
-3. Check OpenClaw hook configuration for proper routing
+1. Check `notifyTargets` and `humanDeliveryTarget` in the active framework config
+2. Verify the target format: `telegram:chat_id` or a raw session key like `agent:main:telegram:direct:<chat-id>`
+3. For OpenClaw, verify hooks are enabled and the hook token is present
+4. For OpenClaw Gateway RPC debugging, use `wss://localhost:18789` against a TLS-enabled local gateway, not `ws://`
+5. Remember that a successful direct session injection is not the same thing as the agent correctly handling a human-delivery obligation

@@ -290,7 +290,7 @@ Bob's OGP daemon (doorman):
 3. **Checks rate limits** - Has Alice exceeded their quota? (v0.2.0+)
 4. Verifies signature using Alice's public key
 5. Checks intent exists in registry
-6. Forwards to Bob's OpenClaw via webhook or sessions_send (v0.2.3+)
+6. Forwards to Bob's OpenClaw via the local platform delivery backend
 
 If scope check fails:
 - Response: `403 Forbidden`
@@ -303,51 +303,41 @@ If rate limit exceeded:
 
 ### OpenClaw Notification
 
-v0.2.3+ prioritizes **sessions_send** over system events for better Telegram integration:
+For human-facing federated work, the OpenClaw reference path is now an agent-turn hook rather than raw session injection:
 
 ```http
-POST /api/sessions/send HTTP/1.1
+POST /hooks/agent HTTP/1.1
 Host: bob-openclaw.local:18789
-Authorization: Bearer bob-token
+Authorization: Bearer <hooks-token>
 Content-Type: application/json
 
 {
-  "sessionKey": "agent:main:main",
-  "message": "[OGP] Message from Alice: Hello, Bob!",
-  "ogp": {
-    "from": "peer-alice",
-    "intent": "message",
-    "nonce": "550e8400-e29b-41d4-a716-446655440000",
-    "payload": {
-      "text": "Hello, Bob!"
+  "agentId": "main",
+  "text": "[OGP Federation] Alice says: Hello, Bob!",
+  "metadata": {
+    "ogp": {
+      "from": "peer-alice",
+      "intent": "message",
+      "nonce": "550e8400-e29b-41d4-a716-446655440000",
+      "payload": {
+        "text": "Hello, Bob!"
+      }
     }
   }
 }
 ```
 
-Fallback to system event if sessions_send is unavailable:
+That lets OpenClaw run a real agent turn, apply the configured human-delivery policy, and decide how to surface the result to the human.
 
-```http
-POST /api/system-event HTTP/1.1
-Host: bob-openclaw.local:18789
-Authorization: Bearer bob-token
-Content-Type: application/json
+If OGP needs direct session injection for fallback or synchronization, it uses Gateway RPC against the TLS-enabled local gateway:
 
-{
-  "text": "[OGP] Message from Alice: Hello, Bob!",
-  "sessionKey": "agent:main:main",
-  "ogp": {
-    "from": "peer-alice",
-    "intent": "message",
-    "nonce": "550e8400-e29b-41d4-a716-446655440000",
-    "payload": {
-      "text": "Hello, Bob!"
-    }
-  }
-}
+```bash
+openclaw gateway call --url wss://localhost:18789 sessions.send ...
 ```
 
-Bob's OpenClaw agent sees (via Telegram or system notification):
+`sessions.send` is still useful, but it is not the primary delivery primitive for human-facing federated work.
+
+Bob's OpenClaw agent sees the resulting human-facing output in the configured channel:
 
 ```
 [OGP] Message from Alice: Hello, Bob!
