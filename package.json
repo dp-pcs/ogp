@@ -6,8 +6,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "ogp": "./dist/cli.js",
-    "ogp-install-skills": "./scripts/install-skills.js"
+    "ogp": "dist/cli.js",
+    "ogp-install-skills": "scripts/install-skills.js"
   },
   "scripts": {
     "build": "tsc",
@@ -31,7 +31,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dp-pcs/ogp.git"
+    "url": "git+https://github.com/dp-pcs/ogp.git"
   },
   "homepage": "https://github.com/dp-pcs/ogp#readme",
   "bugs": {
