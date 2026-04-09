@@ -1,6 +1,6 @@
 ---
 skill_name: ogp
-version: 2.4.0
+version: 2.5.0
 description: >
   OGP (Open Gateway Protocol) — federated agent communication, peer management,
   and project collaboration across OpenClaw and Hermes gateways. Use when the user
@@ -153,9 +153,12 @@ Which agent owns this gateway? (number or ID) [1]:
 
 The `notifyTargets` field enables per-agent notification routing. When OGP sends notifications to your OpenClaw instance, it routes to specific agents based on the message context.
 
+For OpenClaw specifically, human-facing federated work is now handled primarily through `POST /hooks/agent`, not by guessing the "current" session. `notifyTargets` answers "which local agent owns this work?" while `humanDeliveryTarget` answers "where should the human-facing followup go?"
+
 **Configuration fields:**
 - **`notifyTarget`** (legacy, string): Single notification target for all messages. Maintained for backward compatibility.
 - **`notifyTargets`** (object): Map of agent names to notification targets. Example: `{"main": "telegram:...", "scribe": "telegram:..."}`
+- **`humanDeliveryTarget`** (preferred for human-facing followups): Explicit destination for OGP-triggered relay obligations and summaries.
 
 **Example configuration with multiple agents:**
 
@@ -170,6 +173,10 @@ The `notifyTargets` field enables per-agent notification routing. When OGP sends
   "stateDir": "~/.ogp",
   "agentId": "main",
   "notifyTarget": "telegram:123456789",
+  "humanDeliveryTarget": "telegram:123456789",
+  "inboundFederationPolicy": {
+    "mode": "summarize"
+  },
   "notifyTargets": {
     "main": "telegram:123456789",
     "scribe": "telegram:987654321",
@@ -182,12 +189,14 @@ The `notifyTargets` field enables per-agent notification routing. When OGP sends
 
 When routing notifications, OGP resolves the target in this order:
 
-1. **`notifyTargets[agent]`** — If the agent is specified and exists in `notifyTargets`, use that target
-2. **`notifyTarget`** — Fall back to the legacy single target for backward compatibility
-3. **Default** — If neither is set, the notification is sent without a specific target (OpenClaw routes to the default channel)
+1. **`humanDeliveryTarget`** — If set, use it as the explicit human-facing OGP destination
+2. **`notifyTargets[agent]`** — If the agent is specified and exists in `notifyTargets`, use that target
+3. **`notifyTarget`** — Fall back to the legacy single target for backward compatibility
+4. **Default** — If none are set, OGP falls back to the agent's default session
 
 This allows you to:
 - Route federation messages to different agents based on context
+- Explicitly separate "the agent that owns this gateway" from "the human-facing channel for OGP followups"
 - Maintain backward compatibility with existing single-agent setups
 - Gradually migrate to multi-agent routing without breaking existing configurations
 
@@ -220,7 +229,13 @@ Example:
 }
 ```
 
-When a peer says "tell David X", that is a delivery obligation. Do not claim delivery unless you actually used the configured human-facing channel.
+For OpenClaw specifically:
+
+- OGP uses `POST /hooks/agent` as the primary delivery path for inbound federated work that the local agent should interpret and handle.
+- If OGP needs direct session injection, it uses Gateway RPC with `wss://` when the OpenClaw gateway is TLS-enabled.
+- Do not claim delivery unless you actually used the configured human-facing channel or the platform confirmed the hook task completed.
+
+When a peer says "tell David X", that is a delivery obligation. Do not treat it as satisfied just because the information appeared in some other active session.
 
 ---
 
