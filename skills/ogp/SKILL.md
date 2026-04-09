@@ -6,7 +6,7 @@ description: >
   and project collaboration across OpenClaw and Hermes gateways. Use when the user
   asks to establish federation with a peer, send agent-to-agent messages, check peer
   status, manage federation scopes, clean stale federation state, set up cross-gateway
-  project collaboration, or use the rendezvous/invite flow for zero-config peer discovery.
+  project collaboration, or use the optional rendezvous/invite flow for discovery and short join codes.
 trigger: Use when the user asks to federate with a peer, connect to another gateway,
   send an OGP message, check peer status, grant scopes, manage OGP federation relationships,
   generate an invite code, or accept a federation invite.
@@ -30,6 +30,7 @@ OGP must be installed and running:
 ```bash
 npm install -g @dp-pcs/ogp
 ogp setup          # interactive first-time setup
+ogp agent-comms interview  # revisit delegated-authority / human-delivery behavior
 ogp config show    # verify enabled frameworks + default
 ogp start          # starts the default framework
 ogp status         # verify daemon is running
@@ -61,6 +62,22 @@ node dist/cli.js --for openclaw status
 node dist/cli.js --for hermes federation list
 ```
 
+### CLI Discovery Shortcuts
+
+When the user is unsure which command to run, teach the built-in CLI discovery path before inventing custom guidance:
+
+```bash
+ogp ?                         # top-level command map
+ogp federation approve ?      # contextual help for approval
+ogp config show               # inspect configured/default framework
+ogp config set-default openclaw
+ogp completion install zsh    # or bash
+```
+
+- Prefer `ogp config show` first when framework context is unclear.
+- Prefer `ogp config set-default <framework>` when the user keeps forgetting `--for`.
+- Mention `ogp completion install <shell>` for users who will work with OGP often.
+
 ---
 
 ## Canonical Public Endpoint Rule
@@ -80,10 +97,11 @@ The public key on each discovery card must match the intended framework identity
 
 ---
 
-## Zero-Config Federation (v0.2.14+) ⭐ PREFERRED
+## Optional Rendezvous Discovery (v0.2.14+)
 
-The rendezvous server (`rendezvous.elelem.expert`) enables peer discovery by public key.
-No port forwarding, no tunnel accounts, no manual URL sharing.
+The rendezvous server (`rendezvous.elelem.expert`) is an optional discovery/invite service.
+Use it for pubkey lookup or short invite codes when peers are already publicly reachable.
+Do not treat it as NAT traversal or a substitute for a real public gateway URL.
 
 ### Invite flow (easiest — v0.2.15+)
 
@@ -103,7 +121,7 @@ ogp federation accept <token>
 ### Connect by public key (v0.2.14+)
 ```bash
 ogp federation connect <pubkey>
-# Looks up peer's current IP:port from rendezvous, connects directly
+# Looks up the peer's current connection hints from rendezvous, then connects directly
 ```
 
 ### Enable rendezvous in config
@@ -200,7 +218,7 @@ This allows you to:
 - Maintain backward compatibility with existing single-agent setups
 - Gradually migrate to multi-agent routing without breaking existing configurations
 
-### Human Delivery Preferences (v0.4.1+)
+### Human Delivery Preferences (v0.4.2+)
 
 Do not assume that "whatever conversation is currently active" is the right place to satisfy a peer's request to notify the human.
 
@@ -234,6 +252,15 @@ For OpenClaw specifically:
 - OGP uses `POST /hooks/agent` as the primary delivery path for inbound federated work that the local agent should interpret and handle.
 - If OGP needs direct session injection, it uses Gateway RPC with `wss://` when the OpenClaw gateway is TLS-enabled.
 - Do not claim delivery unless you actually used the configured human-facing channel or the platform confirmed the hook task completed.
+
+OGP now resolves delegated-authority rules when deciding how to treat a federated request: global defaults, peer defaults, message-class rules (`human-relay`, `agent-work`, `approval-request`, `status-update`), and topic overrides each layer in to determine whether to forward, summarize, act autonomously, or wait for approval. Hooks will only run with the exact human session key when OpenClaw has `hooks.allowRequestSessionKey=true` and the requested key matches `hooks.allowedSessionKeyPrefixes`; otherwise OGP logs a warning and runs in the default hook session, meaning Telegram delivery still looks like injected/`cli` content, which is the accepted `v0.4.2` limitation documented in the README/changelog.
+
+For first-time configuration, use `ogp setup`. To revisit only the delegated-authority / human-delivery interview later, use:
+
+```bash
+ogp --for openclaw agent-comms interview
+ogp --for hermes agent-comms interview
+```
 
 When a peer says "tell David X", that is a delivery obligation. Do not treat it as satisfied just because the information appeared in some other active session.
 
@@ -446,8 +473,8 @@ printf '[]\n' > ~/.ogp-hermes/peers.json
 | `~/.ogp-meta/config.json` | Enabled frameworks, aliases, and default framework |
 | `~/.ogp/config.json` | OpenClaw gateway config |
 | `~/.ogp-hermes/config.json` | Hermes gateway config |
-| `~/.ogp/keypair.json` | OpenClaw public key file (private key is in Keychain on macOS) |
-| `~/.ogp-hermes/keypair.json` | Hermes public key file |
+| `~/.ogp/keypair.json` | OpenClaw public key cache on macOS; full keypair file on non-macOS |
+| `~/.ogp-hermes/keypair.json` | Hermes public key cache on macOS; full keypair file on non-macOS |
 | `~/.ogp/peers.json` | OpenClaw federation peers + scopes |
 | `~/.ogp-hermes/peers.json` | Hermes federation peers + scopes |
 | `~/.ogp/projects.json` | OpenClaw project data + contributions |
@@ -463,6 +490,7 @@ printf '[]\n' > ~/.ogp-hermes/peers.json
 
 - **Peer Identity (OGP 0.2.24+):** Peers are identified by the first 16 characters of their Ed25519 public key (e.g., `302a300506032b65`). This is stable even when tunnel URLs rotate — the public key is the identity, the URL is just the address.
 - **Framework isolation matters:** In multi-framework mode, OpenClaw and Hermes must keep distinct state directories, keypairs, peers, projects, and logs. Always use `--for` when the active framework is not obvious.
+- **macOS key storage:** The private key source of truth is the instance-specific Keychain entry derived from the framework config dir. Deleting `keypair.json` alone does not rotate identity; use `ogp setup --reset-keypair` when you actually want a new keypair.
 - **Intent Negotiation (OGP 0.2.24+):** Federation requests include `offeredIntents`. Approval automatically mirrors those intents back to the requester, creating symmetric capabilities by default.
 - **Scopes are bilateral:** Each side independently grants what the other can call. OGP 0.2.24+ auto-mirrors offered intents on approval.
 - **Project isolation:** Projects are scoped to their member list. Full mesh federation does NOT give all peers access to all projects. A peer only sees projects they are a member of.

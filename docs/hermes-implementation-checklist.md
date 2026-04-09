@@ -1,6 +1,10 @@
 # Hermes Integration Implementation Checklist
 
 > Developer checklist for adding Hermes support to OGP
+>
+> Historical note, April 9, 2026: this file is retained as an implementation artifact.
+> Many unchecked boxes below were never backfilled after the sidecar work landed.
+> Do not use this file as the canonical current backlog. Use `CURRENT_WORK.md` and Beads instead.
 
 ## Phase 1: Sidecar Integration (Week 1)
 

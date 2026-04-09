@@ -23,6 +23,8 @@ export interface Peer {
   status: 'pending' | 'approved' | 'rejected' | 'removed';
   requestedAt: string;  // ISO timestamp
   approvedAt?: string;
+  rejectedAt?: string;
+  removedAt?: string;
   metadata?: Record<string, any>;
   // v0.2.0 scope negotiation fields
   protocolVersion?: string;          // "0.1.0" or "0.2.0"
@@ -38,6 +40,41 @@ export interface Peer {
 
 function getPeersFile(): string {
   return path.join(getConfigDir(), 'peers.json');
+}
+
+type PendingPeerInput = Pick<Peer, 'id' | 'displayName' | 'email' | 'gatewayUrl' | 'publicKey'> & {
+  agentId?: string;
+  offeredIntents?: string[];
+  requestedAt?: string;
+};
+
+function createPeerTombstone(peer: Peer, status: 'rejected' | 'removed', changedAt = new Date().toISOString()): Peer {
+  return {
+    id: peer.id,
+    displayName: peer.displayName,
+    email: peer.email,
+    gatewayUrl: peer.gatewayUrl,
+    publicKey: peer.publicKey,
+    status,
+    requestedAt: peer.requestedAt,
+    ...(peer.approvedAt ? { approvedAt: peer.approvedAt } : {}),
+    ...(peer.agentId ? { agentId: peer.agentId } : {}),
+    ...(status === 'rejected' ? { rejectedAt: changedAt } : { removedAt: changedAt })
+  };
+}
+
+export function createPendingPeerRecord(input: PendingPeerInput): Peer {
+  return {
+    id: input.id,
+    displayName: input.displayName,
+    email: input.email,
+    gatewayUrl: input.gatewayUrl,
+    publicKey: input.publicKey,
+    status: 'pending',
+    requestedAt: input.requestedAt ?? new Date().toISOString(),
+    ...(input.agentId ? { agentId: input.agentId } : {}),
+    ...(input.offeredIntents && input.offeredIntents.length > 0 ? { offeredIntents: input.offeredIntents } : {})
+  };
 }
 
 export function loadPeers(): Peer[] {
@@ -157,12 +194,11 @@ export function approvePeer(peerId: string): boolean {
 
 export function rejectPeer(peerId: string): boolean {
   const peers = loadPeers();
-  const peer = peers.find(p => p.id === peerId);
-  if (!peer) return false;
+  const peerIndex = peers.findIndex(p => p.id === peerId);
+  if (peerIndex === -1) return false;
 
-  peer.status = 'rejected';
-  savePeers(peers);
-  return true;
+  peers[peerIndex] = createPeerTombstone(peers[peerIndex], 'rejected');
+  return savePeers(peers);
 }
 
 export function removePeer(peerId: string): boolean {
@@ -170,10 +206,10 @@ export function removePeer(peerId: string): boolean {
   const peerIndex = peers.findIndex(p => p.id === peerId);
   if (peerIndex === -1) return false;
 
-  // Mark as removed instead of deleting to maintain audit trail
-  peers[peerIndex].status = 'removed';
-  savePeers(peers);
-  return true;
+  // Keep an auditable tombstone, but clear mutable relationship state so it
+  // cannot leak into later federation attempts.
+  peers[peerIndex] = createPeerTombstone(peers[peerIndex], 'removed');
+  return savePeers(peers);
 }
 
 export function listPeers(status?: 'pending' | 'approved' | 'rejected'): Peer[] {

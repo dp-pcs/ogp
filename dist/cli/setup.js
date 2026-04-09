@@ -3,6 +3,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { requireConfig, saveConfig } from '../shared/config.js';
 import { loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { detectFrameworks } from '../shared/framework-detection.js';
 import { loadMetaConfig, saveMetaConfig } from '../shared/meta-config.js';
@@ -79,13 +80,38 @@ async function promptYesNo(rl, question, defaultYes = true) {
     }
     return trimmed === 'y' || trimmed === 'yes';
 }
-async function promptInboundFederationMode(rl) {
+function getHumanSurfacingDefault(mode) {
+    if (mode === 'forward') {
+        return 'always';
+    }
+    if (mode === 'approval-required') {
+        return 'important-only';
+    }
+    return 'summary-only';
+}
+function getRelayHandlingDefault(mode) {
+    if (mode === 'approval-required') {
+        return 'approval-required';
+    }
+    if (mode === 'summarize') {
+        return 'summarize';
+    }
+    return 'deliver';
+}
+async function promptInboundFederationMode(rl, currentMode = 'summarize') {
     console.log('\nHow should this agent handle inbound federated requests by default?');
     console.log('  1. forward           Tell me everything');
     console.log('  2. summarize         Tell me only the important/actionable parts');
     console.log('  3. autonomous        Act on your own unless blocked or asked to relay something');
     console.log('  4. approval-required Do not act or reply without my approval');
-    const answer = await rl.question('\nChoose handling mode [2]: ');
+    const defaultChoice = currentMode === 'forward'
+        ? '1'
+        : currentMode === 'autonomous'
+            ? '3'
+            : currentMode === 'approval-required'
+                ? '4'
+                : '2';
+    const answer = await rl.question(`\nChoose handling mode [${defaultChoice}]: `);
     const trimmed = answer.trim().toLowerCase();
     switch (trimmed) {
         case '1':
@@ -98,12 +124,184 @@ async function promptInboundFederationMode(rl) {
         case 'approval-required':
         case 'approval':
             return 'approval-required';
-        case '2':
         case '':
+            return currentMode;
+        case '2':
         case 'summarize':
         default:
             return 'summarize';
     }
+}
+async function promptHumanSurfacingMode(rl, defaultMode, currentMode = getHumanSurfacingDefault(defaultMode)) {
+    console.log('\nHow much of inbound federated work should be surfaced to the human by default?');
+    console.log('  1. always         Forward or surface every inbound item');
+    console.log('  2. summary-only   Surface a concise summary');
+    console.log('  3. important-only Surface only important, uncertain, or actionable items');
+    console.log('  4. never          Do not proactively surface unless another rule requires it');
+    const defaultChoice = currentMode === 'always'
+        ? '1'
+        : currentMode === 'important-only'
+            ? '3'
+            : currentMode === 'never'
+                ? '4'
+                : '2';
+    const answer = await rl.question(`\nChoose human surfacing mode [${defaultChoice}]: `);
+    const trimmed = answer.trim().toLowerCase();
+    switch (trimmed) {
+        case '1':
+        case 'always':
+            return 'always';
+        case '3':
+        case 'important':
+        case 'important-only':
+            return 'important-only';
+        case '4':
+        case 'never':
+            return 'never';
+        case '':
+            return currentMode;
+        case '2':
+        case 'summary':
+        case 'summary-only':
+        default:
+            return 'summary-only';
+    }
+}
+async function promptRelayHandlingMode(rl, defaultMode, currentMode = getRelayHandlingDefault(defaultMode)) {
+    console.log('\nIf a peer explicitly asks your agent to tell the human something, what should happen?');
+    console.log('  1. deliver           Treat it as a delivery obligation');
+    console.log('  2. summarize         Summarize it for the human instead of relaying verbatim');
+    console.log('  3. approval-required Hold it for approval before treating it as delivered');
+    const defaultChoice = currentMode === 'summarize'
+        ? '2'
+        : currentMode === 'approval-required'
+            ? '3'
+            : '1';
+    const answer = await rl.question(`\nChoose relay handling [${defaultChoice}]: `);
+    const trimmed = answer.trim().toLowerCase();
+    switch (trimmed) {
+        case '2':
+        case 'summarize':
+            return 'summarize';
+        case '3':
+        case 'approval':
+        case 'approval-required':
+            return 'approval-required';
+        case '':
+            return currentMode;
+        case '1':
+        case 'deliver':
+        default:
+            return 'deliver';
+    }
+}
+async function promptApprovalTopics(rl, currentTopics = []) {
+    const currentDisplay = currentTopics.join(', ');
+    const answer = await rl.question(`\nTopics that should always require approval before the agent acts or replies (comma-separated${currentDisplay ? `, blank to keep ${currentDisplay}` : ', blank for none'}): `);
+    if (!answer.trim()) {
+        return currentTopics;
+    }
+    return answer
+        .split(',')
+        .map(topic => topic.trim())
+        .filter(Boolean);
+}
+async function promptTrustedPeerAutonomy(rl, currentValue = true) {
+    return promptYesNo(rl, 'Should trusted peers be eligible for more autonomy than the default policy later?', currentValue);
+}
+export function buildDelegatedAuthorityConfig(options) {
+    const { inboundMode, humanSurfacingMode, relayHandlingMode, approvalTopics, trustedPeerAutonomy } = options;
+    const topicRules = approvalTopics.reduce((rules, topic) => {
+        rules[topic] = {
+            mode: 'approval-required',
+            relayMode: 'approval-required',
+            surfaceToHuman: 'always',
+            allowDirectPeerReply: false,
+            notes: 'Approval-required topic from setup interview.'
+        };
+        return rules;
+    }, {});
+    return {
+        global: {
+            defaultRule: {
+                mode: inboundMode,
+                relayMode: relayHandlingMode,
+                surfaceToHuman: humanSurfacingMode,
+                allowDirectPeerReply: inboundMode !== 'approval-required',
+                notes: trustedPeerAutonomy
+                    ? 'Trusted peers may receive more autonomy through future per-peer overrides.'
+                    : 'Trusted peers should not receive more autonomy than the default policy without an explicit future change.'
+            },
+            classRules: {
+                'agent-work': {
+                    mode: inboundMode,
+                    surfaceToHuman: humanSurfacingMode,
+                    allowDirectPeerReply: inboundMode !== 'approval-required'
+                },
+                'human-relay': {
+                    mode: inboundMode === 'approval-required' ? 'approval-required' : 'forward',
+                    relayMode: relayHandlingMode,
+                    surfaceToHuman: relayHandlingMode === 'deliver' ? 'always' : humanSurfacingMode,
+                    allowDirectPeerReply: false
+                },
+                'approval-request': {
+                    mode: 'approval-required',
+                    relayMode: 'approval-required',
+                    surfaceToHuman: 'always',
+                    allowDirectPeerReply: false
+                },
+                'status-update': {
+                    mode: 'summarize',
+                    surfaceToHuman: humanSurfacingMode === 'never' ? 'never' : 'summary-only',
+                    allowDirectPeerReply: false
+                }
+            },
+            ...(Object.keys(topicRules).length > 0 ? { topicRules } : {})
+        },
+        peers: {}
+    };
+}
+export function deriveDelegatedAuthorityInterviewAnswers(config) {
+    const inboundFederationMode = config.delegatedAuthority?.global.defaultRule.mode ??
+        config.inboundFederationPolicy?.mode ??
+        'summarize';
+    const humanSurfacingMode = config.delegatedAuthority?.global.defaultRule.surfaceToHuman ??
+        getHumanSurfacingDefault(inboundFederationMode);
+    const relayHandlingMode = config.delegatedAuthority?.global.classRules?.['human-relay']?.relayMode ??
+        config.delegatedAuthority?.global.defaultRule.relayMode ??
+        getRelayHandlingDefault(inboundFederationMode);
+    const approvalTopics = Object.entries(config.delegatedAuthority?.global.topicRules ?? {})
+        .filter(([, rule]) => rule.mode === 'approval-required')
+        .map(([topic]) => topic)
+        .sort();
+    const notes = config.delegatedAuthority?.global.defaultRule.notes?.toLowerCase() ?? '';
+    const trustedPeerAutonomy = notes
+        ? !notes.includes('should not receive more autonomy')
+        : true;
+    return {
+        humanDeliveryTarget: config.humanDeliveryTarget,
+        inboundFederationMode,
+        humanSurfacingMode,
+        relayHandlingMode,
+        approvalTopics,
+        trustedPeerAutonomy
+    };
+}
+export function applyDelegatedAuthorityInterviewAnswers(config, answers) {
+    return {
+        ...config,
+        humanDeliveryTarget: answers.humanDeliveryTarget?.trim() || undefined,
+        delegatedAuthority: buildDelegatedAuthorityConfig({
+            inboundMode: answers.inboundFederationMode,
+            humanSurfacingMode: answers.humanSurfacingMode,
+            relayHandlingMode: answers.relayHandlingMode,
+            approvalTopics: answers.approvalTopics,
+            trustedPeerAutonomy: answers.trustedPeerAutonomy
+        }),
+        inboundFederationPolicy: {
+            mode: answers.inboundFederationMode
+        }
+    };
 }
 async function promptMultiSelect(rl, frameworks) {
     console.log('\nAvailable frameworks:');
@@ -167,6 +365,17 @@ async function setupFramework(rl, framework, agents) {
         console.log('  Hermes uses webhook delivery for OGP followups; skipping human delivery target prompt.');
     }
     const inboundFederationMode = await promptInboundFederationMode(rl);
+    const humanSurfacingMode = await promptHumanSurfacingMode(rl, inboundFederationMode);
+    const relayHandlingMode = await promptRelayHandlingMode(rl, inboundFederationMode);
+    const approvalTopics = await promptApprovalTopics(rl);
+    const trustedPeerAutonomy = await promptTrustedPeerAutonomy(rl);
+    const delegatedAuthority = buildDelegatedAuthorityConfig({
+        inboundMode: inboundFederationMode,
+        humanSurfacingMode,
+        relayHandlingMode,
+        approvalTopics,
+        trustedPeerAutonomy
+    });
     // Create framework configuration
     const frameworkConfig = {
         id: framework.id,
@@ -189,6 +398,7 @@ async function setupFramework(rl, framework, agents) {
         stateDir: framework.suggestedConfigDir,
         agentId,
         humanDeliveryTarget: humanDeliveryTarget.trim() || undefined,
+        delegatedAuthority,
         inboundFederationPolicy: {
             mode: inboundFederationMode
         },
@@ -218,6 +428,12 @@ async function setupFramework(rl, framework, agents) {
             console.log(`  ✓ Human delivery target: ${humanDeliveryTarget.trim()}`);
         }
         console.log(`  ✓ Inbound federation mode: ${inboundFederationMode}`);
+        console.log(`  ✓ Human surfacing mode: ${humanSurfacingMode}`);
+        console.log(`  ✓ Relay handling mode: ${relayHandlingMode}`);
+        if (approvalTopics.length > 0) {
+            console.log(`  ✓ Approval-required topics: ${approvalTopics.join(', ')}`);
+        }
+        console.log(`  ✓ Trusted peers may receive extra autonomy later: ${trustedPeerAutonomy ? 'yes' : 'no'}`);
     }
     finally {
         // Restore original OGP_HOME
@@ -311,6 +527,52 @@ export async function runSetup() {
     catch (error) {
         rl.close();
         throw error;
+    }
+}
+export async function runAgentCommsInterview() {
+    const config = requireConfig();
+    const defaults = deriveDelegatedAuthorityInterviewAnswers(config);
+    console.log('=== OGP Agent-Comms Interview ===\n');
+    console.log('This updates delegated-authority and human-delivery behavior for the active framework.');
+    const rl = readline.createInterface({ input, output });
+    try {
+        let humanDeliveryTarget = defaults.humanDeliveryTarget ?? '';
+        if (config.platform !== 'hermes') {
+            const humanDeliveryPrompt = defaults.humanDeliveryTarget?.trim()
+                ? `Primary human delivery target for OGP followups [${defaults.humanDeliveryTarget.trim()}]: `
+                : 'Primary human delivery target for OGP followups (e.g. telegram:123456789, or leave blank to use notifyTarget/default): ';
+            const answer = await rl.question(humanDeliveryPrompt);
+            humanDeliveryTarget = answer.trim() || humanDeliveryTarget;
+        }
+        else {
+            console.log('  Hermes uses webhook delivery for OGP followups; skipping human delivery target prompt.');
+        }
+        const inboundFederationMode = await promptInboundFederationMode(rl, defaults.inboundFederationMode);
+        const humanSurfacingMode = await promptHumanSurfacingMode(rl, inboundFederationMode, defaults.humanSurfacingMode);
+        const relayHandlingMode = await promptRelayHandlingMode(rl, inboundFederationMode, defaults.relayHandlingMode);
+        const approvalTopics = await promptApprovalTopics(rl, defaults.approvalTopics);
+        const trustedPeerAutonomy = await promptTrustedPeerAutonomy(rl, defaults.trustedPeerAutonomy);
+        const updatedConfig = applyDelegatedAuthorityInterviewAnswers(config, {
+            humanDeliveryTarget,
+            inboundFederationMode,
+            humanSurfacingMode,
+            relayHandlingMode,
+            approvalTopics,
+            trustedPeerAutonomy
+        });
+        saveConfig(updatedConfig);
+        console.log('\n✓ Agent-comms interview saved');
+        if (updatedConfig.humanDeliveryTarget) {
+            console.log(`  ✓ Human delivery target: ${updatedConfig.humanDeliveryTarget}`);
+        }
+        console.log(`  ✓ Inbound federation mode: ${inboundFederationMode}`);
+        console.log(`  ✓ Human surfacing mode: ${humanSurfacingMode}`);
+        console.log(`  ✓ Relay handling mode: ${relayHandlingMode}`);
+        console.log(`  ✓ Approval-required topics: ${approvalTopics.length > 0 ? approvalTopics.join(', ') : '(none)'}`);
+        console.log(`  ✓ Trusted peers may receive extra autonomy later: ${trustedPeerAutonomy ? 'yes' : 'no'}`);
+    }
+    finally {
+        rl.close();
     }
 }
 //# sourceMappingURL=setup.js.map

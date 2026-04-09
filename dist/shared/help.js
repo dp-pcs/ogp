@@ -75,9 +75,9 @@ function showFederationHelp() {
     console.log('  list            List all federated peers');
     console.log('  status          Show federation status and alias mappings');
     console.log('  request         Send federation request to a peer');
-    console.log('  connect         Connect to a peer using rendezvous discovery');
-    console.log('  invite          Generate invite token for peer to accept');
-    console.log('  accept          Accept a peer\'s invite token');
+    console.log('  connect         Connect to a peer via optional rendezvous lookup');
+    console.log('  invite          Generate optional invite token for a peer');
+    console.log('  accept          Accept an optional rendezvous invite token');
     console.log('  approve         Approve a pending federation request');
     console.log('  reject          Reject a pending federation request');
     console.log('  remove          Remove a peer from federation list');
@@ -172,6 +172,7 @@ function showFederationAgentHelp() {
  */
 function showAgentCommsHelp() {
     console.log('\nAgent-comms policy management:');
+    console.log('  interview       Run the delegated-authority / human-delivery interview');
     console.log('  policies        Show response policies (global and per-peer)');
     console.log('  configure       Configure response policies for peers or globally');
     console.log('  add-topic       Add a topic to a peer\'s response policy');
@@ -191,6 +192,7 @@ function showAgentCommsHelp() {
     console.log('  off             No response (silent)');
     console.log('');
     console.log('Examples:');
+    console.log('  ogp agent-comms interview');
     console.log('  ogp agent-comms policies');
     console.log('  ogp agent-comms configure --global --level summary');
     console.log('  ogp agent-comms set-topic <peer-id> memory-management full');

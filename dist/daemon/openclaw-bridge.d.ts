@@ -10,11 +10,16 @@ type DeliveryTarget = {
     channel?: string;
     to?: string;
 };
+type HookDispatchOptions = {
+    deliver?: boolean;
+    target?: DeliveryTarget;
+    sessionKey?: string;
+};
 /**
  * Connect bridge (no-op for request-based implementation)
  */
 export declare function connectBridge(): void;
-export declare function dispatchAgentHook(message: string, from: string, target?: DeliveryTarget): Promise<boolean>;
+export declare function dispatchAgentHook(message: string, from: string, options?: HookDispatchOptions): Promise<boolean>;
 /**
  * Inject a message into an OpenClaw session using the gateway RPC.
  * Note: OpenClaw currently renders these messages with sender "cli", so OGP must

@@ -12,6 +12,7 @@ The OGP daemon must be installed. If you see errors like 'ogp: command not found
 npm install -g @dp-pcs/ogp
 ogp-install-skills
 ogp setup
+ogp agent-comms interview
 ogp config show
 ```
 
@@ -45,8 +46,10 @@ Agent-comms policies control HOW your agent responds to incoming messages (separ
 **Multi-Agent Routing (v0.2.28+):**
 When using `notifyTargets` in your OGP config, federation messages can be routed to specific agents based on the message context. Each agent can have its own agent-comms policies.
 
-**Human delivery behavior (v0.4.1+):**
+**Human delivery behavior (v0.4.2+):**
 Use `humanDeliveryTarget` plus `inboundFederationPolicy.mode` to tell the agent whether it should forward everything, summarize, act autonomously, or wait for approval before replying.
+
+OGP now evaluates delegated-authority rules—global defaults, per-peer overrides, message-class-specific rules (`agent-work`, `human-relay`, `approval-request`, `status-update`), and topic overrides—before finalizing delivery behavior. This determines whether the agent may reply directly or must escalate to the configured human session. On OpenClaw, `/hooks/agent` is the preferred delivery path; it tries to request the actual human session key only when `hooks.allowRequestSessionKey=true` and the requested key matches configured prefixes. When the flag is false, the hook runs in the default session (`agent:main:main`), so Telegram sender identity continues to appear as injected/system/`cli`, which is the accepted `v0.4.2` limitation documented in the README and changelog. Lifecycle events such as federation approvals now surface through these same hook-driven turns, so humans see the lifecycle update without needing to poll another channel.
 
 On OpenClaw, human-facing federated work should be handled through the platform's hook-driven agent turn (`/hooks/agent`). Direct `sessions.send` injection is a lower-level fallback or sync mechanism, not the primary behavioral path.
 
@@ -67,21 +70,42 @@ ogp --for openclaw federation list --status approved
 
 If no approved peers, inform the user they need to federate first.
 
-### Step 2: Show Current Configuration
+### Step 2: Re-run the Delegated-Authority Interview First
+
+When the user is configuring overall human-delivery or autonomy behavior, start with the canonical interview command instead of approximating it manually:
+
+```bash
+ogp --for openclaw agent-comms interview
+```
+
+Use the Hermes variant when the active framework is Hermes:
+
+```bash
+ogp --for hermes agent-comms interview
+```
+
+This command updates:
+- `humanDeliveryTarget` when the framework supports it
+- `inboundFederationPolicy.mode`
+- delegated-authority defaults for human surfacing, relay handling, approval-required topics, and trusted-peer autonomy
+
+After the interview, continue with per-peer or per-topic policy commands only if the user wants something more specific.
+
+### Step 3: Show Current Configuration
 
 ```bash
 # Show current policies
 ogp --for openclaw agent-comms policies
 ```
 
-### Step 3: Ask What to Configure
+### Step 4: Ask What to Configure
 
 Present options:
 1. **Global defaults** - Apply to all peers (current and future)
 2. **Specific peer(s)** - Configure individual peers
 3. **View current policies** - Just show what's configured
 
-### Step 4: For Specific Peers - Multi-Select
+### Step 5: For Specific Peers - Multi-Select
 
 If configuring specific peers, show the list and allow multi-select:
 
@@ -103,7 +127,7 @@ Select peers to configure:
 Selected: Stanislav, Alice
 ```
 
-### Step 5: Configure Topics
+### Step 6: Configure Topics
 
 Ask which topics the agent should engage on:
 
@@ -357,7 +381,7 @@ ogp --for openclaw agent-comms configure --global \
 
 ### Human Delivery Modes
 
-These live in config rather than the `agent-comms` CLI, but they are part of the same operational policy:
+These now have a first-class CLI interview via `ogp agent-comms interview`, and they remain part of the same operational policy:
 
 - `forward` — forward all inbound federated requests/replies to the human
 - `summarize` — summarize and escalate only important/actionable items

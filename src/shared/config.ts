@@ -47,6 +47,61 @@ export interface InboundFederationPolicy {
   mode: InboundFederationMode;
 }
 
+export type FederatedMessageClass =
+  | 'agent-work'
+  | 'human-relay'
+  | 'approval-request'
+  | 'status-update';
+
+export type HumanSurfacingMode =
+  | 'always'
+  | 'summary-only'
+  | 'important-only'
+  | 'never';
+
+export type RelayHandlingMode =
+  | 'deliver'
+  | 'summarize'
+  | 'approval-required';
+
+/**
+ * Rule describing how the local agent may handle a class of federated work.
+ * All fields are optional so more specific scopes can override only what changes.
+ */
+export interface DelegatedAuthorityRule {
+  mode?: InboundFederationMode;
+  relayMode?: RelayHandlingMode;
+  surfaceToHuman?: HumanSurfacingMode;
+  allowDirectPeerReply?: boolean;
+  notes?: string;
+}
+
+/**
+ * Policy scope with a default rule plus more specific overrides.
+ */
+export interface DelegatedAuthorityScope {
+  defaultRule: DelegatedAuthorityRule;
+  classRules?: Partial<Record<FederatedMessageClass, DelegatedAuthorityRule>>;
+  topicRules?: Record<string, DelegatedAuthorityRule>;
+}
+
+/**
+ * Peer-specific delegated authority override.
+ * The key in delegatedAuthority.peers is expected to be the peer ID.
+ */
+export interface DelegatedAuthorityPeerOverride extends DelegatedAuthorityScope {
+  trust?: 'default' | 'trusted' | 'restricted';
+}
+
+/**
+ * First-class governance model for inbound federated work.
+ * This coexists with legacy inboundFederationPolicy during migration.
+ */
+export interface DelegatedAuthorityConfig {
+  global: DelegatedAuthorityScope;
+  peers?: Record<string, DelegatedAuthorityPeerOverride>;
+}
+
 export interface OGPConfig {
   daemonPort: number;
   openclawUrl: string;
@@ -67,7 +122,12 @@ export interface OGPConfig {
   // Explicit human-facing delivery target for OGP-triggered followups.
   // Examples: "telegram:123456789" or "agent:main:telegram:direct:123456789"
   humanDeliveryTarget?: string;
+  // First-class governance model for delegated human/agent authority.
+  // Preferred long-term representation for inbound federated behavior.
+  delegatedAuthority?: DelegatedAuthorityConfig;
   // Policy describing how the local agent should handle inbound federated requests.
+  // Legacy coarse-grained field retained for backward compatibility while the
+  // delegatedAuthority model is rolled out through setup/runtime.
   inboundFederationPolicy?: InboundFederationPolicy;
   // BUILD-115: Agent-specific notification routing — which agent owns this gateway
   agentId?: string;

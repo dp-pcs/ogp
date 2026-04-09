@@ -1,8 +1,180 @@
 # OGP Development - Current Work Session
 
-**Date**: April 8, 2026
-**Version**: 0.4.1 (unreleased)
-**Focus**: BUG-2 Investigation - Phantom Messages in OpenClaw Federation
+**Date**: April 9, 2026
+**Version**: 0.4.2
+**Focus**: OGP v0.4.2 release cut after stabilization, delegated-authority rollout, and end-to-end validation
+
+## Canonical Active Backlog
+
+This file is the canonical short-term backlog for the current OGP push.
+
+Do **not** treat the following as active implementation queues:
+- `docs/hermes-implementation-checklist.md` — historical implementation checklist; much of it is already shipped
+- `docs/MULTI-FRAMEWORK-IMPL.md` — historical implementation log; some unchecked items were not maintained after features landed
+
+Active backlog is:
+1. Normalize stale backlog/docs so the repo stops contradicting itself
+2. Make an explicit BUG-2 release decision and record closure criteria
+3. Build the delegated authority / governance layer
+4. Rewrite setup around that model
+5. Enforce runtime policy behavior
+6. Resolve policy precedence and remaining notification gaps
+
+## BUG-2 Release Decision
+
+### Decision
+
+For **v0.4.2**, BUG-2 is considered resolved enough to stop blocking the next product step.
+
+### What counts as fixed for v0.4.2
+
+- inbound federated work reaches the local agent
+- the local agent can read and reason over that work
+- OpenClaw delivery prefers `/hooks/agent` with explicit human-delivery targeting
+- fallback session injection still reaches the correct human-facing session when hook delivery is unavailable
+
+### Accepted limitation for v0.4.2
+
+Native sender identity preservation inside the OpenClaw/Telegram surface is **not** a release blocker for v0.4.2.
+
+If the message appears as injected/system/`cli` content but:
+- the peer identity is preserved in message content/metadata
+- the agent can reason over it correctly
+- the configured human-delivery target is respected
+
+then BUG-2 should not block release.
+
+### What remains out of scope for BUG-2
+
+The following remain real issues, but they are no longer part of BUG-2's release gate:
+- proactive federation lifecycle surfacing to the human (`BUG-3`)
+- policy/governance for when to forward, summarize, act, or ask
+- native sender identity parity with first-party Telegram messages
+
+### Why this decision is correct
+
+The live repro changed the diagnosis:
+- part of the original problem was transport/injection
+- a larger remaining problem is governance and channel-grounding
+
+That means continuing to chase perfect sender identity before building the delegated-authority model is the wrong order.
+
+## Next Build - Delegated Authority Model for OGP
+
+This is the next product step after proving that OpenClaw delivery works via `/hooks/agent`.
+
+### Core Product Point
+
+OGP is not just message transport. The real value is that each human can bring an agent to a shared interaction space, and each human can decide how much authority that agent has when dealing with peer agents.
+
+That means the missing layer is not primarily protocol transport anymore. It is a clear delegation model between the human and their agent.
+
+### What We Need To Build
+
+#### 1. First-class governance model
+
+We need explicit config for agent authority, not just delivery routing.
+
+The model should cover:
+- when the agent may reply autonomously to peers
+- when it must ask the human first
+- when it should summarize instead of forward
+- when a peer request counts as a human relay obligation
+- global defaults, per-peer overrides, and topic-level overrides
+
+#### 2. Setup interview
+
+`ogp setup` should include a real human-agent interview, similar in spirit to Claude Code's ask-user flow.
+
+The interview should ask:
+- Should your agent answer peers on its own?
+- Should it ask before replying?
+- Should it summarize most things and only escalate important items?
+- If a peer says "tell David X", should that always be delivered, summarized, or held for approval?
+- Are some topics always approval-required?
+- Do some trusted peers get more autonomy than others?
+
+#### 3. Separate message classes
+
+Behavior needs to distinguish between:
+- agent-to-agent work
+- human relay requests
+- approval requests
+- status/update only
+
+Normal `agent-comms` should stay agent-to-agent unless policy says otherwise.
+
+If a peer asks, "tell David X", that is different from, "what do you know about project intents?" The first is a relay obligation. The second is usually agent-to-agent work.
+
+#### 4. Runtime interpretation
+
+The daemon/backend should turn config into explicit instructions for the local agent so the agent is not improvising.
+
+Examples:
+- reply to peer directly unless blocked
+- surface only a summary to the human
+- do not claim delivery unless human relay actually happened
+- if the request is a relay-to-human request, apply relay policy instead of ordinary peer-reply policy
+
+#### 5. Natural-language updates later
+
+After setup, the human should be able to change this with natural language.
+
+Examples:
+- "Handle Apollo autonomously unless he asks for approval."
+- "Never reply to peers without clearing it with me."
+- "Summarize everything except project work."
+
+This means the config schema should be designed so it can be edited by both:
+- the setup wizard
+- future agent-mediated commands
+
+#### 6. Docs and skills must explain the real value
+
+Docs should explain:
+- humans bring agents to the party
+- each human decides what their agent is allowed to do
+- federation is delegated collaboration with boundaries, not just transport
+
+Skills should teach agents:
+- default `agent-comms` stays agent-to-agent
+- human surfacing depends on policy
+- relay obligations are special
+- approval boundaries must be respected
+
+### Recommended Implementation Order
+
+1. Add config schema for delegated authority
+2. Add setup interview for human-agent OGP preferences
+3. Update runtime handling so agent-to-agent work and human-relay work are treated differently
+4. Update skills and docs to reflect the model clearly
+5. Add end-to-end tests covering autonomy, summary, approval, and relay behaviors
+
+### Test Scenarios We Must Cover Before Release
+
+- Peer asks peer a question:
+  - local agent replies to peer
+  - human only gets a summary if policy says so
+- Peer says "tell David X":
+  - local agent follows relay policy correctly
+- Approval-required mode:
+  - no reply until human approves
+- Autonomous mode:
+  - agent handles it and only surfaces blockers or important results
+- Per-peer override:
+  - trusted peer behaves differently from a new or less-trusted peer
+
+### Current Judgment
+
+The protocol is already strong enough for the core use case.
+
+What needs to be built next is the delegation/governance product layer on top of it:
+- authority
+- approval boundaries
+- human surfacing preferences
+- peer-specific trust behavior
+
+That is the next meaningful build.
 
 ## Session Summary
 
@@ -163,7 +335,7 @@ Junior saw it in logs/TUI but NOT in Telegram conversation ❌
 
 **4. `package.json`**
 - Added `ws` and `@types/ws` dependencies (may not be needed if staying with CLI approach)
-- Version: 0.4.1
+- Version: 0.4.2
 
 ## Key Discoveries
 
@@ -209,6 +381,12 @@ Successfully created Apollo ↔ Junior federation:
 ❌ **Sender identity preservation**: All messages show sender="cli"
 ❌ **Peer-to-peer replies**: Junior can't reply directly to Apollo (sees it as system message)
 ❌ **True agent-to-agent comms**: No bidirectional peer conversation possible
+
+## Historical Debug Notes (Superseded by Sections Above)
+
+The remaining sections in this document are retained as debugging notes and repro history.
+
+Their "next steps" are **not** the canonical backlog anymore unless they also appear in the sections above.
 
 ## Next Steps
 
@@ -267,14 +445,27 @@ curl -k -X POST https://localhost:18789/hooks/agent \
 
 ## Related Issues
 
+Historical status snapshot below. For the current source of truth, use the canonical backlog at the top of this file plus Beads.
+
+Remaining stabilization queue after the delegated-authority work:
+- `clawd-10a.12` / **BUG-10** next/last — rendezvous deregistration remains the only open stabilization bug in this queue, and it is still a convenience/discovery issue rather than the core direct-federation path.
+
 - **BUG-1**: ✅ FIXED - Keychain collision (v0.3.3)
-- **BUG-2**: 🔄 IN PROGRESS - Phantom messages (this document)
-- **BUG-3**: ⏸️ PENDING - No proactive federation request notifications
-- **BUG-5**: ⏸️ PENDING - Tombstone persistence
-- **BUG-7**: ⏸️ PENDING - Ghost identity (stale display names)
-- **BUG-8**: ⏸️ PENDING - Policy precedence confusion
-- **BUG-10**: ⏸️ PENDING - Rendezvous deregistration
-- **BUG-11**: ⏸️ PENDING - Keypair storage confusion
+- **BUG-2**: ✅ CLOSED FOR v0.4.2 - Accepted limitation remains for native Telegram sender identity parity
+- **BUG-3**: ✅ FIXED - Proactive federation lifecycle notifications now surface through the local agent path
+- **BUG-5**: ✅ FIXED - Remove/reject now persist minimal tombstones and refederation replaces them with fresh pending peer state
+- **BUG-7**: ✅ FIXED - Refederation no longer revives stale display names from removed/rejected peer records
+- **BUG-8**: ✅ FIXED - Delegated-authority precedence is now deterministic and tested
+- **BUG-10**: ✅ FIXED - Daemon shutdown now stops the HTTP listener and exits cleanly, so rendezvous deregistration is no longer undermined by a still-running process
+- **BUG-11**: ✅ FIXED - macOS key storage/source-of-truth is now explicit in runtime messaging and docs
+
+### Rendezvous Posture
+
+Rendezvous remains available, but it is now treated as an **optional** discovery/invite layer rather than a core OGP requirement.
+
+- Primary federation path: stable public gateway URLs plus direct federation
+- Optional convenience layer: pubkey lookup and short invite codes via rendezvous
+- Explicit non-goals: NAT traversal, UDP hole punching, or transport relay
 
 ## Configuration Files
 
@@ -346,22 +537,19 @@ import('/Users/davidproctor/Documents/GitHub/ogp/dist/daemon/notify.js').then(as
 ## Documentation To-Do
 
 - [x] Create CURRENT_WORK.md (this file)
-- [ ] Update CHANGELOG.md for v0.4.1
-- [ ] Update README.md with multi-framework examples
+- [x] Update CHANGELOG.md for v0.4.2 posture and accepted limitations
+- [x] Update README.md with v0.4.2 delivery, precedence, and session-key grounding notes
 - [ ] Check openclaw-federation repo for syntax updates
-- [ ] Update ogp skill with new --for syntax
-- [ ] Publish v0.4.1 to npm
+- [x] Update OGP skills to match delegated-authority and v0.4.2 posture
+- [ ] Publish v0.4.2 to npm
 - [ ] Push updated skills to clawhub
 
 ## Notes for Next Session
 
-**Where we left off**: Testing `/hooks/agent` webhook endpoint to see if it can preserve sender identity when delivering to Telegram.
+**Where we left off**: BUG-2 and BUG-3 were closed in the accepted `v0.4.2` posture. The remaining work is release follow-through and the next product layer on top of transport.
 
-**Next experiment**: Try different parameter combinations with `/hooks/agent` to route messages to Telegram conversation with correct sender metadata.
+**Important runtime fact**: OGP now requests the Telegram `sessionKey` for `/hooks/agent` when local OpenClaw allows it via `hooks.allowRequestSessionKey=true` and compatible `hooks.allowedSessionKeyPrefixes`.
 
-**Alternative path**: If OpenClaw doesn't support this natively, we may need to accept that OGP messages appear as system/cli messages, and implement a workaround like:
-1. Include peer identity in message content (already doing this)
-2. Teach agents to recognize OGP message format
-3. Build a reply mechanism that routes responses back through OGP federation
+**Remaining limitation**: Most local installs still have `hooks.allowRequestSessionKey=false`, which means `/hooks/agent` falls back to the default hook session (`agent:main:main`) and native Telegram sender identity still looks like injected/system/`cli` content.
 
-**Critical question**: Is preserving sender identity a hard requirement, or can we work with "cli" sender if agents can parse peer info from message content?
+**Next practical step**: Finish aligning skills, release notes, and docs to the shipped runtime so the repo no longer implies there is an unshipped sender-identity fix in progress.

@@ -84,7 +84,7 @@ Gateway URL (your public URL): https://ogp.example.com
 Display name: Alice
 Email: alice@example.com
 
-Enable rendezvous for zero-config peer discovery? [Y/n]: y
+Enable optional rendezvous for invite codes / pubkey discovery? [y/N]: n
 Rendezvous server URL [https://rendezvous.elelem.expert]: <enter>
 
 ✓ OpenClaw configured
@@ -675,6 +675,9 @@ ogp --for hermes federation send alice message '{"text":"Hello Alice!"}'
 Using agent-comms for rich collaboration:
 
 ```bash
+# Revisit delegated-authority / human-delivery preferences
+ogp agent-comms interview
+
 # Configure response policies first
 ogp agent-comms configure apollo \
   --topics memory-management,task-delegation \
