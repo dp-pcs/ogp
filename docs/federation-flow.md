@@ -33,8 +33,8 @@ Host: peer.example.com
   "publicKey": "302a300506032b6570032100abc123...",
   "agentId": "main",
   "capabilities": {
-    "intents": ["message", "task-request", "status-update", "agent-comms"],
-    "features": ["scope-negotiation", "reply-callback", "project-intent"]
+    "intents": ["message", "task-request", "status-update", "agent-comms", "project.join", "project.contribute", "project.query", "project.status"],
+    "features": ["scope-negotiation", "reply-callback"]
   },
   "endpoints": {
     "request": "https://peer.example.com/federation/request",

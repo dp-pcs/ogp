@@ -1,6 +1,6 @@
 ---
 skill_name: ogp-agent-comms
-version: 0.5.0
+version: 0.6.0
 description: Interactive wizard to configure agent-to-agent communication policies (updated for multi-framework `--for` workflows, OGP 0.2.24+ peer identity, and 0.2.28+ multi-agent routing)
 trigger: Use when the user wants to configure how their agent responds to incoming agent-comms messages from federated peers
 ---

@@ -20,6 +20,14 @@ After installation, install the OGP skills for Claude Code:
 ogp-install-skills
 ```
 
+Then verify the installed skill versions:
+
+```bash
+rg -n '^version:' ~/.openclaw/skills/ogp*/SKILL.md ~/.claude/skills/ogp*/SKILL.md 2>/dev/null
+```
+
+For the current `0.4.2` release line, expect `ogp` `2.6.0`, `ogp-agent-comms` `0.6.0`, and `ogp-project` `2.2.0`.
+
 ## Step 2: Configure
 
 Run the interactive setup:
@@ -137,8 +145,8 @@ You should see:
   "gatewayUrl": "https://abc-def-123.trycloudflare.com",
   "publicKey": "302a300506032b6570032100...",
   "capabilities": {
-    "intents": ["message", "task-request", "status-update", "agent-comms"],
-    "features": ["scope-negotiation", "reply-callback", "project-intent"]
+    "intents": ["message", "task-request", "status-update", "agent-comms", "project.join", "project.contribute", "project.query", "project.status"],
+    "features": ["scope-negotiation", "reply-callback"]
   },
   "endpoints": {
     "request": "https://abc-def-123.trycloudflare.com/federation/request",

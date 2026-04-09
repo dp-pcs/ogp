@@ -19,8 +19,8 @@ Your gateway advertises its capabilities in the federation card at `/.well-known
   "version": "0.2.3",
   "displayName": "David's Gateway",
   "capabilities": {
-    "intents": ["message", "task-request", "status-update", "agent-comms", "project"],
-    "features": ["scope-negotiation", "reply-callback", "project-intent"]
+    "intents": ["message", "task-request", "status-update", "agent-comms", "project.join", "project.contribute", "project.query", "project.status"],
+    "features": ["scope-negotiation", "reply-callback"]
   }
 }
 ```
@@ -28,7 +28,7 @@ Your gateway advertises its capabilities in the federation card at `/.well-known
 This tells other gateways what you **can** support, not what you **will** grant.
 
 Capabilities are automatically populated from:
-- **Built-in intents**: `message`, `task-request`, `status-update`, `agent-comms`, `project`
+- **Built-in intents**: `message`, `task-request`, `status-update`, `agent-comms`, `project.join`, `project.contribute`, `project.query`, `project.status`
 - **Custom intents**: Registered via `ogp intent register`
 - **Features**: Protocol features your gateway supports
 
@@ -205,25 +205,25 @@ ogp federation approve alice \
   --rate 50/3600
 ```
 
-## Project Intent
+## Project Intents
 
-The `project` intent enables collaborative project management across federated peers.
+Project collaboration is enforced through four exact runtime intents, not a singular `project` scope.
 
 ### Project Actions
 
 | Action | Description | Rate Limit Recommended |
 |--------|-------------|------------------------|
-| `contribute` | Send contribution to peer's project | 100/hour |
-| `query` | Query peer's project contributions | 50/hour |
-| `request-join` | Request to join peer's project | 10/hour |
-| `status` | Get project status from peer | 20/hour |
+| `project.join` | Join or create a shared project context | 10/hour |
+| `project.contribute` | Send a contribution to a peer's project | 100/hour |
+| `project.query` | Query peer project contributions | 50/hour |
+| `project.status` | Get peer project status | 20/hour |
 
 ### Grant Project Access
 
 ```bash
-# Grant project collaboration access
+# Grant full project collaboration access
 ogp federation approve alice \
-  --intents project \
+  --intents project.join,project.contribute,project.query,project.status \
   --rate 100/3600
 ```
 
@@ -260,9 +260,9 @@ ogp federation approve bob \
 ### Project Collaboration
 
 ```bash
-# Grant project and agent-comms for team collaboration
+# Grant project collaboration intents plus agent-comms for team coordination
 ogp federation approve charlie \
-  --intents agent-comms,project \
+  --intents agent-comms,project.join,project.contribute,project.query,project.status \
   --topics project-updates,planning \
   --rate 200/3600
 ```
