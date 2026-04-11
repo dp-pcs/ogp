@@ -8,7 +8,18 @@ const _require = createRequire(import.meta.url);
 const OGP_VERSION: string = _require('../../package.json').version;
 import { requireConfig, loadConfig, type OGPConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey, getPrivateKey } from './keypair.js';
-import { addPeer, getPeer, approvePeer, listPeers, updatePeer, updatePeerReceivedScopes, type Peer, removePeer, createPendingPeerRecord } from './peers.js';
+import {
+  addPeer,
+  createPendingPeerRecord,
+  derivePeerIdFromPublicKey,
+  findBestPeerForApproval,
+  getPeer,
+  listPeers,
+  removePeer,
+  replacePeersByIdentity,
+  type Peer,
+  updatePeerReceivedScopes
+} from './peers.js';
 import { handleMessage, type FederationMessage } from './message-handler.js';
 import { signObject, verify } from '../shared/signing.js';
 import { notifyOpenClaw } from './notify.js';
@@ -148,7 +159,7 @@ export function startServer(config?: OGPConfig, background = false): void {
       // Derive peer ID from public key (BUILD-111: port-agnostic identity)
       // NEVER trust sender's peer.id - always use public key prefix
       // Use 32-char prefix to avoid collision on shared Ed25519 DER header (first 24 chars identical for ALL Ed25519 keys)
-      const peerIdFromKey = peer.publicKey.substring(0, 32);
+      const peerIdFromKey = derivePeerIdFromPublicKey(peer.publicKey);
       
       // Check if peer already exists (by public key)
       const existingPeer = getPeer(peerIdFromKey);
@@ -268,26 +279,13 @@ export function startServer(config?: OGPConfig, background = false): void {
       const protocolVersion = body.protocolVersion || (scopeGrants ? '0.2.0' : '0.1.0');
 
       // Derive peer ID from public key (BUILD-111: port-agnostic identity)
-      const peerIdFromKey = fromPublicKey ? fromPublicKey.substring(0, 32) : (peerId || fromGatewayId);
+      const peerIdFromKey = fromPublicKey ? derivePeerIdFromPublicKey(fromPublicKey) : (peerId || fromGatewayId);
 
-      // Find the peer to approve — try multiple strategies
-      let peer = null;
-
-      if (peerIdFromKey) peer = getPeer(peerIdFromKey);
-      if (!peer && fromGatewayUrl) {
-        const allPeers = listPeers();
-        peer = allPeers.find((p: Peer) => p.gatewayUrl === fromGatewayUrl) || null;
-      }
-      // Last resort: match by public key prefix
-      if (!peer && fromPublicKey) {
-        const allPeers = listPeers();
-        peer = allPeers.find((p: Peer) => p.publicKey.startsWith(fromPublicKey.substring(0, 16))) || null;
-      }
-      // Final fallback: approve any pending peer
-      if (!peer) {
-        const allPeers = listPeers();
-        peer = allPeers.find((p: Peer) => p.status === 'pending') || null;
-      }
+      const peer = findBestPeerForApproval({
+        peerId: peerIdFromKey,
+        gatewayUrl: fromGatewayUrl,
+        publicKey: fromPublicKey
+      });
 
       if (!peer) {
         return res.status(404).json({ error: 'No pending peer found' });
@@ -296,6 +294,7 @@ export function startServer(config?: OGPConfig, background = false): void {
       // Update peer info if fork sent richer data
       const peerUpdates: Partial<Peer> = {};
       if (fromDisplayName) peerUpdates.displayName = fromDisplayName;
+      if (fromGatewayUrl) peerUpdates.gatewayUrl = fromGatewayUrl;
       if (fromPublicKey) peerUpdates.publicKey = fromPublicKey;
       if (fromEmail) peerUpdates.email = fromEmail;
       peerUpdates.protocolVersion = protocolVersion;
@@ -308,24 +307,40 @@ export function startServer(config?: OGPConfig, background = false): void {
         console.log(`[OGP] Received scope grants from ${peer.displayName}:`, scopeGrants.scopes.map(s => s.intent).join(', '));
       }
 
-      // Update peer with new info
-      if (Object.keys(peerUpdates).length > 0) {
-        updatePeer(peer.id, peerUpdates);
+      const approvedAt = new Date().toISOString();
+      const approvedPeer: Peer = {
+        ...peer,
+        ...peerUpdates,
+        id: fromPublicKey ? derivePeerIdFromPublicKey(fromPublicKey) : peer.id,
+        status: 'approved',
+        approvedAt
+      };
+
+      const persisted = replacePeersByIdentity(
+        {
+          peerId: peer.id,
+          gatewayUrl: fromGatewayUrl || peer.gatewayUrl,
+          publicKey: fromPublicKey || peer.publicKey
+        },
+        approvedPeer
+      );
+
+      if (!persisted) {
+        return res.status(500).json({ error: 'Failed to persist approved peer state' });
       }
 
-      approvePeer(peer.id);
-      console.log(`[OGP] Federation approved by ${peer.displayName} (v${protocolVersion})`);
+      console.log(`[OGP] Federation approved by ${approvedPeer.displayName} (v${protocolVersion})`);
 
-      const approvalNotificationText = `[OGP Federation Approved] ${peer.displayName} (${peer.id}) approved your federation request\n` +
-        `Gateway: ${peer.gatewayUrl}\n` +
+      const approvalNotificationText = `[OGP Federation Approved] ${approvedPeer.displayName} (${approvedPeer.id}) approved your federation request\n` +
+        `Gateway: ${approvedPeer.gatewayUrl}\n` +
         `Protocol: v${protocolVersion}\n` +
         `Status: Federation is now active.`;
 
       const approvalNotificationPayload = {
         text: approvalNotificationText,
         sessionKey: 'agent:main:main',
-        peerId: peer.id,
-        peerDisplayName: peer.displayName,
+        peerId: approvedPeer.id,
+        peerDisplayName: approvedPeer.displayName,
         intent: 'status-update',
         topic: 'federation',
         messageClass: 'status-update' as const,
@@ -333,12 +348,12 @@ export function startServer(config?: OGPConfig, background = false): void {
           ogp: {
             type: 'federation_approved',
             peer: {
-              id: peer.id,
-              displayName: peer.displayName,
-              email: peer.email,
-              gatewayUrl: peer.gatewayUrl
+              id: approvedPeer.id,
+              displayName: approvedPeer.displayName,
+              email: approvedPeer.email,
+              gatewayUrl: approvedPeer.gatewayUrl
             },
-            approvedAt: new Date().toISOString(),
+            approvedAt,
             protocolVersion,
             scopeGrantsReceived: Boolean(scopeGrants)
           }
@@ -348,9 +363,9 @@ export function startServer(config?: OGPConfig, background = false): void {
       try {
         const notified = await notifyOpenClaw(approvalNotificationPayload);
         if (notified) {
-          console.log(`[OGP] Agent session proactively notified of federation approval by ${peer.displayName}`);
+          console.log(`[OGP] Agent session proactively notified of federation approval by ${approvedPeer.displayName}`);
         } else {
-          console.warn(`[OGP] Failed to proactively notify agent session of federation approval by ${peer.displayName}`);
+          console.warn(`[OGP] Failed to proactively notify agent session of federation approval by ${approvedPeer.displayName}`);
         }
       } catch (error) {
         console.error(`[OGP] Error notifying agent session of approval:`, error);
@@ -363,13 +378,13 @@ export function startServer(config?: OGPConfig, background = false): void {
       const { getPrivateKey: _getPrivateKey } = await import('./keypair.js');
       const { signObject: _signObject } = await import('../shared/signing.js');
 
-      const freshPeer = getPeer(peer.id);
+      const freshPeer = getPeer(approvedPeer.id);
       if (freshPeer && !freshPeer.grantedScopes) {
         const defaultIntents = ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'];
         const scopes = defaultIntents.map(intent => createScopeGrant(intent, { rateLimit: DEFAULT_RATE_LIMIT }));
         const bundle = createScopeBundle(scopes);
-        updatePeerGrantedScopes(peer.id, bundle);
-        console.log(`[OGP] Auto-granted default scopes to ${peer.displayName}: ${defaultIntents.join(', ')}`);
+        updatePeerGrantedScopes(approvedPeer.id, bundle);
+        console.log(`[OGP] Auto-granted default scopes to ${approvedPeer.displayName}: ${defaultIntents.join(', ')}`);
 
         // Send our grants back to the approving peer
         try {
@@ -389,9 +404,9 @@ export function startServer(config?: OGPConfig, background = false): void {
               scopeGrants: bundle
             })
           });
-          console.log(`[OGP] Sent auto-grant confirmation back to ${peer.displayName}`);
+          console.log(`[OGP] Sent auto-grant confirmation back to ${approvedPeer.displayName}`);
         } catch (e) {
-          console.warn(`[OGP] Could not send auto-grant back to ${peer.displayName}:`, e);
+          console.warn(`[OGP] Could not send auto-grant back to ${approvedPeer.displayName}:`, e);
         }
       }
 

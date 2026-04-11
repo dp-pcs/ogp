@@ -38,8 +38,60 @@ export interface Peer {
   agentId?: string;                  // which local agent "owns" this federation relationship
 }
 
+export interface PeerIdentityLookup {
+  peerId?: string;
+  gatewayUrl?: string;
+  publicKey?: string;
+}
+
+export const CANONICAL_PEER_ID_LENGTH = 32;
+
 function getPeersFile(): string {
   return path.join(getConfigDir(), 'peers.json');
+}
+
+export function derivePeerIdFromPublicKey(publicKey: string): string {
+  return publicKey.substring(0, CANONICAL_PEER_ID_LENGTH);
+}
+
+function matchesPeerIdentity(peer: Peer, identity: PeerIdentityLookup): boolean {
+  const canonicalLookupId = identity.publicKey ? derivePeerIdFromPublicKey(identity.publicKey) : undefined;
+
+  if (identity.peerId && peer.id === identity.peerId) {
+    return true;
+  }
+
+  if (identity.publicKey && peer.publicKey === identity.publicKey) {
+    return true;
+  }
+
+  if (canonicalLookupId) {
+    if (peer.id === canonicalLookupId) {
+      return true;
+    }
+    if (peer.publicKey && derivePeerIdFromPublicKey(peer.publicKey) === canonicalLookupId) {
+      return true;
+    }
+  }
+
+  if (identity.gatewayUrl && peer.gatewayUrl === identity.gatewayUrl) {
+    return true;
+  }
+
+  return false;
+}
+
+function rankPeerMatch(peer: Peer, identity: PeerIdentityLookup): number {
+  const canonicalLookupId = identity.publicKey ? derivePeerIdFromPublicKey(identity.publicKey) : undefined;
+
+  if (peer.status === 'pending' && canonicalLookupId && peer.id === canonicalLookupId) return 0;
+  if (peer.status === 'pending' && identity.publicKey && peer.publicKey === identity.publicKey) return 1;
+  if (peer.status === 'pending') return 2;
+  if (canonicalLookupId && peer.id === canonicalLookupId) return 3;
+  if (identity.publicKey && peer.publicKey === identity.publicKey) return 4;
+  if (identity.peerId && peer.id === identity.peerId) return 5;
+  if (identity.gatewayUrl && peer.gatewayUrl === identity.gatewayUrl) return 6;
+  return 7;
 }
 
 type PendingPeerInput = Pick<Peer, 'id' | 'displayName' | 'email' | 'gatewayUrl' | 'publicKey'> & {
@@ -132,13 +184,26 @@ export function savePeers(peers: Peer[]): boolean {
 
 export function addPeer(peer: Peer): boolean {
   const peers = loadPeers();
-  const existing = peers.findIndex(p => p.id === peer.id);
-  if (existing >= 0) {
-    peers[existing] = peer;
-  } else {
+  const matches = peers.filter((existingPeer) =>
+    matchesPeerIdentity(existingPeer, {
+      peerId: peer.id,
+      gatewayUrl: peer.gatewayUrl,
+      publicKey: peer.publicKey
+    })
+  );
+
+  if (matches.length === 0) {
     peers.push(peer);
+    return savePeers(peers);
   }
-  return savePeers(peers);
+
+  const preservedAlias = peer.alias ?? matches.find((candidate) => candidate.alias)?.alias;
+  const replacement = preservedAlias ? { ...peer, alias: preservedAlias } : peer;
+  const filtered = peers.filter(
+    (existingPeer) => !matches.some((candidate) => candidate.id === existingPeer.id)
+  );
+  filtered.push(replacement);
+  return savePeers(filtered);
 }
 
 export function getPeer(peerId: string): Peer | null {
@@ -176,6 +241,30 @@ export function getPeerByPublicKey(publicKey: string): Peer | null {
     peer = peers.find(p => p.publicKey && p.publicKey.startsWith(publicKey.substring(0, prefixLen2))) || null;
   }
   return peer;
+}
+
+export function findPeersByIdentity(identity: PeerIdentityLookup): Peer[] {
+  return loadPeers().filter((peer) => matchesPeerIdentity(peer, identity));
+}
+
+export function findBestPeerForApproval(identity: PeerIdentityLookup): Peer | null {
+  const matches = findPeersByIdentity(identity);
+  if (matches.length === 0) return null;
+
+  return matches
+    .slice()
+    .sort((a, b) => {
+      const rankDelta = rankPeerMatch(a, identity) - rankPeerMatch(b, identity);
+      if (rankDelta !== 0) return rankDelta;
+      return b.id.length - a.id.length;
+    })[0] ?? null;
+}
+
+export function replacePeersByIdentity(identity: PeerIdentityLookup, replacement: Peer): boolean {
+  const peers = loadPeers();
+  const filtered = peers.filter((peer) => !matchesPeerIdentity(peer, identity));
+  filtered.push(replacement);
+  return savePeers(filtered);
 }
 
 export function approvePeer(peerId: string): boolean {

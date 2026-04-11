@@ -4,8 +4,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   addPeer,
+  derivePeerIdFromPublicKey,
   createPendingPeerRecord,
+  findBestPeerForApproval,
   getPeer,
+  listPeers,
+  replacePeersByIdentity,
   rejectPeer,
   removePeer,
   type Peer
@@ -137,6 +141,62 @@ describe('peer tombstone persistence', () => {
       requestedAt: '2026-04-09T09:00:00.000Z',
       offeredIntents: ['project.status'],
       agentId: 'main'
+    });
+  });
+
+  it('prefers the pending duplicate during approval and collapses duplicate peer records', () => {
+    const publicKey = 'c'.repeat(64);
+    const canonicalId = derivePeerIdFromPublicKey(publicKey);
+    const shortId = publicKey.substring(0, 16);
+
+    addPeer(createPeer({
+      id: canonicalId,
+      displayName: 'Junior @ OpenClaw',
+      gatewayUrl: 'https://junior.example.com',
+      publicKey,
+      status: 'approved'
+    }));
+
+    addPeer(createPendingPeerRecord({
+      id: shortId,
+      displayName: 'Junior @ OpenClaw',
+      email: 'junior@example.com',
+      gatewayUrl: 'https://junior.example.com',
+      publicKey,
+      agentId: 'main',
+      requestedAt: '2026-04-10T20:00:00.000Z'
+    }));
+
+    const matched = findBestPeerForApproval({
+      peerId: canonicalId,
+      gatewayUrl: 'https://junior.example.com',
+      publicKey
+    });
+
+    expect(matched?.id).toBe(shortId);
+    expect(matched?.status).toBe('pending');
+
+    expect(replacePeersByIdentity(
+      {
+        peerId: matched?.id,
+        gatewayUrl: 'https://junior.example.com',
+        publicKey
+      },
+      {
+        ...matched!,
+        id: canonicalId,
+        status: 'approved',
+        approvedAt: '2026-04-10T20:05:00.000Z'
+      }
+    )).toBe(true);
+
+    const peers = listPeers();
+    expect(peers).toHaveLength(1);
+    expect(peers[0]).toMatchObject({
+      id: canonicalId,
+      status: 'approved',
+      publicKey,
+      gatewayUrl: 'https://junior.example.com'
     });
   });
 });
