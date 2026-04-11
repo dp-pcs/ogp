@@ -23,6 +23,13 @@ export interface Peer {
     defaultLevel?: ResponseLevel;
     agentId?: string;
 }
+export interface PeerIdentityLookup {
+    peerId?: string;
+    gatewayUrl?: string;
+    publicKey?: string;
+}
+export declare const CANONICAL_PEER_ID_LENGTH = 32;
+export declare function derivePeerIdFromPublicKey(publicKey: string): string;
 type PendingPeerInput = Pick<Peer, 'id' | 'displayName' | 'email' | 'gatewayUrl' | 'publicKey'> & {
     agentId?: string;
     offeredIntents?: string[];
@@ -35,6 +42,9 @@ export declare function addPeer(peer: Peer): boolean;
 export declare function getPeer(peerId: string): Peer | null;
 export declare function getPeerByUrl(gatewayUrl: string): Peer | null;
 export declare function getPeerByPublicKey(publicKey: string): Peer | null;
+export declare function findPeersByIdentity(identity: PeerIdentityLookup): Peer[];
+export declare function findBestPeerForApproval(identity: PeerIdentityLookup): Peer | null;
+export declare function replacePeersByIdentity(identity: PeerIdentityLookup, replacement: Peer): boolean;
 export declare function approvePeer(peerId: string): boolean;
 export declare function rejectPeer(peerId: string): boolean;
 export declare function removePeer(peerId: string): boolean;
