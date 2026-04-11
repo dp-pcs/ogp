@@ -27,3 +27,4 @@ tunnel.pid
 # Test coverage
 coverage/
 .vitest/
+CURRENT_WORK.md
