@@ -330,7 +330,7 @@ async function promptMultiSelect(rl, frameworks) {
 async function setupFramework(rl, framework, agents) {
     console.log(`\n--- Setting up ${framework.name} ---`);
     // Prompt for gateway URL
-    const gatewayUrl = await rl.question('Gateway URL (your public URL — run "ogp expose" first, or leave blank to set later): ');
+    const gatewayUrl = await rl.question('Gateway URL (your public URL — run "ogp expose" first; leave blank only if you understand federation/invites will not work until you set it later): ');
     // Prompt for display name
     const displayName = await rl.question(`Display name [${framework.name} Gateway]: `);
     // Prompt for email

@@ -1,5 +1,5 @@
-import { listPeers, loadPeers, savePeers, getPeer, getPeerByUrl, getPeerByPublicKey, approvePeer, rejectPeer, updatePeerGrantedScopes, type Peer } from '../daemon/peers.js';
-import { requireConfig, loadConfig } from '../shared/config.js';
+import { listPeers, loadPeers, savePeers, getPeer, getPeerByUrl, getPeerByPublicKey, approvePeer, rejectPeer, updatePeer, updatePeerGrantedScopes, type Peer } from '../daemon/peers.js';
+import { requireConfig, loadConfig, type OGPConfig } from '../shared/config.js';
 import { lookupPeer } from '../daemon/rendezvous.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject, sign } from '../shared/signing.js';
@@ -29,6 +29,95 @@ function expandTilde(filePath: string): string {
     return path.join(os.homedir(), filePath.slice(2));
   }
   return filePath;
+}
+
+type FederationCard = {
+  displayName?: string;
+  email?: string;
+  gatewayUrl?: string;
+  publicKey?: string;
+};
+
+function normalizeGatewayUrl(url: string): string {
+  return url.trim().replace(/\/+$/, '');
+}
+
+export async function fetchFederationCard(
+  gatewayUrl: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<{ requestedUrl: string; canonicalUrl: string; card: FederationCard }> {
+  const requestedUrl = normalizeGatewayUrl(gatewayUrl);
+  const wellKnownUrl = `${requestedUrl}/.well-known/ogp`;
+  const response = await fetchImpl(wellKnownUrl);
+
+  if (!response.ok) {
+    throw new Error(`Could not fetch ${wellKnownUrl}: ${response.status} ${response.statusText}`);
+  }
+
+  const card = await response.json() as FederationCard;
+  const canonicalUrl = card.gatewayUrl ? normalizeGatewayUrl(card.gatewayUrl) : requestedUrl;
+  return { requestedUrl, canonicalUrl, card };
+}
+
+export async function ensureLocalGatewayReachable(
+  config: Pick<OGPConfig, 'gatewayUrl'>,
+  actionLabel: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<boolean> {
+  const configuredGatewayUrl = normalizeGatewayUrl(config.gatewayUrl || '');
+
+  if (!configuredGatewayUrl) {
+    console.error(`Error: gatewayUrl is not set. Run "ogp expose" or update your config before you ${actionLabel}.`);
+    return false;
+  }
+
+  try {
+    const { canonicalUrl } = await fetchFederationCard(configuredGatewayUrl, fetchImpl);
+    if (canonicalUrl !== configuredGatewayUrl) {
+      console.error(`Error: configured gatewayUrl is stale.`);
+      console.error(`  Config: ${configuredGatewayUrl}`);
+      console.error(`  Live card: ${canonicalUrl}`);
+      console.error(`  Update your config before you ${actionLabel}.`);
+      return false;
+    }
+    return true;
+  } catch (error: any) {
+    console.error(`Error: your gatewayUrl is not reachable at ${configuredGatewayUrl}.`);
+    console.error(`  Run "ogp expose" or fix gatewayUrl before you ${actionLabel}.`);
+    console.error(`  Details: ${error.message}`);
+    return false;
+  }
+}
+
+async function resolvePeerGatewayUrl(
+  gatewayUrl: string,
+  contextLabel: string
+): Promise<{ gatewayUrl: string; card: FederationCard }> {
+  try {
+    const { requestedUrl, canonicalUrl, card } = await fetchFederationCard(gatewayUrl);
+    if (canonicalUrl !== requestedUrl) {
+      console.log(`ℹ ${contextLabel}: peer advertises canonical gateway URL ${canonicalUrl}; using it instead of ${requestedUrl}`);
+    }
+    return { gatewayUrl: canonicalUrl, card };
+  } catch (error: any) {
+    throw new Error(`${contextLabel}: peer gateway is not reachable or missing /.well-known/ogp. ${error.message}`);
+  }
+}
+
+async function refreshPeerGatewayUrlForApproval(peer: Peer): Promise<string> {
+  const { gatewayUrl, card } = await resolvePeerGatewayUrl(peer.gatewayUrl, 'Preflight');
+
+  if (card.publicKey && peer.publicKey && card.publicKey !== peer.publicKey) {
+    throw new Error(
+      `Preflight: peer gateway identity mismatch. Expected ${peer.publicKey.substring(0, 32)}, got ${card.publicKey.substring(0, 32)}.`
+    );
+  }
+
+  if (gatewayUrl !== peer.gatewayUrl) {
+    updatePeer(peer.id, { gatewayUrl });
+  }
+
+  return gatewayUrl;
 }
 
 /**
@@ -303,8 +392,24 @@ export async function federationRequest(peerUrl: string, peerId: string, alias?:
   const config = requireConfig();
   const keypair = loadOrGenerateKeyPair();
 
+  if (!await ensureLocalGatewayReachable(config, 'send federation requests')) {
+    return false;
+  }
+
   // BUILD-111: Use public key prefix as peer ID (port-agnostic identity)
   const ourPeerId = keypair.publicKey.substring(0, 16);
+
+  let resolvedPeerUrl = normalizeGatewayUrl(peerUrl);
+  let peerCard: FederationCard | null = null;
+
+  try {
+    const resolved = await resolvePeerGatewayUrl(resolvedPeerUrl, 'Preflight');
+    resolvedPeerUrl = resolved.gatewayUrl;
+    peerCard = resolved.card;
+  } catch (error: any) {
+    console.error(error.message);
+    return false;
+  }
 
   // Build our peer info
   const peer = {
@@ -329,7 +434,7 @@ export async function federationRequest(peerUrl: string, peerId: string, alias?:
 
   // Send request
   try {
-    const response = await fetch(`${peerUrl}/federation/request`, {
+    const response = await fetch(`${resolvedPeerUrl}/federation/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
@@ -349,11 +454,10 @@ export async function federationRequest(peerUrl: string, peerId: string, alias?:
     // Store them as a pending peer so we can send intents when approved
     try {
       const { addPeer } = await import('../daemon/peers.js');
-      const cardRes = await fetch(`${peerUrl}/.well-known/ogp`);
-      if (cardRes.ok) {
-        const card = await cardRes.json() as { displayName?: string; email?: string; publicKey?: string };
-        const peerHostname = new URL(peerUrl).hostname;
-        const peerPort = new URL(peerUrl).port || '18790';
+      const card = peerCard;
+      if (card) {
+        const peerHostname = new URL(resolvedPeerUrl).hostname;
+        const peerPort = new URL(resolvedPeerUrl).port || '18790';
         // BUILD-111: Use a 32-char public key prefix as canonical ID to avoid
         // duplicate short/full peer IDs across request/approve flows.
         const canonicalId = card.publicKey?.substring(0, 32) || `${peerHostname}:${peerPort}`;
@@ -361,7 +465,7 @@ export async function federationRequest(peerUrl: string, peerId: string, alias?:
           id: canonicalId,
           displayName: card.displayName || peerId,
           email: card.email || '',
-          gatewayUrl: peerUrl,
+          gatewayUrl: resolvedPeerUrl,
           publicKey: card.publicKey || '',
           status: 'pending',
           requestedAt: new Date().toISOString(),
@@ -389,6 +493,10 @@ export interface ApproveOptions {
 export async function federationApprove(peerId: string, options: ApproveOptions = {}): Promise<void> {
   const config = requireConfig();
 
+  if (!await ensureLocalGatewayReachable(config, 'approve federation requests')) {
+    return;
+  }
+
   // Resolve peer identifier (alias, ID, or public key)
   const resolvedId = resolvePeerId(peerId);
   if (!resolvedId) {
@@ -405,6 +513,15 @@ export async function federationApprove(peerId: string, options: ApproveOptions 
 
   if (peer.status === 'approved') {
     console.log(`Peer ${peerId} is already approved.`);
+    return;
+  }
+
+  let peerGatewayUrl = peer.gatewayUrl;
+  try {
+    peerGatewayUrl = await refreshPeerGatewayUrlForApproval(peer);
+  } catch (error: any) {
+    console.error(error.message);
+    console.error('Ask the peer to fix their gatewayUrl and resend the federation request.');
     return;
   }
 
@@ -485,7 +602,7 @@ export async function federationApprove(peerId: string, options: ApproveOptions 
     const keypair = loadOrGenerateKeyPair();
     const ourConfig = requireConfig();
     const nonce = crypto.randomUUID();
-    await fetch(`${peer.gatewayUrl}/federation/approve`, {
+    await fetch(`${peerGatewayUrl}/federation/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
