@@ -1,3 +1,16 @@
+import { type OGPConfig } from '../shared/config.js';
+type FederationCard = {
+    displayName?: string;
+    email?: string;
+    gatewayUrl?: string;
+    publicKey?: string;
+};
+export declare function fetchFederationCard(gatewayUrl: string, fetchImpl?: typeof fetch): Promise<{
+    requestedUrl: string;
+    canonicalUrl: string;
+    card: FederationCard;
+}>;
+export declare function ensureLocalGatewayReachable(config: Pick<OGPConfig, 'gatewayUrl'>, actionLabel: string, fetchImpl?: typeof fetch): Promise<boolean>;
 export declare function federationList(status?: 'pending' | 'approved' | 'rejected' | 'removed'): Promise<void>;
 export declare function federationStatus(): Promise<void>;
 export declare function federationRequest(peerUrl: string, peerId: string, alias?: string): Promise<boolean>;
@@ -60,4 +73,5 @@ export declare function federationConnect(pubkey: string, alias?: string): Promi
  * Usage: ogp federation alias <peer-id> <alias>
  */
 export declare function federationSetAlias(peerId: string, alias: string): Promise<void>;
+export {};
 //# sourceMappingURL=federation.d.ts.map
