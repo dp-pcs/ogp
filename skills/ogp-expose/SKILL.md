@@ -1,6 +1,6 @@
 ---
 skill_name: ogp-expose
-version: 0.3.0
+version: 0.4.0
 description: Expose OGP via a public HTTPS endpoint, usually a stable Cloudflare hostname or named tunnel. Use when the user wants to verify or fix gateway reachability, align `gatewayUrl` with the real public endpoint, or set up temporary cloudflared/ngrok exposure for testing.
 trigger: Use when the user wants to expose their OGP daemon to the internet, get a public URL for federation, or set up a tunnel for peer discovery.
 requires:
@@ -74,6 +74,101 @@ ogp --for hermes status
 
 Use `--for <framework>` on all exposure and verification commands when the target is not obvious.
 
+## Guided Wizard
+
+Follow this decision order every time:
+
+1. **Cloudflare named tunnel + stable hostname** if the user has a domain on Cloudflare or wants a durable production URL.
+2. **ngrok** if they need a stable-enough ad hoc URL and already have ngrok/auth configured.
+3. **Temporary Cloudflare quick tunnel** only for fast testing when the URL can change on restart.
+
+Ask or determine these three facts first:
+
+1. Which framework is being exposed (`openclaw`, `hermes`, or another configured framework)?
+2. Does the user want a **stable long-lived URL** or just a **temporary test URL**?
+3. Do they already have **Cloudflare DNS/domain control** or **ngrok auth** available?
+
+Then route them through exactly one branch below instead of mixing options.
+
+## Branch 1: Stable Cloudflare Named Tunnel
+
+Choose this when the user wants the recommended path.
+
+Checklist:
+
+1. Confirm the framework and its daemon port.
+2. Choose the canonical hostname that should become `gatewayUrl`.
+3. Create or verify the named tunnel.
+4. Route DNS to the tunnel.
+5. Point ingress at the correct local daemon port.
+6. Set `gatewayUrl` to the same public hostname.
+7. Verify local card, public card, and config all agree.
+
+Primary repo doc:
+
+- `docs/cloudflare-named-tunnel-setup.md`
+
+Use that doc as the copy-paste path instead of rewriting the steps from scratch.
+
+Success criteria:
+
+- The public `/.well-known/ogp` card loads.
+- Its `gatewayUrl` matches the intended hostname.
+- Its public key matches the local daemon card.
+
+## Branch 2: ngrok
+
+Choose this when the user wants something faster than named Cloudflare but more intentional than a throwaway quick tunnel.
+
+Checklist:
+
+1. Confirm ngrok is installed and authenticated.
+2. Start the tunnel against the correct local daemon port.
+3. Capture the HTTPS URL.
+4. Update `gatewayUrl` to that URL only if it is the intended endpoint for current federation.
+5. Verify the public `/.well-known/ogp` card.
+
+Use this command path:
+
+```bash
+ogp --for openclaw expose --method ngrok
+```
+
+## Branch 3: Temporary Cloudflare Quick Tunnel
+
+Choose this only for short-lived testing.
+
+Checklist:
+
+1. Start the quick tunnel on the correct daemon port.
+2. Copy the temporary HTTPS URL.
+3. Warn that it changes on restart.
+4. Update `gatewayUrl` only if the user is intentionally federating against this temporary URL.
+5. Verify the public `/.well-known/ogp` card before testing federation.
+
+Use this command path:
+
+```bash
+ogp --for openclaw expose
+```
+
+## Verification Flow
+
+Always end with this verification sequence:
+
+```bash
+curl -s http://127.0.0.1:<daemon-port>/.well-known/ogp
+curl -s https://your-public-hostname/.well-known/ogp
+```
+
+Confirm:
+
+1. Public key matches local.
+2. Public `gatewayUrl` matches config `gatewayUrl`.
+3. The framework/port behind the hostname is the one the user intended.
+
+If any of those disagree, do not treat the gateway as ready for federation.
+
 ## Recommended Production Baseline
 
 Prefer one stable HTTPS hostname per framework:
@@ -133,9 +228,9 @@ Sign up at https://ngrok.com and get your auth token:
 ngrok config add-authtoken <your-token>
 ```
 
-## Usage
+## Command Reference
 
-### Expose with Cloudflared (Temporary / Ad Hoc)
+### Temporary Cloudflare Quick Tunnel
 
 ```bash
 ogp --for openclaw expose
@@ -152,7 +247,7 @@ This will:
 # Set "gatewayUrl" to the URL shown by cloudflared only if this temporary URL is the intended canonical endpoint
 ```
 
-### Expose with ngrok (Fallback Only)
+### ngrok Tunnel
 
 ```bash
 ogp --for openclaw expose --method ngrok
@@ -169,9 +264,9 @@ This will:
 # Set "gatewayUrl" to the ngrok URL
 ```
 
-## Complete Setup Workflow
+## Worked Flows
 
-### First-time or Temporary Setup
+### Temporary Exposure Flow
 
 1. **Run OGP setup:**
    ```bash
@@ -209,7 +304,7 @@ This will:
    curl https://your-tunnel-url/.well-known/ogp
    ```
 
-### Permanent Setup with Cloudflared Named Tunnel
+### Stable Named Tunnel Flow
 
 For production use, create a permanent cloudflared tunnel:
 
@@ -253,7 +348,7 @@ Then make sure each framework config uses its own canonical hostname:
 }
 ```
 
-## Comparison: Cloudflared vs ngrok
+## Selection Notes
 
 ### Cloudflared / Stable Hostname
 **Pros:**

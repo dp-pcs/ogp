@@ -36,7 +36,7 @@ const DEFAULT_AGENT_COMMS_CONFIG: AgentCommsConfig = {
     'general': { level: 'summary' },
     'testing': { level: 'full' }
   },
-  defaultLevel: 'summary',
+  defaultLevel: 'off',
   activityLog: true
 };
 

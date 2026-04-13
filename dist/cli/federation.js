@@ -478,9 +478,9 @@ export async function federationApprove(peerId, options = {}) {
     approvePeer(peerId);
     console.log(`✓ Approved peer: ${peerId}`);
     // BUILD-102: Auto-register existing local projects as agent-comms topics for this peer
-    const { listProjects } = await import('../daemon/projects.js');
+    const { listProjectsForPeer } = await import('../daemon/projects.js');
     const { setPeerTopicPolicy } = await import('../daemon/peers.js');
-    const projects = listProjects();
+    const projects = listProjectsForPeer(peerId);
     if (projects.length > 0) {
         for (const project of projects) {
             setPeerTopicPolicy(peerId, project.id, 'summary');
@@ -649,11 +649,25 @@ export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
         });
         if (timeoutId)
             clearTimeout(timeoutId);
-        if (!response.ok) {
-            console.error(`Send failed: ${response.status} ${response.statusText}`);
-            return null;
+        let result = null;
+        try {
+            result = await response.json();
         }
-        const result = await response.json();
+        catch {
+            result = null;
+        }
+        if (!response.ok) {
+            if (result?.error) {
+                console.error(`Send failed: ${response.status} ${response.statusText} - ${result.error}`);
+                return result;
+            }
+            console.error(`Send failed: ${response.status} ${response.statusText}`);
+            return {
+                success: false,
+                error: `Send failed: ${response.status} ${response.statusText}`,
+                statusCode: response.status
+            };
+        }
         return result;
     }
     catch (error) {

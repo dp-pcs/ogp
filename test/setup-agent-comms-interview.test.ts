@@ -1,11 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyDelegatedAuthorityInterviewAnswers,
-  deriveDelegatedAuthorityInterviewAnswers
+  deriveDelegatedAuthorityInterviewAnswers,
+  isValidGatewayUrl,
+  normalizeGatewayUrlInput
 } from '../src/cli/setup.js';
 import type { OGPConfig } from '../src/shared/config.js';
 
 describe('agent-comms interview config helpers', () => {
+  it('normalizes a bare gateway hostname to https', () => {
+    expect(normalizeGatewayUrlInput('david-proctor.gw.clawporate.elelem.expert/')).toBe(
+      'https://david-proctor.gw.clawporate.elelem.expert'
+    );
+  });
+
+  it('accepts valid normalized gateway URLs and rejects malformed ones', () => {
+    expect(isValidGatewayUrl('https://ogp.example.com')).toBe(true);
+    expect(isValidGatewayUrl('http://localhost:18790')).toBe(true);
+    expect(isValidGatewayUrl('https://')).toBe(false);
+  });
+
   it('derives current interview defaults from delegated-authority config', () => {
     const config: OGPConfig = {
       daemonPort: 18790,

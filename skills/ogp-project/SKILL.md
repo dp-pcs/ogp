@@ -97,7 +97,7 @@ What this skill is aiming for:
 ### 2. Freeform Activity Logging
 - Monitors for logging intent (any natural phrasing)
 - Logs high-level decisions, progress, blockers, questions, and context — all queryable later
-- Auto-registers project ID as agent-comms topic for all approved peers
+- Auto-registers project ID as agent-comms topic for approved peers who are explicit project members
 
 ### 3. Project-Aware Coordination Workflow
 - Before starting project-related work, the agent should consider checking local state first

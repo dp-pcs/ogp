@@ -460,7 +460,7 @@ Content-Type: application/json
       "action": "contribute",
       "projectId": "shared-app",
       "contribution": {
-        "topic": "progress",
+        "entryType": "progress",
         "summary": "Completed authentication system",
         "metadata": {
           "files": ["src/auth.ts", "src/jwt.ts"],
@@ -485,7 +485,7 @@ Bob's daemon:
 Bob sees:
 
 ```
-[OGP Project] Alice contributed to shared-app (progress): Completed authentication system
+[OGP Project] Alice contributed to shared-app (entry type: progress): Completed authentication system
 ```
 
 ### Alice Queries Bob's Project
@@ -539,13 +539,13 @@ Content-Type: application/json
       "projectName": "Shared Mobile App",
       "contributions": [
         {
-          "topic": "progress",
+          "entryType": "progress",
           "summary": "Deployed staging environment",
           "author": "peer-bob",
           "timestamp": "2026-03-24T10:00:00Z"
         },
         {
-          "topic": "blocker",
+          "entryType": "blocker",
           "summary": "Waiting for API key approval",
           "author": "peer-bob",
           "timestamp": "2026-03-23T15:30:00Z"

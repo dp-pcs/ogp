@@ -1,4 +1,4 @@
-import { createProject, addProject, getProject, listProjects, joinProject, isProjectMember, contributeToProject, getTopicContributions, getAuthorContributions, searchContributions, getProjectStatus, ensureProjectTopic } from '../daemon/projects.js';
+import { createProject, addProject, getProject, listProjects, listProjectsForPeer, joinProject, isProjectMember, contributeToProject, getTopicContributions, getAuthorContributions, searchContributions, getProjectStatus, ensureProjectTopic, getContributionEntryType } from '../daemon/projects.js';
 import { loadConfig } from '../shared/config.js';
 import { getPeer } from '../daemon/peers.js';
 import { federationSend } from './federation.js';
@@ -27,10 +27,10 @@ export async function projectCreate(projectId, projectName, options = {}) {
     console.log(`  Members: ${project.members.join(', ')}`);
     // BUILD-102: Auto-register project ID as agent-comms topic for all approved peers
     const { listPeers, setPeerTopicPolicy } = await import('../daemon/peers.js');
-    const approvedPeers = listPeers('approved');
-    if (approvedPeers.length > 0) {
+    const memberPeers = listPeers('approved').filter(peer => listProjectsForPeer(peer.id, [project]).length > 0);
+    if (memberPeers.length > 0) {
         let registered = 0;
-        for (const peer of approvedPeers) {
+        for (const peer of memberPeers) {
             setPeerTopicPolicy(peer.id, projectId, 'summary');
             registered++;
         }
@@ -119,9 +119,9 @@ export async function projectList() {
     }
 }
 /**
- * Contribute to a project topic
+ * Contribute to a project entry type
  */
-export async function projectContribute(projectId, topic, summary, options = {}) {
+export async function projectContribute(projectId, entryType, summary, options = {}) {
     const config = loadConfig();
     if (!config) {
         console.error('Error: Not configured. Run "ogp setup" first.');
@@ -147,12 +147,12 @@ export async function projectContribute(projectId, topic, summary, options = {})
             process.exit(1);
         }
     }
-    // Ensure the topic exists
-    ensureProjectTopic(projectId, topic);
+    // Keep the existing topic bucket structure on disk; user-facing terminology is "entry type".
+    ensureProjectTopic(projectId, entryType);
     // Add the contribution
-    const contributionId = contributeToProject(projectId, topic, config.email, summary, metadata);
+    const contributionId = contributeToProject(projectId, entryType, config.email, summary, metadata);
     if (contributionId) {
-        console.log(`✓ Contributed to project '${project.name}' [${topic}]`);
+        console.log(`✓ Contributed to project '${project.name}' [${entryType}]`);
         console.log(`  Summary: ${summary}`);
         if (metadata) {
             console.log(`  Metadata: ${JSON.stringify(metadata, null, 2)}`);
@@ -166,9 +166,9 @@ export async function projectContribute(projectId, topic, summary, options = {})
     // BUILD-93: Auto-push to all approved peers who are project members
     if (!options.localOnly) {
         const { listPeers } = await import('../daemon/peers.js');
-        const peers = listPeers().filter(p => p.status === 'approved');
+        const peers = listPeers('approved').filter(peer => listProjectsForPeer(peer.id, [project]).length > 0);
         if (peers.length > 0) {
-            const payload = JSON.stringify({ projectId, topic, summary, ...(metadata && { metadata }) });
+            const payload = JSON.stringify({ projectId, entryType, topic: entryType, summary, ...(metadata && { metadata }) });
             let pushed = 0;
             for (const peer of peers) {
                 try {
@@ -196,15 +196,16 @@ export async function projectQuery(projectId, options = {}) {
     }
     const limit = options.limit || 20;
     let contributions;
+    const entryType = options.entryType || options.topic;
     if (options.search) {
         // Search by text
         contributions = searchContributions(projectId, options.search, limit);
         console.log(`Search results for "${options.search}" in project '${project.name}':`);
     }
-    else if (options.topic) {
+    else if (entryType) {
         // Query by entry type
-        contributions = getTopicContributions(projectId, options.topic, limit);
-        console.log(`Contributions [${options.topic}] in project '${project.name}':`);
+        contributions = getTopicContributions(projectId, entryType, limit);
+        console.log(`Contributions [${entryType}] in project '${project.name}':`);
     }
     else if (options.author) {
         // Query by author
@@ -236,7 +237,7 @@ export async function projectQuery(projectId, options = {}) {
     console.log();
     for (const contrib of contributions) {
         console.log(`[${new Date(contrib.timestamp).toLocaleString()}] ${contrib.authorId}`);
-        console.log(`  Type: ${contrib.topic}`);
+        console.log(`  Entry type: ${getContributionEntryType(contrib)}`);
         console.log(`  Summary: ${contrib.summary}`);
         if (contrib.metadata) {
             console.log(`  Metadata: ${JSON.stringify(contrib.metadata, null, 2)}`);
@@ -329,6 +330,11 @@ export async function projectRequestJoin(peerId, projectId, projectName, options
                 joinProject(projectId, config.email);
                 console.log(`✓ Added to project members`);
             }
+            if (!isProjectMember(projectId, peer.id)) {
+                joinProject(projectId, peer.id);
+            }
+            const { setPeerTopicPolicy } = await import('../daemon/peers.js');
+            setPeerTopicPolicy(peer.id, projectId, 'summary');
             console.log(`✓ Successfully joined project '${responseProjectName || projectName}'`);
             console.log(`  Run 'ogp project list' to see your projects`);
         }
@@ -349,7 +355,7 @@ export async function projectRequestJoin(peerId, projectId, projectName, options
 /**
  * Send a project contribution to peers
  */
-export async function projectSendContribution(peerId, projectId, topic, summary, options = {}) {
+export async function projectSendContribution(peerId, projectId, entryType, summary, options = {}) {
     const config = loadConfig();
     if (!config) {
         console.error('Error: Not configured. Run "ogp setup" first.');
@@ -377,11 +383,12 @@ export async function projectSendContribution(peerId, projectId, topic, summary,
     }
     const payload = {
         projectId,
-        topic,
+        entryType,
+        topic: entryType,
         summary,
         ...(metadata && { metadata })
     };
-    console.log(`Sending contribution to project '${projectId}' [${topic}] to peer '${peerId}'...`);
+    console.log(`Sending contribution to project '${projectId}' [${entryType}] to peer '${peerId}'...`);
     try {
         await federationSend(peerId, 'project.contribute', JSON.stringify(payload));
         console.log(`✓ Contribution sent to peer '${peerId}'`);
@@ -409,9 +416,12 @@ export async function projectQueryPeer(peerId, projectId, options = {}) {
         console.error(`Error: Peer '${peerId}' is not approved for federation`);
         process.exit(1);
     }
+    const entryType = options.entryType || options.topic;
     const payload = { projectId };
-    if (options.topic)
-        payload.topic = options.topic;
+    if (entryType) {
+        payload.entryType = entryType;
+        payload.topic = entryType;
+    }
     if (options.author)
         payload.authorId = options.author;
     if (options.limit)
@@ -433,7 +443,7 @@ export async function projectQueryPeer(peerId, projectId, options = {}) {
             console.log(`\n✓ Found ${contributions.length} contributions in project '${projectName}':\n`);
             contributions.forEach((contribution, index) => {
                 const timestamp = new Date(contribution.timestamp).toLocaleString();
-                console.log(`${index + 1}. [${contribution.topic}] by ${contribution.authorId} (${timestamp})`);
+                console.log(`${index + 1}. [${getContributionEntryType(contribution)}] by ${contribution.authorId} (${timestamp})`);
                 console.log(`   ${contribution.summary}`);
                 if (contribution.metadata) {
                     console.log(`   Metadata: ${JSON.stringify(contribution.metadata, null, 2)}`);
@@ -445,8 +455,8 @@ export async function projectQueryPeer(peerId, projectId, options = {}) {
             console.log(`\n✓ No contributions found in project '${projectName}'`);
             // Check if filters were applied
             const filters = [];
-            if (options.topic)
-                filters.push(`topic: ${options.topic}`);
+            if (entryType)
+                filters.push(`entry type: ${entryType}`);
             if (options.author)
                 filters.push(`author: ${options.author}`);
             if (filters.length > 0) {

@@ -19,7 +19,7 @@ const DEFAULT_AGENT_COMMS_CONFIG = {
         'general': { level: 'summary' },
         'testing': { level: 'full' }
     },
-    defaultLevel: 'summary',
+    defaultLevel: 'off',
     activityLog: true
 };
 /**

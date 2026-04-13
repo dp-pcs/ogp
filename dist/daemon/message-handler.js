@@ -163,7 +163,7 @@ async function handleAgentComms(message, displayName) {
         const wittyMessage = getWittyRejection();
         const rejection = {
             status: 'rejected',
-            reason: 'not-available',
+            reason: 'topic-not-permitted',
             message: wittyMessage
         };
         const { signature } = signObject(rejection, keypair.privateKey);
@@ -252,7 +252,7 @@ function formatNotification(message, displayName) {
         case 'project.join':
             return `[OGP Project] ${displayName} wants to join project '${payload.projectName}' (${payload.projectId})`;
         case 'project.contribute':
-            return `[OGP Project] ${displayName} contributed to project '${payload.projectId}' topic '${payload.topic}': ${payload.summary}`;
+            return `[OGP Project] ${displayName} contributed to project '${payload.projectId}' entry type '${payload.entryType || payload.topic}': ${payload.summary}`;
         case 'project.query':
             return `[OGP Project] ${displayName} queried project '${payload.projectId}'`;
         case 'project.status':
@@ -393,6 +393,8 @@ async function handleProjectJoin(message, displayName, payload) {
     // Add the requesting peer as a member
     const success = joinProject(projectId, message.from);
     if (success) {
+        const { setPeerTopicPolicy } = await import('./peers.js');
+        setPeerTopicPolicy(message.from, projectId, 'summary');
         const notificationText = `[OGP Project] ${displayName} joined project '${projectName}' (${projectId})`;
         await notifyOpenClaw({
             text: notificationText,
@@ -431,12 +433,13 @@ async function handleProjectJoin(message, displayName, payload) {
  * Handle project.contribute intent
  */
 async function handleProjectContribute(message, displayName, payload) {
-    const { projectId, topic, summary, metadata } = payload;
-    if (!projectId || !topic || !summary) {
+    const { projectId, summary, metadata } = payload;
+    const entryType = payload.entryType || payload.topic;
+    if (!projectId || !entryType || !summary) {
         return {
             success: false,
             nonce: message.nonce,
-            error: 'Missing required fields: projectId, topic, summary',
+            error: 'Missing required fields: projectId, entryType/topic, summary',
             statusCode: 400
         };
     }
@@ -458,12 +461,12 @@ async function handleProjectContribute(message, displayName, payload) {
             statusCode: 403
         };
     }
-    // Ensure topic exists
-    ensureProjectTopic(projectId, topic);
+    // Keep the existing topic bucket structure on disk; user-facing terminology is "entry type".
+    ensureProjectTopic(projectId, entryType);
     // Add the contribution
-    const contributionId = contributeToProject(projectId, topic, message.from, summary, metadata);
+    const contributionId = contributeToProject(projectId, entryType, message.from, summary, metadata);
     if (contributionId) {
-        const notificationText = `[OGP Project] ${displayName} contributed to '${project.name}' topic '${topic}': ${summary}`;
+        const notificationText = `[OGP Project] ${displayName} contributed to '${project.name}' entry type '${entryType}': ${summary}`;
         await notifyOpenClaw({
             text: notificationText,
             metadata: {
@@ -472,7 +475,8 @@ async function handleProjectContribute(message, displayName, payload) {
                     intent: 'project.contribute',
                     nonce: message.nonce,
                     projectId,
-                    topic,
+                    entryType,
+                    topic: entryType,
                     summary,
                     contributionId,
                     payload: message.payload
@@ -485,7 +489,8 @@ async function handleProjectContribute(message, displayName, payload) {
             response: {
                 contributed: true,
                 projectId,
-                topic,
+                entryType,
+                topic: entryType,
                 contributionId,
                 timestamp: new Date().toISOString()
             }
@@ -504,7 +509,8 @@ async function handleProjectContribute(message, displayName, payload) {
  * Handle project.query intent
  */
 async function handleProjectQuery(message, displayName, payload) {
-    const { projectId, topic, authorId, limit = 20 } = payload;
+    const { projectId, authorId, limit = 20 } = payload;
+    const entryType = payload.entryType || payload.topic;
     if (!projectId) {
         return {
             success: false,
@@ -534,9 +540,9 @@ async function handleProjectQuery(message, displayName, payload) {
     // Get contributions based on query parameters
     let contributions;
     let queryDescription;
-    if (topic) {
-        contributions = getTopicContributions(projectId, topic, limit);
-        queryDescription = `topic '${topic}'`;
+    if (entryType) {
+        contributions = getTopicContributions(projectId, entryType, limit);
+        queryDescription = `entry type '${entryType}'`;
     }
     else if (authorId) {
         contributions = getAuthorContributions(projectId, authorId, limit);
@@ -577,7 +583,8 @@ async function handleProjectQuery(message, displayName, payload) {
                 id: c.id,
                 timestamp: c.timestamp,
                 authorId: c.authorId,
-                topic: c.topic,
+                entryType: c.entryType || c.topic,
+                topic: c.entryType || c.topic,
                 summary: c.summary,
                 metadata: c.metadata
             })),

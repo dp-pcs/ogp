@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { runAgentCommsInterview, runSetup } from './cli/setup.js';
+import { runAgentCommsInterview, runSetup, runSetupResetKeypair } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { requireConfig, loadConfig, saveConfig } from './shared/config.js';
 import { loadMetaConfig } from './shared/meta-config.js';
@@ -202,7 +202,15 @@ program
 program
   .command('setup')
   .description('Interactive setup wizard')
-  .action(async () => {
+  .option('--reset-keypair', 'Delete the active framework keypair and generate a new one')
+  .action(async (options) => {
+    if (options.resetKeypair) {
+      const forFlag = program.opts().for;
+      selectFramework(forFlag);
+      await runSetupResetKeypair();
+      return;
+    }
+
     await runSetup();
   });
 
@@ -967,7 +975,7 @@ project
   .action(async (projectId, options) => {
     const queryOptions = {
       ...options,
-      topic: options.type || options.topic, // --type takes precedence
+      entryType: options.type || options.topic, // --type takes precedence; --topic remains a legacy alias
       limit: parseInt(options.limit, 10)
     };
     await projectQuery(projectId, queryOptions);
@@ -1018,7 +1026,7 @@ project
   .action(async (peerId, projectId, options) => {
     const queryOptions = {
       ...options,
-      topic: options.type || options.topic, // --type takes precedence
+      entryType: options.type || options.topic, // --type takes precedence; --topic remains a legacy alias
       limit: parseInt(options.limit, 10),
       timeout: parseInt(options.timeout, 10)
     };

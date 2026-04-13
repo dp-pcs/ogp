@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getConfigDir, ensureConfigDir } from '../shared/config.js';
+export function getContributionEntryType(contribution) {
+    return contribution?.entryType || contribution?.topic || 'unknown';
+}
 function getProjectsFile() {
     return path.join(getConfigDir(), 'projects.json');
 }
@@ -47,6 +50,9 @@ export function getProject(projectId) {
 }
 export function listProjects() {
     return loadProjects();
+}
+export function listProjectsForPeer(peerId, projects = loadProjects()) {
+    return projects.filter(project => project.members.includes(peerId));
 }
 export function deleteProject(projectId) {
     const projects = loadProjects();
@@ -122,9 +128,9 @@ export function ensureProjectTopic(projectId, topicName, description) {
     return true;
 }
 /**
- * Add a contribution to a project topic
+ * Add a contribution to a project entry type
  */
-export function contributeToProject(projectId, topicName, authorId, summary, metadata) {
+export function contributeToProject(projectId, entryTypeName, authorId, summary, metadata) {
     const projects = loadProjects();
     const project = projects.find(p => p.id === projectId);
     if (!project)
@@ -133,11 +139,11 @@ export function contributeToProject(projectId, topicName, authorId, summary, met
     if (!project.members.includes(authorId)) {
         return null;
     }
-    // Ensure the topic exists
-    let topic = project.topics.find(t => t.name === topicName);
+    // Keep the existing topic bucket structure on disk; user-facing terminology is "entry type".
+    let topic = project.topics.find(t => t.name === entryTypeName);
     if (!topic) {
         topic = {
-            name: topicName,
+            name: entryTypeName,
             contributions: [],
             lastUpdated: new Date().toISOString()
         };
@@ -145,12 +151,13 @@ export function contributeToProject(projectId, topicName, authorId, summary, met
     }
     // Create the contribution
     const now = new Date().toISOString();
-    const contributionId = `${projectId}-${topicName}-${Date.now()}`;
+    const contributionId = `${projectId}-${entryTypeName}-${Date.now()}`;
     const contribution = {
         id: contributionId,
         timestamp: now,
         authorId,
-        topic: topicName,
+        entryType: entryTypeName,
+        topic: entryTypeName,
         summary,
         metadata
     };
@@ -161,9 +168,9 @@ export function contributeToProject(projectId, topicName, authorId, summary, met
     return contributionId;
 }
 /**
- * Get contributions for a specific topic across all projects
+ * Get contributions for a specific entry type across all projects
  */
-export function getTopicContributions(projectId, topicName, limit) {
+export function getTopicContributions(projectId, entryTypeName, limit) {
     const project = getProject(projectId);
     if (!project)
         return [];
@@ -171,17 +178,17 @@ export function getTopicContributions(projectId, topicName, limit) {
     // Handle both data formats: old flat format and new nested format
     if (project.topics.length > 0 && typeof project.topics[0] === 'object') {
         // New nested format: topics are objects with contributions
-        const topic = project.topics.find(t => t.name === topicName);
+        const topic = project.topics.find(t => t.name === entryTypeName);
         if (!topic)
             return [];
         topicContributions = topic.contributions;
     }
     else {
         // Old flat format: check if topic exists and filter contributions
-        const topicExists = project.topics.includes(topicName);
+        const topicExists = project.topics.includes(entryTypeName);
         if (!topicExists)
             return [];
-        topicContributions = (project.contributions || []).filter((c) => c.topic === topicName);
+        topicContributions = (project.contributions || []).filter((c) => getContributionEntryType(c) === entryTypeName);
     }
     // Sort by timestamp descending (newest first)
     const sorted = [...topicContributions].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -226,20 +233,20 @@ export function searchContributions(projectId, query, limit) {
         // New nested format: topics are objects with contributions
         for (const topic of project.topics) {
             contributions.push(...topic.contributions.filter((c) => c.summary.toLowerCase().includes(lowerQuery) ||
-                c.topic.toLowerCase().includes(lowerQuery)));
+                getContributionEntryType(c).toLowerCase().includes(lowerQuery)));
         }
     }
     else {
         // Old flat format: search through the flat contributions array
         contributions = (project.contributions || []).filter((c) => c.summary.toLowerCase().includes(lowerQuery) ||
-            c.topic.toLowerCase().includes(lowerQuery));
+            getContributionEntryType(c).toLowerCase().includes(lowerQuery));
     }
     // Sort by timestamp descending (newest first)
     const sorted = contributions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return limit ? sorted.slice(0, limit) : sorted;
 }
 /**
- * Get project status summary (topics with recent activity)
+ * Get project status summary (entry types with recent activity)
  */
 export function getProjectStatus(projectId) {
     const project = getProject(projectId);
@@ -266,7 +273,7 @@ export function getProjectStatus(projectId) {
         // Old flat format: topics are strings, contributions are flat
         topics = project.topics.map(topicName => {
             // Filter contributions for this topic from the flat contributions array
-            const topicContributions = project.contributions.filter((c) => c.topic === topicName);
+            const topicContributions = project.contributions.filter((c) => getContributionEntryType(c) === topicName);
             const sortedContributions = [...topicContributions].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
             // Use peerId instead of authorId based on actual data format
             const contributors = [...new Set(topicContributions.map((c) => c.peerId || c.authorId))];

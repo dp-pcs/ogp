@@ -262,7 +262,7 @@ After installation, restart your shell or run `source ~/.bashrc` (bash) or `sour
 
 | Command | Description |
 |---------|-------------|
-| `ogp expose` | Launch guided tunnel setup wizard (coming soon) or start cloudflared tunnel in foreground |
+| `ogp expose` | Start a Cloudflare quick tunnel in the foreground; use the `ogp-expose` skill/doc flow for guided setup |
 | `ogp expose --background` | Run tunnel as background process |
 | `ogp expose --method ngrok` | Use ngrok instead of cloudflared |
 | `ogp expose stop` | Stop the tunnel |
@@ -743,11 +743,11 @@ Projects are optional collaboration boundaries layered on top of federation. The
 - Log high-level contributions by entry type (progress, decision, blocker, context)
 - Query local and peer contributions for project-aware coordination
 - Use project IDs as agent-comms topics for collaborator questions and summaries
-- **Auto-registration (v0.2.9+)**: Project IDs auto-register as agent-comms topics for all approved peers
+- **Auto-registration (v0.2.9+)**: Project IDs auto-register as agent-comms topics for approved peers who are explicit project members
 
 **Example:**
 ```bash
-# Create project (auto-registers as agent-comms topic for approved peers)
+# Create project (auto-registers as agent-comms topic for approved project members)
 ogp project create my-app "My App" --description "Expense tracker"
 
 # Log work by entry type
@@ -826,10 +826,10 @@ ogp agent-comms configure --global --topics "general,project-updates" --level su
 
 ### 9. Project Topic Auto-Registration (v0.2.9+)
 
-When you create a project, its ID is automatically registered as an agent-comms topic for all approved peers at `summary` level. When you approve a new peer, all existing local projects are auto-registered as topics for that peer.
+When you create a project, its ID is automatically registered as an agent-comms topic at `summary` level for approved peers who are explicit project members. When you approve a new peer, existing local projects are auto-registered only if that peer is already in the project's member list.
 
 ```bash
-# Creates project AND registers as topic for all peers
+# Creates project AND registers as topic for approved project members
 ogp project create my-app "My Application"
 
 # Approving a peer also registers existing projects as topics
@@ -1126,13 +1126,20 @@ If you are debugging OpenClaw integration directly:
 
 ### State Files
 
-- `~/.ogp/keypair.json` - Public key cache for the OpenClaw instance. On macOS the private key lives in an instance-specific Keychain entry; on non-macOS the file contains the full keypair.
+- `~/.ogp/keypair.json` - Public key cache plus key material metadata. On macOS the private key lives in an instance-specific Keychain entry; on non-macOS OGP encrypts the private key at rest when `OGP_KEYPAIR_SECRET`, `openclawToken`, or `hermesWebhookSecret` is available.
 - `~/.ogp/peers.json` - Federated peer list with scope grants
 - `~/.ogp/intents.json` - Intent registry (built-in + custom)
 - `~/.ogp/projects.json` - Project contexts and contributions
 - `~/.ogp/agent-comms-config.json` - Response policies and activity log
 
 On macOS, deleting `keypair.json` by itself does **not** rotate the gateway identity if the matching private key is still present in Keychain. Use `ogp setup --reset-keypair` when you intentionally want a new identity.
+
+On non-macOS, OGP prefers this secret source order for encrypting the private key at rest:
+- `OGP_KEYPAIR_SECRET`
+- `hermesWebhookSecret`
+- `openclawToken`
+
+If no encryption secret is available, OGP falls back to legacy plaintext key storage and logs a warning. Set one of the secrets above, then run `ogp setup --reset-keypair` to harden the instance.
 
 ## Skills (Claude Code)
 
@@ -1194,7 +1201,7 @@ Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill no
 **Best practices:**
 - Treat `~/.ogp/keypair.json` as identity material even when it contains only the public key cache on macOS.
 - On macOS, remember the private key source of truth is the instance-specific Keychain entry, not `keypair.json`; use `ogp setup --reset-keypair` for intentional rotation.
-- On non-macOS, keep `~/.ogp/keypair.json` secure with proper file permissions (`chmod 600`)
+- On non-macOS, provide `OGP_KEYPAIR_SECRET` or a platform secret so OGP can encrypt the private key at rest; `chmod 600` remains enforced but is not sufficient by itself.
 - Verify peer identity out-of-band before approving federation requests
 - Always use HTTPS tunnels (never expose raw HTTP)
 - Monitor OpenClaw logs for suspicious peer activity
