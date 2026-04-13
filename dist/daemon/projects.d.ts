@@ -2,7 +2,8 @@ export interface ProjectContribution {
     id: string;
     timestamp: string;
     authorId: string;
-    topic: string;
+    entryType?: string;
+    topic?: string;
     summary: string;
     metadata?: Record<string, any>;
 }
@@ -22,12 +23,14 @@ export interface Project {
     topics: ProjectTopic[];
     metadata?: Record<string, any>;
 }
+export declare function getContributionEntryType(contribution: Partial<ProjectContribution> | null | undefined): string;
 export declare function loadProjects(): Project[];
 export declare function saveProjects(projects: Project[]): void;
 export declare function createProject(id: string, name: string, description?: string, metadata?: Record<string, any>): Project;
 export declare function addProject(project: Project): void;
 export declare function getProject(projectId: string): Project | null;
 export declare function listProjects(): Project[];
+export declare function listProjectsForPeer(peerId: string, projects?: Project[]): Project[];
 export declare function deleteProject(projectId: string): boolean;
 /**
  * Join a project (add peer as member if not already present)
@@ -46,13 +49,13 @@ export declare function isProjectMember(projectId: string, peerId: string): bool
  */
 export declare function ensureProjectTopic(projectId: string, topicName: string, description?: string): boolean;
 /**
- * Add a contribution to a project topic
+ * Add a contribution to a project entry type
  */
-export declare function contributeToProject(projectId: string, topicName: string, authorId: string, summary: string, metadata?: Record<string, any>): string | null;
+export declare function contributeToProject(projectId: string, entryTypeName: string, authorId: string, summary: string, metadata?: Record<string, any>): string | null;
 /**
- * Get contributions for a specific topic across all projects
+ * Get contributions for a specific entry type across all projects
  */
-export declare function getTopicContributions(projectId: string, topicName: string, limit?: number): ProjectContribution[];
+export declare function getTopicContributions(projectId: string, entryTypeName: string, limit?: number): ProjectContribution[];
 /**
  * Get all contributions from a specific author in a project
  */
@@ -62,7 +65,7 @@ export declare function getAuthorContributions(projectId: string, authorId: stri
  */
 export declare function searchContributions(projectId: string, query: string, limit?: number): ProjectContribution[];
 /**
- * Get project status summary (topics with recent activity)
+ * Get project status summary (entry types with recent activity)
  */
 export declare function getProjectStatus(projectId: string): {
     project: any;

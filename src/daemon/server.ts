@@ -553,7 +553,13 @@ export function startServer(config?: OGPConfig, background = false): void {
         // Return full result including success flag so callers can check response.success
         res.json({ success: true, nonce: result.nonce, response: result.response });
       } else {
-        res.status(result.statusCode || 400).json({ success: false, error: result.error });
+        res.status(result.statusCode || 400).json({
+          success: false,
+          error: result.error,
+          statusCode: result.statusCode || 400,
+          ...(result.retryAfter !== undefined ? { retryAfter: result.retryAfter } : {}),
+          ...(result.response !== undefined ? { response: result.response } : {})
+        });
       }
     } catch (error) {
       console.error('[OGP] Error handling message:', error);

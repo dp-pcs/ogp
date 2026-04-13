@@ -7,6 +7,7 @@ interface ProjectContributeOptions {
     localOnly?: boolean;
 }
 interface ProjectQueryOptions {
+    entryType?: string;
     topic?: string;
     author?: string;
     limit?: number;
@@ -29,9 +30,9 @@ export declare function projectJoin(projectId: string, projectName?: string, opt
 export declare function projectRemove(projectId: string): Promise<void>;
 export declare function projectList(): Promise<void>;
 /**
- * Contribute to a project topic
+ * Contribute to a project entry type
  */
-export declare function projectContribute(projectId: string, topic: string, summary: string, options?: ProjectContributeOptions): Promise<void>;
+export declare function projectContribute(projectId: string, entryType: string, summary: string, options?: ProjectContributeOptions): Promise<void>;
 /**
  * Query project contributions
  */
@@ -49,7 +50,7 @@ export declare function projectRequestJoin(peerId: string, projectId: string, pr
 /**
  * Send a project contribution to peers
  */
-export declare function projectSendContribution(peerId: string, projectId: string, topic: string, summary: string, options?: ProjectContributeOptions): Promise<void>;
+export declare function projectSendContribution(peerId: string, projectId: string, entryType: string, summary: string, options?: ProjectContributeOptions): Promise<void>;
 /**
  * Query a peer's project contributions
  */

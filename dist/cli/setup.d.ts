@@ -7,6 +7,8 @@ export interface DelegatedAuthorityInterviewAnswers {
     approvalTopics: string[];
     trustedPeerAutonomy: boolean;
 }
+export declare function normalizeGatewayUrlInput(value: string): string;
+export declare function isValidGatewayUrl(value: string): boolean;
 export declare function buildDelegatedAuthorityConfig(options: {
     inboundMode: InboundFederationMode;
     humanSurfacingMode: HumanSurfacingMode;
@@ -16,6 +18,8 @@ export declare function buildDelegatedAuthorityConfig(options: {
 }): DelegatedAuthorityConfig;
 export declare function deriveDelegatedAuthorityInterviewAnswers(config: OGPConfig): DelegatedAuthorityInterviewAnswers;
 export declare function applyDelegatedAuthorityInterviewAnswers(config: OGPConfig, answers: DelegatedAuthorityInterviewAnswers): OGPConfig;
+export declare function formatKeypairResetSummary(publicKey: string): string[];
 export declare function runSetup(): Promise<void>;
+export declare function runSetupResetKeypair(): Promise<void>;
 export declare function runAgentCommsInterview(): Promise<void>;
 //# sourceMappingURL=setup.d.ts.map

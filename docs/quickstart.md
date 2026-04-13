@@ -434,8 +434,8 @@ ogp federation scopes <peer-id>
 
 # Projects
 ogp project create <id> <name> [--description "..."]
-ogp project contribute <id> <topic> <summary>
-ogp project query <id> [--limit 10] [--topic <topic>]
+ogp project contribute <id> <type> <summary>
+ogp project query <id> [--limit 10] [--type <type>]
 ogp project status <id>
 
 # Intents

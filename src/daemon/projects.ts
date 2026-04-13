@@ -9,7 +9,8 @@ export interface ProjectContribution {
   id: string;           // unique contribution ID
   timestamp: string;    // ISO timestamp
   authorId: string;     // peer ID who contributed
-  topic: string;        // the topic/area this contributes to
+  entryType?: string;   // preferred contribution category name
+  topic?: string;       // legacy alias for entryType
   summary: string;      // human-readable summary
   metadata?: Record<string, any>; // additional structured data
 }
@@ -30,6 +31,10 @@ export interface Project {
   members: string[];    // peer IDs who are participants
   topics: ProjectTopic[]; // organized knowledge areas
   metadata?: Record<string, any>; // extensible metadata
+}
+
+export function getContributionEntryType(contribution: Partial<ProjectContribution> | null | undefined): string {
+  return contribution?.entryType || contribution?.topic || 'unknown';
 }
 
 function getProjectsFile(): string {
@@ -88,6 +93,10 @@ export function getProject(projectId: string): Project | null {
 
 export function listProjects(): Project[] {
   return loadProjects();
+}
+
+export function listProjectsForPeer(peerId: string, projects: Project[] = loadProjects()): Project[] {
+  return projects.filter(project => project.members.includes(peerId));
 }
 
 export function deleteProject(projectId: string): boolean {
@@ -173,11 +182,11 @@ export function ensureProjectTopic(
 }
 
 /**
- * Add a contribution to a project topic
+ * Add a contribution to a project entry type
  */
 export function contributeToProject(
   projectId: string,
-  topicName: string,
+  entryTypeName: string,
   authorId: string,
   summary: string,
   metadata?: Record<string, any>
@@ -191,11 +200,11 @@ export function contributeToProject(
     return null;
   }
 
-  // Ensure the topic exists
-  let topic = project.topics.find(t => t.name === topicName);
+  // Keep the existing topic bucket structure on disk; user-facing terminology is "entry type".
+  let topic = project.topics.find(t => t.name === entryTypeName);
   if (!topic) {
     topic = {
-      name: topicName,
+      name: entryTypeName,
       contributions: [],
       lastUpdated: new Date().toISOString()
     };
@@ -204,12 +213,13 @@ export function contributeToProject(
 
   // Create the contribution
   const now = new Date().toISOString();
-  const contributionId = `${projectId}-${topicName}-${Date.now()}`;
+  const contributionId = `${projectId}-${entryTypeName}-${Date.now()}`;
   const contribution: ProjectContribution = {
     id: contributionId,
     timestamp: now,
     authorId,
-    topic: topicName,
+    entryType: entryTypeName,
+    topic: entryTypeName,
     summary,
     metadata
   };
@@ -223,11 +233,11 @@ export function contributeToProject(
 }
 
 /**
- * Get contributions for a specific topic across all projects
+ * Get contributions for a specific entry type across all projects
  */
 export function getTopicContributions(
   projectId: string,
-  topicName: string,
+  entryTypeName: string,
   limit?: number
 ): ProjectContribution[] {
   const project = getProject(projectId);
@@ -238,14 +248,14 @@ export function getTopicContributions(
   // Handle both data formats: old flat format and new nested format
   if ((project as any).topics.length > 0 && typeof (project as any).topics[0] === 'object') {
     // New nested format: topics are objects with contributions
-    const topic = ((project as any).topics as any[]).find(t => t.name === topicName);
+    const topic = ((project as any).topics as any[]).find(t => t.name === entryTypeName);
     if (!topic) return [];
     topicContributions = topic.contributions;
   } else {
     // Old flat format: check if topic exists and filter contributions
-    const topicExists = ((project as any).topics as string[]).includes(topicName);
+    const topicExists = ((project as any).topics as string[]).includes(entryTypeName);
     if (!topicExists) return [];
-    topicContributions = ((project as any).contributions || []).filter((c: any) => c.topic === topicName);
+    topicContributions = ((project as any).contributions || []).filter((c: any) => getContributionEntryType(c) === entryTypeName);
   }
 
   // Sort by timestamp descending (newest first)
@@ -313,14 +323,14 @@ export function searchContributions(
     for (const topic of (project as any).topics) {
       contributions.push(...topic.contributions.filter((c: any) =>
         c.summary.toLowerCase().includes(lowerQuery) ||
-        c.topic.toLowerCase().includes(lowerQuery)
+        getContributionEntryType(c).toLowerCase().includes(lowerQuery)
       ));
     }
   } else {
     // Old flat format: search through the flat contributions array
     contributions = ((project as any).contributions || []).filter((c: any) =>
       c.summary.toLowerCase().includes(lowerQuery) ||
-      c.topic.toLowerCase().includes(lowerQuery)
+      getContributionEntryType(c).toLowerCase().includes(lowerQuery)
     );
   }
 
@@ -333,7 +343,7 @@ export function searchContributions(
 }
 
 /**
- * Get project status summary (topics with recent activity)
+ * Get project status summary (entry types with recent activity)
  */
 export function getProjectStatus(projectId: string): {
   project: any; // Use actual stored format instead of interface
@@ -373,7 +383,7 @@ export function getProjectStatus(projectId: string): {
     // Old flat format: topics are strings, contributions are flat
     topics = ((project as any).topics as string[]).map(topicName => {
       // Filter contributions for this topic from the flat contributions array
-      const topicContributions = (project as any).contributions.filter((c: any) => c.topic === topicName);
+      const topicContributions = (project as any).contributions.filter((c: any) => getContributionEntryType(c) === topicName);
 
       const sortedContributions = [...topicContributions].sort(
         (a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()

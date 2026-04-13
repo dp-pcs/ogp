@@ -57,6 +57,7 @@ function showTopLevelHelp(): void {
   console.log('');
   console.log('Examples:');
   console.log('  ogp setup');
+  console.log('  ogp setup --reset-keypair');
   console.log('  ogp start');
   console.log('  ogp --for hermes federation list');
   console.log('  ogp federation ?');
@@ -254,7 +255,7 @@ function showProjectHelp(): void {
   console.log('  list            List all local projects');
   console.log('  remove          Remove a local project');
   console.log('  delete          Delete a project and all contributions');
-  console.log('  contribute      Add a contribution to a project');
+  console.log('  contribute      Add a contribution by entry type');
   console.log('  query           Query project contributions');
   console.log('  status          Show project status overview');
   console.log('');

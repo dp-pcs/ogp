@@ -52,6 +52,32 @@ export interface DelegatedAuthorityInterviewAnswers {
   trustedPeerAutonomy: boolean;
 }
 
+export function normalizeGatewayUrlInput(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+
+  return withProtocol.replace(/\/+$/, '');
+}
+
+export function isValidGatewayUrl(value: string): boolean {
+  if (!value) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function loadOpenClawConfig(): OpenClawConfig | null {
   try {
     const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
@@ -463,6 +489,30 @@ async function promptMultiSelect(
   return selected.length > 0 ? selected : frameworks.filter(f => f.detected);
 }
 
+async function promptGatewayUrl(rl: readline.Interface): Promise<string> {
+  while (true) {
+    const rawGatewayUrl = await rl.question(
+      'Gateway URL (your public URL — run "ogp expose" first; leave blank only if you understand federation/invites will not work until you set it later): '
+    );
+
+    const normalizedGatewayUrl = normalizeGatewayUrlInput(rawGatewayUrl);
+    if (!normalizedGatewayUrl) {
+      return '';
+    }
+
+    if (!isValidGatewayUrl(normalizedGatewayUrl)) {
+      console.log('  Invalid gateway URL. Enter a full URL or hostname, for example: https://gateway.example.com');
+      continue;
+    }
+
+    if (normalizedGatewayUrl !== rawGatewayUrl.trim()) {
+      console.log(`  Normalized gateway URL: ${normalizedGatewayUrl}`);
+    }
+
+    return normalizedGatewayUrl;
+  }
+}
+
 async function setupFramework(
   rl: readline.Interface,
   framework: DetectedFramework,
@@ -470,10 +520,7 @@ async function setupFramework(
 ): Promise<Framework> {
   console.log(`\n--- Setting up ${framework.name} ---`);
 
-  // Prompt for gateway URL
-  const gatewayUrl = await rl.question(
-    'Gateway URL (your public URL — run "ogp expose" first; leave blank only if you understand federation/invites will not work until you set it later): '
-  );
+  const gatewayUrl = await promptGatewayUrl(rl);
 
   // Prompt for display name
   const displayName = await rl.question(`Display name [${framework.name} Gateway]: `);
@@ -532,7 +579,7 @@ async function setupFramework(
     enabled: true,
     configDir: framework.suggestedConfigDir,
     daemonPort: framework.suggestedPort,
-    gatewayUrl: gatewayUrl.trim() || undefined,
+    gatewayUrl: gatewayUrl || undefined,
     displayName: displayName.trim() || `${framework.name} Gateway`,
     platform: framework.id === 'standalone' ? undefined : framework.id as 'openclaw' | 'hermes',
   };
@@ -542,7 +589,7 @@ async function setupFramework(
     daemonPort: framework.suggestedPort,
     openclawUrl: openclawUrl.trim() || 'http://localhost:18789',
     openclawToken: openclawToken.trim() || '',
-    gatewayUrl: gatewayUrl.trim() || '',
+    gatewayUrl: gatewayUrl || '',
     displayName: displayName.trim() || `${framework.name} Gateway`,
     email: email.trim() || '',
     stateDir: framework.suggestedConfigDir,
@@ -598,6 +645,14 @@ async function setupFramework(
   }
 
   return frameworkConfig;
+}
+
+export function formatKeypairResetSummary(publicKey: string): string[] {
+  return [
+    '✓ Reset OGP keypair for active framework',
+    `  ✓ Public key: ${publicKey.substring(0, 16)}...`,
+    '  Re-approve this gateway with peers if they pin or expect the old identity.'
+  ];
 }
 
 export async function runSetup(): Promise<void> {
@@ -697,6 +752,16 @@ export async function runSetup(): Promise<void> {
   } catch (error) {
     rl.close();
     throw error;
+  }
+}
+
+export async function runSetupResetKeypair(): Promise<void> {
+  const { resetKeyPair } = await import('../daemon/keypair.js');
+  requireConfig();
+
+  const keypair = resetKeyPair();
+  for (const line of formatKeypairResetSummary(keypair.publicKey)) {
+    console.log(line);
   }
 }
 

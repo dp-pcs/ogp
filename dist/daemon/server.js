@@ -476,7 +476,13 @@ export function startServer(config, background = false) {
                 res.json({ success: true, nonce: result.nonce, response: result.response });
             }
             else {
-                res.status(result.statusCode || 400).json({ success: false, error: result.error });
+                res.status(result.statusCode || 400).json({
+                    success: false,
+                    error: result.error,
+                    statusCode: result.statusCode || 400,
+                    ...(result.retryAfter !== undefined ? { retryAfter: result.retryAfter } : {}),
+                    ...(result.response !== undefined ? { response: result.response } : {})
+                });
             }
         }
         catch (error) {

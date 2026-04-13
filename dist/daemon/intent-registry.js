@@ -71,26 +71,32 @@ const DEFAULT_INTENTS = [
     },
     {
         name: 'project.contribute',
-        description: 'Add a summary/update to a project topic',
+        description: 'Add a summary/update to a project entry type',
         schema: {
             type: 'object',
             properties: {
                 projectId: { type: 'string', description: 'Project to contribute to' },
-                topic: { type: 'string', description: 'Topic area for this contribution' },
+                entryType: { type: 'string', description: 'Entry type for this contribution' },
+                topic: { type: 'string', description: 'Legacy alias for entryType' },
                 summary: { type: 'string', description: 'Summary of the contribution' },
                 metadata: { type: 'object', description: 'Additional structured data' }
             },
-            required: ['projectId', 'topic', 'summary']
+            required: ['projectId', 'summary'],
+            anyOf: [
+                { required: ['entryType'] },
+                { required: ['topic'] }
+            ]
         }
     },
     {
         name: 'project.query',
-        description: 'Ask what a peer has done on a project topic',
+        description: 'Ask what a peer has done on a project entry type',
         schema: {
             type: 'object',
             properties: {
                 projectId: { type: 'string', description: 'Project to query' },
-                topic: { type: 'string', description: 'Topic to query about (optional)' },
+                entryType: { type: 'string', description: 'Entry type to query about (optional)' },
+                topic: { type: 'string', description: 'Legacy alias for entryType (optional)' },
                 authorId: { type: 'string', description: 'Specific author to query (optional)' },
                 limit: { type: 'number', description: 'Maximum number of contributions to return', minimum: 1, maximum: 50 }
             },
@@ -99,7 +105,7 @@ const DEFAULT_INTENTS = [
     },
     {
         name: 'project.status',
-        description: 'Get current state of all topics in a project',
+        description: 'Get current state of all entry types in a project',
         schema: {
             type: 'object',
             properties: {

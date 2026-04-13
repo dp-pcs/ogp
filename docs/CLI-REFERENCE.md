@@ -962,6 +962,7 @@ ogp project query <id> [options] [--for <framework>]
 **Options:**
 - `--limit <n>` - Max number of entries (default: 20)
 - `--type <type>` - Filter by entry type
+- `--topic <type>` - Legacy alias for `--type`
 - `--for <framework>` - Framework to use (default: current/default)
 
 **Examples:**
