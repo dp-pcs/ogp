@@ -26,6 +26,7 @@ import { notifyOpenClaw } from './notify.js';
 import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
 import { startReplyCleanup, stopReplyCleanup, getPendingReply, deletePendingReply, storePendingReply, type ReplyPayload } from './reply-handler.js';
 import { startRendezvous, stopRendezvous } from './rendezvous.js';
+import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { connectBridge, disconnectBridge } from './openclaw-bridge.js';
 import type { ScopeBundle } from './scopes.js';
 import { loadIntents } from './intent-registry.js';
@@ -38,6 +39,7 @@ interface ShutdownDeps {
   stopDoormanCleanup: () => void;
   stopReplyCleanup: () => void;
   stopRendezvous: () => Promise<void>;
+  stopHeartbeat: () => void;
   getServer: () => { close: (cb: (error?: Error) => void) => void } | null;
   exit: (code: number) => never;
   setTimer: typeof setTimeout;
@@ -55,6 +57,7 @@ export function createGracefulShutdownHandler(deps: ShutdownDeps) {
     deps.disconnectBridge();
     deps.stopDoormanCleanup();
     deps.stopReplyCleanup();
+    deps.stopHeartbeat();
     await deps.stopRendezvous().catch(() => {});
 
     const activeServer = deps.getServer();
@@ -329,11 +332,10 @@ export function startServer(config?: OGPConfig, background = false): void {
         return res.status(500).json({ error: 'Failed to persist approved peer state' });
       }
 
-      console.log(`[OGP] Federation approved by ${approvedPeer.displayName} (v${protocolVersion})`);
+      console.log(`[OGP] Federation approved by ${approvedPeer.displayName} (wire protocol: v${protocolVersion})`);
 
       const approvalNotificationText = `[OGP Federation Approved] ${approvedPeer.displayName} (${approvedPeer.id}) approved your federation request\n` +
         `Gateway: ${approvedPeer.gatewayUrl}\n` +
-        `Protocol: v${protocolVersion}\n` +
         `Status: Federation is now active.`;
 
       const approvalNotificationPayload = {
@@ -625,7 +627,9 @@ export function startServer(config?: OGPConfig, background = false): void {
     // Start cleanup timers
     startDoormanCleanup();
     startReplyCleanup();
+    startHeartbeat();
     console.log(`[OGP] Started doorman and reply cleanup timers`);
+    console.log(`[OGP] Started peer heartbeat monitoring`);
 
     // Start OpenClaw WebSocket bridge (if using OpenClaw platform)
     if (cfg.platform === 'openclaw' || !cfg.platform) {
@@ -647,6 +651,7 @@ export function startServer(config?: OGPConfig, background = false): void {
     stopDoormanCleanup,
     stopReplyCleanup,
     stopRendezvous,
+    stopHeartbeat,
     getServer: () => server,
     exit: (code: number) => process.exit(code),
     setTimer: setTimeout,

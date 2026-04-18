@@ -21,7 +21,16 @@ function expandTilde(filePath) {
     return filePath;
 }
 function normalizeGatewayUrl(url) {
-    return url.trim().replace(/\/+$/, '');
+    const trimmed = url.trim();
+    if (!trimmed) {
+        return '';
+    }
+    // Add https:// if no protocol specified
+    const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+        ? trimmed
+        : `https://${trimmed}`;
+    // Remove trailing slashes
+    return withProtocol.replace(/\/+$/, '');
 }
 export async function fetchFederationCard(gatewayUrl, fetchImpl = fetch) {
     const requestedUrl = normalizeGatewayUrl(gatewayUrl);
@@ -182,9 +191,34 @@ export async function federationList(status) {
         const displayCol = (peer.displayName || '-').slice(0, 20).padEnd(20);
         const keyCol = (peer.publicKey?.substring(0, 16) || '-') + '...';
         const statusCol = peer.status;
-        console.log(`  ${aliasCol} ${displayCol} ${keyCol.padEnd(20)} ${statusCol}`);
+        // Health status indicator
+        let healthIcon = '';
+        if (peer.status === 'approved') {
+            if (peer.healthy === true) {
+                healthIcon = '✓';
+            }
+            else if (peer.healthy === false) {
+                healthIcon = '✗';
+            }
+            else {
+                healthIcon = '?'; // Unknown health status
+            }
+        }
+        console.log(`  ${healthIcon ? healthIcon + ' ' : ''}${aliasCol} ${displayCol} ${keyCol.padEnd(20)} ${statusCol}`);
         console.log(`    Gateway: ${peer.gatewayUrl}`);
         console.log(`    ID: ${peer.id}`);
+        // Show health details for approved peers
+        if (peer.status === 'approved') {
+            if (peer.lastSeenAt) {
+                const lastSeen = new Date(peer.lastSeenAt);
+                const now = new Date();
+                const minutesAgo = Math.floor((now.getTime() - lastSeen.getTime()) / 60000);
+                console.log(`    Last seen: ${minutesAgo < 60 ? minutesAgo + 'm ago' : Math.floor(minutesAgo / 60) + 'h ago'}`);
+            }
+            if (peer.healthCheckFailures && peer.healthCheckFailures > 0) {
+                console.log(`    Health check failures: ${peer.healthCheckFailures}`);
+            }
+        }
         console.log('');
     });
 }
@@ -280,6 +314,10 @@ export async function federationStatus() {
     const pendingPeers = peers.filter(p => p.status === 'pending');
     const rejectedPeers = peers.filter(p => p.status === 'rejected');
     const removedPeers = peers.filter(p => p.status === 'removed');
+    // Health statistics for approved peers
+    const healthyPeers = approvedPeers.filter(p => p.healthy === true);
+    const unhealthyPeers = approvedPeers.filter(p => p.healthy === false);
+    const unknownHealthPeers = approvedPeers.filter(p => p.healthy === undefined);
     console.log('\n📊 FEDERATION STATUS\n');
     // Summary counts
     console.log(`Total peers: ${peers.length}`);
@@ -288,6 +326,14 @@ export async function federationStatus() {
     console.log(`  Rejected: ${rejectedPeers.length}`);
     console.log(`  Removed:  ${removedPeers.length}`);
     console.log('');
+    // Health summary for approved peers
+    if (approvedPeers.length > 0) {
+        console.log('🏥 PEER HEALTH:\n');
+        console.log(`  Healthy:   ${healthyPeers.length} (✓)`);
+        console.log(`  Unhealthy: ${unhealthyPeers.length} (✗)`);
+        console.log(`  Unknown:   ${unknownHealthPeers.length} (?)`);
+        console.log('');
+    }
     // Alias → Public Key mapping section
     if (peers.length > 0) {
         console.log('📝 ALIAS → PUBLIC KEY MAPPING:\n');
@@ -698,7 +744,7 @@ export async function federationShowScopes(peerId) {
     }
     console.log(`\nSCOPES FOR ${peer.displayName} (${peerId}):\n`);
     console.log('  Status:', peer.status);
-    console.log('  Protocol:', peer.protocolVersion || '0.1.0 (legacy)');
+    console.log('  Wire Protocol:', peer.protocolVersion || '0.1.0 (legacy)');
     console.log('');
     // What I grant TO this peer
     if (peer.grantedScopes) {
@@ -894,10 +940,12 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
                 }
             }
             console.log('\n⏱ Reply timeout - no response received');
+            process.exit(1);
         }
     }
     catch (error) {
         console.error('Failed to send agent-comms:', error);
+        process.exit(1);
     }
 }
 /**
