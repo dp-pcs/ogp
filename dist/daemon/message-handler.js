@@ -135,6 +135,127 @@ export async function handleMessage(message, signature, messageStr // raw JSON s
     };
 }
 /**
+ * Handle federation resync responses (yes/no to restore old config)
+ */
+async function handleFederationResyncResponse(message, displayName, messageText) {
+    const { getPeer, updatePeer } = await import('./peers.js');
+    const { joinProject } = await import('./projects.js');
+    const { updatePeerGrantedScopes, updatePeerReceivedScopes, setPeerTopicPolicy } = await import('./peers.js');
+    const peer = getPeer(message.from);
+    if (!peer || !peer.resyncSnapshot) {
+        // No snapshot to restore
+        return {
+            success: true,
+            nonce: message.nonce,
+            response: {
+                received: true,
+                message: 'No resync data available'
+            }
+        };
+    }
+    const response = messageText.trim().toLowerCase();
+    const snapshot = peer.resyncSnapshot;
+    if (response === 'yes') {
+        // Restore old configuration
+        const updates = {};
+        if (snapshot.oldAlias) {
+            updates.alias = snapshot.oldAlias;
+        }
+        if (snapshot.oldGrantedScopes) {
+            updatePeerGrantedScopes(message.from, snapshot.oldGrantedScopes);
+        }
+        if (snapshot.oldReceivedScopes) {
+            updatePeerReceivedScopes(message.from, snapshot.oldReceivedScopes);
+        }
+        if (snapshot.oldResponsePolicy) {
+            updates.responsePolicy = snapshot.oldResponsePolicy;
+        }
+        // Re-join old projects
+        if (snapshot.oldProjects && snapshot.oldProjects.length > 0) {
+            for (const projectId of snapshot.oldProjects) {
+                try {
+                    joinProject(projectId, message.from);
+                }
+                catch (error) {
+                    console.warn(`[OGP Resync] Failed to rejoin project ${projectId}:`, error);
+                }
+            }
+        }
+        // Clear the snapshot
+        updates.resyncSnapshot = undefined;
+        updatePeer(message.from, updates);
+        console.log(`[OGP Resync] Restored old config for ${displayName}`);
+        if (snapshot.oldAlias)
+            console.log(`  - Alias: ${snapshot.oldAlias}`);
+        if (snapshot.oldProjects)
+            console.log(`  - Projects: ${snapshot.oldProjects.length}`);
+        await notifyOpenClaw({
+            text: `✓ Restored previous federation config for ${displayName}`,
+            metadata: {
+                ogp: {
+                    from: message.from,
+                    intent: 'agent-comms',
+                    topic: 'federation-resync',
+                    resyncCompleted: true
+                }
+            }
+        });
+        return {
+            success: true,
+            nonce: message.nonce,
+            response: {
+                received: true,
+                message: 'Configuration restored successfully'
+            }
+        };
+    }
+    else if (response === 'no') {
+        // Discard snapshot and start fresh
+        updatePeer(message.from, { resyncSnapshot: undefined });
+        console.log(`[OGP Resync] ${displayName} chose to start fresh - snapshot discarded`);
+        await notifyOpenClaw({
+            text: `${displayName} chose to start with fresh federation settings (previous config discarded)`,
+            metadata: {
+                ogp: {
+                    from: message.from,
+                    intent: 'agent-comms',
+                    topic: 'federation-resync',
+                    resyncDeclined: true
+                }
+            }
+        });
+        return {
+            success: true,
+            nonce: message.nonce,
+            response: {
+                received: true,
+                message: 'Starting with fresh configuration'
+            }
+        };
+    }
+    else {
+        // Unrecognized response - keep snapshot and ask again
+        await notifyOpenClaw({
+            text: `${displayName} sent unclear response to resync offer: "${messageText}"`,
+            metadata: {
+                ogp: {
+                    from: message.from,
+                    intent: 'agent-comms',
+                    topic: 'federation-resync'
+                }
+            }
+        });
+        return {
+            success: true,
+            nonce: message.nonce,
+            response: {
+                received: true,
+                message: 'Please respond with "yes" to restore or "no" for fresh start'
+            }
+        };
+    }
+}
+/**
  * Handle agent-comms intent with topic routing and reply support
  */
 async function handleAgentComms(message, displayName) {
@@ -142,6 +263,10 @@ async function handleAgentComms(message, displayName) {
     const topic = payload.topic || 'general';
     const messageText = payload.message || '';
     const priority = payload.priority || 'normal';
+    // Handle federation resync responses specially
+    if (topic === 'federation-resync') {
+        return handleFederationResyncResponse(message, displayName, messageText);
+    }
     // Get effective response policy for this peer and topic
     const policy = getEffectivePolicy(message.from, topic);
     // Log incoming activity

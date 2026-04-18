@@ -40,6 +40,18 @@ export interface Peer {
   lastSeenAt?: string;               // ISO timestamp of last successful health check
   healthy?: boolean;                 // current health status (undefined = unknown, true = healthy, false = unhealthy)
   healthCheckFailures?: number;      // consecutive health check failure count
+  // Federation resync snapshot (when gateway URL is re-used with new keys)
+  resyncSnapshot?: {
+    oldPeerId: string;
+    oldPublicKey: string;
+    oldAlias?: string;
+    oldGrantedScopes?: ScopeBundle;
+    oldReceivedScopes?: ScopeBundle;
+    oldProjects?: string[];           // project IDs they were members of
+    oldResponsePolicy?: ResponsePolicy;
+    replacedAt: string;               // ISO timestamp when old peer was replaced
+    expiresAt: string;                // ISO timestamp (7 days from replacedAt)
+  };
 }
 
 export interface PeerIdentityLookup {

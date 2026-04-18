@@ -25,6 +25,17 @@ export interface Peer {
     lastSeenAt?: string;
     healthy?: boolean;
     healthCheckFailures?: number;
+    resyncSnapshot?: {
+        oldPeerId: string;
+        oldPublicKey: string;
+        oldAlias?: string;
+        oldGrantedScopes?: ScopeBundle;
+        oldReceivedScopes?: ScopeBundle;
+        oldProjects?: string[];
+        oldResponsePolicy?: ResponsePolicy;
+        replacedAt: string;
+        expiresAt: string;
+    };
 }
 export interface PeerIdentityLookup {
     peerId?: string;
