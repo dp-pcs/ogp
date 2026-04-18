@@ -66,6 +66,29 @@ async function runHealthChecks() {
     });
     await Promise.allSettled(healthCheckPromises);
     console.log(`[OGP Heartbeat] Health check completed`);
+    // Cleanup expired resync snapshots (older than 7 days)
+    cleanupExpiredSnapshots();
+}
+/**
+ * Remove expired resync snapshots from peers
+ */
+function cleanupExpiredSnapshots() {
+    const peers = listPeers();
+    const now = Date.now();
+    let cleanedCount = 0;
+    for (const peer of peers) {
+        if (peer.resyncSnapshot) {
+            const expiresAt = new Date(peer.resyncSnapshot.expiresAt).getTime();
+            if (now > expiresAt) {
+                updatePeer(peer.id, { resyncSnapshot: undefined });
+                cleanedCount++;
+                console.log(`[OGP Heartbeat] Cleaned up expired resync snapshot for ${peer.displayName}`);
+            }
+        }
+    }
+    if (cleanedCount > 0) {
+        console.log(`[OGP Heartbeat] Cleaned up ${cleanedCount} expired resync snapshot(s)`);
+    }
 }
 /**
  * Start the periodic heartbeat timer

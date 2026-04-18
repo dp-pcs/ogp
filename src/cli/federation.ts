@@ -649,9 +649,10 @@ export async function federationApprove(peerId: string, options: ApproveOptions 
   console.log(`  To review policies:  ogp agent-comms policies ${peerId}`);
 
   // Notify the peer — send both formats for maximum compatibility
+  const keypair = loadOrGenerateKeyPair();
+  const ourConfig = requireConfig();
+
   try {
-    const keypair = loadOrGenerateKeyPair();
-    const ourConfig = requireConfig();
     const nonce = crypto.randomUUID();
     await fetch(`${peerGatewayUrl}/federation/approve`, {
       method: 'POST',
@@ -676,6 +677,59 @@ export async function federationApprove(peerId: string, options: ApproveOptions 
     console.log('✓ Notified peer of approval');
   } catch (error) {
     console.error('Failed to notify peer:', error);
+  }
+
+  // Check if this peer has a resync snapshot (gateway URL reused with new keys)
+  const refreshedPeer = getPeer(peerId);
+  if (refreshedPeer?.resyncSnapshot) {
+    const snapshot = refreshedPeer.resyncSnapshot;
+    console.log('\n📋 Federation resync available');
+    console.log(`  This gateway previously had federation with different keys`);
+    console.log(`  Old peer ID: ${snapshot.oldPeerId}`);
+    if (snapshot.oldAlias) console.log(`  Old alias: ${snapshot.oldAlias}`);
+    if (snapshot.oldProjects && snapshot.oldProjects.length > 0) {
+      console.log(`  Old projects: ${snapshot.oldProjects.join(', ')}`);
+    }
+
+    // Send resync offer via agent-comms
+    try {
+      const resyncMessage = `Hey! We previously had a federation with your gateway (${refreshedPeer.gatewayUrl}) until ${new Date(snapshot.replacedAt).toLocaleDateString()}.
+
+Previous setup:
+${snapshot.oldAlias ? `- Alias: ${snapshot.oldAlias}` : ''}
+${snapshot.oldProjects && snapshot.oldProjects.length > 0 ? `- Projects: ${snapshot.oldProjects.join(', ')}` : '- Projects: none'}
+${snapshot.oldGrantedScopes ? `- Granted scopes: ${snapshot.oldGrantedScopes.scopes.map(s => s.intent).join(', ')}` : '- Granted scopes: none'}
+${snapshot.oldReceivedScopes ? `- Received scopes: ${snapshot.oldReceivedScopes.scopes.map(s => s.intent).join(', ')}` : '- Received scopes: none'}
+
+Would you like me to restore these settings? Reply with "yes" to restore or "no" to start fresh.`;
+
+      const resyncNonce = crypto.randomUUID();
+      const resyncPayload = {
+        intent: 'agent-comms',
+        from: keypair.publicKey.substring(0, 32),
+        to: peerId,
+        nonce: resyncNonce,
+        timestamp: new Date().toISOString(),
+        topic: 'federation-resync',
+        message: resyncMessage,
+        priority: 'normal'
+      };
+
+      const { payload: signedPayload, signature } = signObject(resyncPayload, keypair.privateKey);
+
+      await fetch(`${peerGatewayUrl}/federation/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: signedPayload,
+          signature
+        })
+      });
+
+      console.log('✓ Sent resync offer to peer');
+    } catch (error) {
+      console.warn('Failed to send resync offer:', error);
+    }
   }
 }
 

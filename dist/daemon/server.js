@@ -7,7 +7,8 @@ const _require = createRequire(import.meta.url);
 const OGP_VERSION = _require('../../package.json').version;
 import { requireConfig, loadConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
-import { addPeer, createPendingPeerRecord, derivePeerIdFromPublicKey, findBestPeerForApproval, getPeer, removePeer, replacePeersByIdentity } from './peers.js';
+import { addPeer, createPendingPeerRecord, derivePeerIdFromPublicKey, findBestPeerForApproval, getPeer, getPeerByUrl, removePeer, replacePeersByIdentity } from './peers.js';
+import { listProjectsForPeer } from './projects.js';
 import { handleMessage } from './message-handler.js';
 import { verify } from '../shared/signing.js';
 import { notifyOpenClaw } from './notify.js';
@@ -118,6 +119,32 @@ export function startServer(config, background = false) {
             // NEVER trust sender's peer.id - always use public key prefix
             // Use 32-char prefix to avoid collision on shared Ed25519 DER header (first 24 chars identical for ALL Ed25519 keys)
             const peerIdFromKey = derivePeerIdFromPublicKey(peer.publicKey);
+            // Check for gateway URL collision (same URL, different keys = resync scenario)
+            const existingByUrl = getPeerByUrl(peer.gatewayUrl);
+            let resyncSnapshot;
+            if (existingByUrl && existingByUrl.publicKey !== peer.publicKey) {
+                // Different keys for same gateway URL - create snapshot for later resync offer
+                const oldProjects = listProjectsForPeer(existingByUrl.id);
+                const now = new Date().toISOString();
+                const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+                resyncSnapshot = {
+                    oldPeerId: existingByUrl.id,
+                    oldPublicKey: existingByUrl.publicKey,
+                    oldAlias: existingByUrl.alias,
+                    oldGrantedScopes: existingByUrl.grantedScopes,
+                    oldReceivedScopes: existingByUrl.receivedScopes,
+                    oldProjects: oldProjects.map(p => p.id),
+                    oldResponsePolicy: existingByUrl.responsePolicy,
+                    replacedAt: now,
+                    expiresAt
+                };
+                console.log(`[OGP] Gateway URL collision detected: ${peer.gatewayUrl}`);
+                console.log(`[OGP] Old peer ID: ${existingByUrl.id} (${existingByUrl.status})`);
+                console.log(`[OGP] New peer ID: ${peerIdFromKey} (pending)`);
+                console.log(`[OGP] Created resync snapshot - will offer to restore config after approval`);
+                // Remove the old peer to avoid duplicates
+                removePeer(existingByUrl.id);
+            }
             // Check if peer already exists (by public key)
             const existingPeer = getPeer(peerIdFromKey);
             if (existingPeer) {
@@ -142,6 +169,10 @@ export function startServer(config, background = false) {
                 // BUILD-115: Record which agent owns this federation relationship
                 agentId: cfg.agentId
             });
+            // Attach resync snapshot if we're replacing an existing peer with different keys
+            if (resyncSnapshot) {
+                peerData.resyncSnapshot = resyncSnapshot;
+            }
             if (offeredIntents && offeredIntents.length > 0) {
                 console.log(`[OGP] Peer ${peer.displayName} offers intents: ${offeredIntents.join(', ')}`);
             }
