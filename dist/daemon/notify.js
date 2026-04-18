@@ -1,6 +1,7 @@
 import { requireConfig } from '../shared/config.js';
 import crypto from 'node:crypto';
 import { dispatchAgentHook, injectMessage } from './openclaw-bridge.js';
+import { sendReply } from './reply-handler.js';
 /**
  * Resolve the notification target for a given agent.
  * Priority:
@@ -139,6 +140,36 @@ function applyDelegatedAuthorityPrecedence(accumulated, config, messageClass, to
     if (topic) {
         mergeRule(accumulated, delegatedAuthority.global.topicRules?.[topic]);
         mergeRule(accumulated, peerScope?.topicRules?.[topic]);
+    }
+}
+/**
+ * Send replyTo callback if present in payload metadata
+ * This completes the --wait loop for the initiating peer
+ */
+async function handleReplyToCallback(payload, success, data, error) {
+    const ogp = getOgpMetadata(payload);
+    const replyTo = ogp.replyTo;
+    const nonce = ogp.nonce;
+    const peerId = resolvePayloadPeerId(payload);
+    if (!replyTo || !nonce || !peerId) {
+        // No replyTo callback requested
+        return;
+    }
+    const replyPayload = {
+        nonce,
+        success,
+        data,
+        error,
+        timestamp: new Date().toISOString()
+    };
+    try {
+        const result = await sendReply(peerId, replyTo, replyPayload);
+        if (!result.success) {
+            console.warn(`[OGP] Failed to send replyTo callback to ${peerId}:`, result.error);
+        }
+    }
+    catch (err) {
+        console.error(`[OGP] Error sending replyTo callback to ${peerId}:`, err);
     }
 }
 export function classifyFederatedMessage(payload) {
@@ -300,6 +331,8 @@ ${payload.text}${handlingGuidance ? `\n\n[OGP Handling Policy]\n${handlingGuidan
             if (hookDelivered) {
                 if (!deliverToHuman) {
                     console.log('[OGP] Message delivered to OpenClaw via /hooks/agent without proactive human delivery for peer:', peerName);
+                    // Send replyTo callback if requested
+                    await handleReplyToCallback(payload, true, { received: true });
                     return true;
                 }
                 const sessionKey = resolveOpenClawSessionKey(config, payload.agent);
@@ -315,6 +348,8 @@ ${payload.text}`;
                     console.warn('[OGP] Hook delivery succeeded, but DM-session sync note failed for peer:', peerName);
                 }
                 console.log('[OGP] Message delivered to OpenClaw via /hooks/agent for peer:', peerName);
+                // Send replyTo callback if requested
+                await handleReplyToCallback(payload, true, { received: true });
                 return true;
             }
             const sessionKey = deliverToHuman
@@ -323,15 +358,21 @@ ${payload.text}`;
             const result = await injectMessage(sessionKey, sessionMessageText, peerName);
             if (result) {
                 console.log('[OGP] Message delivered to OpenClaw session fallback for peer:', peerName);
+                // Send replyTo callback if requested
+                await handleReplyToCallback(payload, true, { received: true });
                 return true;
             }
             else {
                 console.error('[OGP] OpenClaw notification delivery failed');
+                // Send failure callback if requested
+                await handleReplyToCallback(payload, false, undefined, 'OpenClaw session injection failed');
                 return false;
             }
         }
         catch (err) {
             console.error('[OGP] Message injection failed:', err);
+            // Send failure callback if requested
+            await handleReplyToCallback(payload, false, undefined, err instanceof Error ? err.message : String(err));
             return false;
         }
     }
@@ -414,15 +455,21 @@ class HermesBackend {
             });
             if (result) {
                 console.log('[OGP] Notified Hermes via webhook:', payload.text);
+                // Send replyTo callback if requested
+                await handleReplyToCallback(payload, true, { received: true });
                 return true;
             }
             else {
                 console.error('[OGP] Hermes webhook call failed (non-2xx response)');
+                // Send failure callback if requested
+                await handleReplyToCallback(payload, false, undefined, 'Hermes webhook returned non-2xx status');
                 return false;
             }
         }
         catch (error) {
             console.error('[OGP] Hermes webhook failed:', error);
+            // Send failure callback if requested
+            await handleReplyToCallback(payload, false, undefined, error instanceof Error ? error.message : String(error));
             return false;
         }
     }

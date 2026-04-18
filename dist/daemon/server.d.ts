@@ -4,6 +4,7 @@ interface ShutdownDeps {
     stopDoormanCleanup: () => void;
     stopReplyCleanup: () => void;
     stopRendezvous: () => Promise<void>;
+    stopHeartbeat: () => void;
     getServer: () => {
         close: (cb: (error?: Error) => void) => void;
     } | null;

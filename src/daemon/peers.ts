@@ -36,6 +36,10 @@ export interface Peer {
   defaultLevel?: ResponseLevel;      // per-peer default for unknown topics
   // BUILD-115: Agent-specific notification routing
   agentId?: string;                  // which local agent "owns" this federation relationship
+  // Heartbeat/health tracking
+  lastSeenAt?: string;               // ISO timestamp of last successful health check
+  healthy?: boolean;                 // current health status (undefined = unknown, true = healthy, false = unhealthy)
+  healthCheckFailures?: number;      // consecutive health check failure count
 }
 
 export interface PeerIdentityLookup {

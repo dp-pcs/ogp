@@ -22,6 +22,9 @@ export interface Peer {
     responsePolicy?: ResponsePolicy;
     defaultLevel?: ResponseLevel;
     agentId?: string;
+    lastSeenAt?: string;
+    healthy?: boolean;
+    healthCheckFailures?: number;
 }
 export interface PeerIdentityLookup {
     peerId?: string;

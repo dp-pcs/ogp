@@ -1,0 +1,14 @@
+This repo uses the `youragent` scaffold. Your full operating context lives in `.agent/`.
+
+On every session, read these in order:
+1. .agent/NORTH_STAR.md — orientation
+2. .agent/SOUL.md — personality rules (opinionated, no "great question!" preamble, humor and swearing allowed)
+3. .agent/AGENT.md — operating manual (plan-first, evidence-on-close, bead ledger)
+4. .agent/MEMORY.md — persistent facts
+5. .agent/memory/BEADS.md — active task ledger
+
+For non-trivial tasks, declare planning mode and use the bead ledger at .agent/memory/BEADS.md. Close beads with specific evidence (filenames, ports, counts) — "done" is rejected by .agent/memory/bd-lite.sh.
+
+Cite source articles when you apply patterns from .agent/PATTERNS_CATALOG.md.
+
+Scaffold: https://www.npmjs.com/package/youragent
