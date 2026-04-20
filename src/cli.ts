@@ -23,7 +23,9 @@ import {
   federationConnect,
   federationInvite,
   federationAccept,
-  federationSetAlias
+  federationSetAlias,
+  federationTagPeer,
+  federationUntagPeer
 } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
@@ -654,6 +656,24 @@ federation
   .argument('<alias>', 'Alias name (e.g., "big-papa", "staging-server")')
   .action(async (peerId, alias) => {
     await federationSetAlias(peerId, alias);
+  });
+
+federation
+  .command('tag')
+  .description('Add tags to a peer (local categorization)')
+  .argument('<peer-id>', 'Peer ID')
+  .argument('<tags...>', 'Tags to add (e.g., work production)')
+  .action(async (peerId, tags) => {
+    await federationTagPeer(peerId, tags);
+  });
+
+federation
+  .command('untag')
+  .description('Remove tags from a peer')
+  .argument('<peer-id>', 'Peer ID')
+  .argument('<tags...>', 'Tags to remove')
+  .action(async (peerId, tags) => {
+    await federationUntagPeer(peerId, tags);
   });
 
 federation

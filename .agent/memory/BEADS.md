@@ -95,3 +95,4 @@ For real work the human gives you:
 
 **Migrated from**: Global bead `clawd-0gw.1` (2026-04-15)
 | B0030 | P1 | done | — | Review repo state and identify new, pending, and next actions | davidproctor | Reviewed git state and bead queue; HEAD=ae74cea on main, ready queue contains B0028 only, local pending changes in src/cli/federation.ts and src/daemon/server.ts with matching dist output, found docs/package mismatch for test:project-intents (docs/project-intent-testing.md:6,38,44,53 vs package.json:12-19), verified npm run build and npm test -- --run (14 files, 103 tests). |
+| B0031 | P1 | in_progress | — | Implement enhanced peer identity system with human/agent separation and flexible tags | davidproctor | — |

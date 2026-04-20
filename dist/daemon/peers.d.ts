@@ -6,6 +6,10 @@ export interface Peer {
     alias?: string;
     petname?: string;
     displayName: string;
+    humanName?: string;
+    agentName?: string;
+    organization?: string;
+    tags?: string[];
     email: string;
     gatewayUrl: string;
     publicKey: string;
@@ -48,6 +52,10 @@ type PendingPeerInput = Pick<Peer, 'id' | 'displayName' | 'email' | 'gatewayUrl'
     agentId?: string;
     offeredIntents?: string[];
     requestedAt?: string;
+    humanName?: string;
+    agentName?: string;
+    organization?: string;
+    platform?: string;
 };
 export declare function createPendingPeerRecord(input: PendingPeerInput): Peer;
 export declare function loadPeers(): Peer[];

@@ -218,6 +218,10 @@ export function startServer(config?: OGPConfig, background = false): void {
         email: peer.email,
         gatewayUrl: peer.gatewayUrl,
         publicKey: peer.publicKey,
+        // Enhanced identity fields (backward compatible)
+        humanName: peer.humanName,
+        agentName: peer.agentName,
+        organization: peer.organization,
         offeredIntents,
         // BUILD-115: Record which agent owns this federation relationship
         agentId: cfg.agentId

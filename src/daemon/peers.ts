@@ -16,7 +16,12 @@ export interface Peer {
   id: string;           // unique peer ID (hostname or user-chosen)
   alias?: string;       // user-friendly name for this peer (user-defined)
   petname?: string;     // DEPRECATED: old field name, migrated to alias on load
-  displayName: string;  // peer's self-reported display name
+  // Identity fields
+  displayName: string;  // peer's self-reported display name (legacy, kept for compatibility)
+  humanName?: string;   // human operator name from peer
+  agentName?: string;   // agent name from peer
+  organization?: string; // organization from peer
+  tags?: string[];      // local tags applied to this peer (not federated)
   email: string;
   gatewayUrl: string;
   publicKey: string;    // hex-encoded Ed25519 public key
@@ -114,6 +119,10 @@ type PendingPeerInput = Pick<Peer, 'id' | 'displayName' | 'email' | 'gatewayUrl'
   agentId?: string;
   offeredIntents?: string[];
   requestedAt?: string;
+  humanName?: string;
+  agentName?: string;
+  organization?: string;
+  platform?: string;
 };
 
 function createPeerTombstone(peer: Peer, status: 'rejected' | 'removed', changedAt = new Date().toISOString()): Peer {
@@ -140,6 +149,9 @@ export function createPendingPeerRecord(input: PendingPeerInput): Peer {
     publicKey: input.publicKey,
     status: 'pending',
     requestedAt: input.requestedAt ?? new Date().toISOString(),
+    ...(input.humanName ? { humanName: input.humanName } : {}),
+    ...(input.agentName ? { agentName: input.agentName } : {}),
+    ...(input.organization ? { organization: input.organization } : {}),
     ...(input.agentId ? { agentId: input.agentId } : {}),
     ...(input.offeredIntents && input.offeredIntents.length > 0 ? { offeredIntents: input.offeredIntents } : {})
   };

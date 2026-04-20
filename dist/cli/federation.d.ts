@@ -32,6 +32,14 @@ export declare function federationShowScopes(peerId: string): Promise<void>;
  */
 export declare function federationUpdateGrants(peerId: string, options: ApproveOptions): Promise<void>;
 /**
+ * Add tags to a peer (local categorization)
+ */
+export declare function federationTagPeer(peerId: string, tags: string[]): Promise<void>;
+/**
+ * Remove tags from a peer
+ */
+export declare function federationUntagPeer(peerId: string, tags: string[]): Promise<void>;
+/**
  * Send an agent-comms message to a peer
  */
 export declare function federationSendAgentComms(peerId: string, topic: string, messageText: string, options?: {

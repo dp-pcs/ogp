@@ -522,8 +522,24 @@ async function setupFramework(
 
   const gatewayUrl = await promptGatewayUrl(rl);
 
-  // Prompt for display name
-  const displayName = await rl.question(`Display name [${framework.name} Gateway]: `);
+  // Prompt for identity information
+  console.log('\n--- Identity Information ---');
+  console.log('OGP now separates human operators from agents for better clarity in federation.');
+
+  const humanName = await rl.question('Human operator name (e.g., "David Proctor"): ');
+  const agentName = await rl.question('Agent name (e.g., "Junior", "Apollo", "TrogdorClaw"): ');
+  const organization = await rl.question('Organization (optional, e.g., "Trilogy", "AICOE") [none]: ');
+  const tagsInput = await rl.question('Tags (optional, comma-separated, e.g., "work,production") [none]: ');
+
+  // Parse tags
+  const tags = tagsInput.trim()
+    ? tagsInput.split(',').map(t => t.trim()).filter(t => t.length > 0)
+    : undefined;
+
+  // Auto-generate displayName from humanName + agentName
+  const displayName = humanName.trim() && agentName.trim()
+    ? `${humanName.trim()} - ${agentName.trim()}`
+    : (humanName.trim() || agentName.trim() || `${framework.name} Gateway`);
 
   // Prompt for email
   const email = await rl.question('Email: ');
@@ -590,7 +606,11 @@ async function setupFramework(
     openclawUrl: openclawUrl.trim() || 'http://localhost:18789',
     openclawToken: openclawToken.trim() || '',
     gatewayUrl: gatewayUrl || '',
-    displayName: displayName.trim() || `${framework.name} Gateway`,
+    displayName,
+    humanName: humanName.trim() || undefined,
+    agentName: agentName.trim() || undefined,
+    organization: organization.trim() || undefined,
+    tags,
     email: email.trim() || '',
     stateDir: framework.suggestedConfigDir,
     agentId,

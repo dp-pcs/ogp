@@ -70,6 +70,9 @@ export function createPendingPeerRecord(input) {
         publicKey: input.publicKey,
         status: 'pending',
         requestedAt: input.requestedAt ?? new Date().toISOString(),
+        ...(input.humanName ? { humanName: input.humanName } : {}),
+        ...(input.agentName ? { agentName: input.agentName } : {}),
+        ...(input.organization ? { organization: input.organization } : {}),
         ...(input.agentId ? { agentId: input.agentId } : {}),
         ...(input.offeredIntents && input.offeredIntents.length > 0 ? { offeredIntents: input.offeredIntents } : {})
     };

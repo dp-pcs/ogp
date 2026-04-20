@@ -241,6 +241,113 @@ function setHealthCheckTimeout(timeoutMs) {
     console.log('  Restart daemon for changes to take effect: ogp stop && ogp start --background');
 }
 /**
+ * Show current identity configuration
+ */
+function showIdentity() {
+    const config = requireConfig();
+    console.log('\nIdentity Configuration');
+    console.log('━'.repeat(44));
+    console.log('');
+    console.log(`Human name:    ${config.humanName || '(not set)'}`);
+    console.log(`Agent name:    ${config.agentName || '(not set)'}`);
+    console.log(`Organization:  ${config.organization || '(not set)'}`);
+    console.log(`Tags:          ${config.tags && config.tags.length > 0 ? config.tags.join(', ') : '(none)'}`);
+    console.log('');
+    console.log(`Display name:  ${config.displayName}`);
+    console.log(`Email:         ${config.email}`);
+    console.log('');
+}
+/**
+ * Update identity information
+ */
+function setIdentity(options) {
+    const config = requireConfig();
+    let changed = false;
+    if (options.humanName !== undefined) {
+        config.humanName = options.humanName || undefined;
+        changed = true;
+    }
+    if (options.agentName !== undefined) {
+        config.agentName = options.agentName || undefined;
+        changed = true;
+    }
+    if (options.organization !== undefined) {
+        config.organization = options.organization || undefined;
+        changed = true;
+    }
+    if (!changed) {
+        console.error('Error: No changes specified. Use --human-name, --agent-name, or --organization');
+        process.exit(1);
+    }
+    // Auto-update displayName if both humanName and agentName are set
+    if (config.humanName && config.agentName) {
+        config.displayName = `${config.humanName} - ${config.agentName}`;
+    }
+    saveConfig(config);
+    console.log('✓ Identity updated');
+    if (config.humanName)
+        console.log(`  Human name: ${config.humanName}`);
+    if (config.agentName)
+        console.log(`  Agent name: ${config.agentName}`);
+    if (config.organization)
+        console.log(`  Organization: ${config.organization}`);
+    if (config.humanName && config.agentName) {
+        console.log(`  Display name: ${config.displayName}`);
+    }
+}
+/**
+ * Set tags (replaces existing)
+ */
+function setTags(tags) {
+    const config = requireConfig();
+    config.tags = tags.filter(t => t.trim().length > 0);
+    saveConfig(config);
+    console.log(`✓ Tags set to: ${config.tags.join(', ')}`);
+}
+/**
+ * Add a single tag
+ */
+function addTag(tag) {
+    const config = requireConfig();
+    if (!config.tags) {
+        config.tags = [];
+    }
+    const trimmed = tag.trim();
+    if (config.tags.includes(trimmed)) {
+        console.log(`Tag '${trimmed}' already exists`);
+        return;
+    }
+    config.tags.push(trimmed);
+    saveConfig(config);
+    console.log(`✓ Added tag: ${trimmed}`);
+    console.log(`  Current tags: ${config.tags.join(', ')}`);
+}
+/**
+ * Remove a single tag
+ */
+function removeTag(tag) {
+    const config = requireConfig();
+    if (!config.tags || config.tags.length === 0) {
+        console.log('No tags to remove');
+        return;
+    }
+    const trimmed = tag.trim();
+    const before = config.tags.length;
+    config.tags = config.tags.filter(t => t !== trimmed);
+    if (config.tags.length === before) {
+        console.log(`Tag '${trimmed}' not found`);
+        return;
+    }
+    saveConfig(config);
+    console.log(`✓ Removed tag: ${trimmed}`);
+    if (config.tags.length > 0) {
+        console.log(`  Remaining tags: ${config.tags.join(', ')}`);
+    }
+    else {
+        console.log('  No tags remaining');
+    }
+}
+/**
  * Set max consecutive failures threshold
  */
 function setHealthCheckMaxFailures(maxFailures) {
@@ -331,5 +438,42 @@ healthCheckCommand
     .argument('<count>', 'Number of failures (minimum 1)')
     .action((count) => {
     setHealthCheckMaxFailures(count);
+});
+// Identity management commands
+configCommand
+    .command('show-identity')
+    .description('Show current identity configuration')
+    .action(() => {
+    showIdentity();
+});
+configCommand
+    .command('set-identity')
+    .description('Update identity information')
+    .option('--human-name <name>', 'Human operator name')
+    .option('--agent-name <name>', 'Agent name')
+    .option('--organization <org>', 'Organization name')
+    .action((options) => {
+    setIdentity(options);
+});
+configCommand
+    .command('set-tags')
+    .description('Set tags (replaces existing tags)')
+    .argument('<tags...>', 'Tags to set')
+    .action((tags) => {
+    setTags(tags);
+});
+configCommand
+    .command('add-tag')
+    .description('Add a tag')
+    .argument('<tag>', 'Tag to add')
+    .action((tag) => {
+    addTag(tag);
+});
+configCommand
+    .command('remove-tag')
+    .description('Remove a tag')
+    .argument('<tag>', 'Tag to remove')
+    .action((tag) => {
+    removeTag(tag);
 });
 //# sourceMappingURL=config.js.map

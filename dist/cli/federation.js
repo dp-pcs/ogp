@@ -445,6 +445,10 @@ export async function federationRequest(peerUrl, peerId, alias) {
         email: config.email,
         gatewayUrl: config.gatewayUrl,
         publicKey: keypair.publicKey,
+        // Include enhanced identity if available
+        ...(config.humanName ? { humanName: config.humanName } : {}),
+        ...(config.agentName ? { agentName: config.agentName } : {}),
+        ...(config.organization ? { organization: config.organization } : {}),
     };
     const { sign } = await import('../shared/signing.js');
     const signature = sign(JSON.stringify(peer), keypair.privateKey);
@@ -941,6 +945,79 @@ export async function federationUpdateGrants(peerId, options) {
     console.log(`  Rate limit: ${formatRateLimit(rateLimit)}`);
     // Optionally notify peer of updated grants (they can re-fetch our card)
     console.log('\nNote: Peer will see updated capabilities on next card fetch.');
+}
+/**
+ * Add tags to a peer (local categorization)
+ */
+export async function federationTagPeer(peerId, tags) {
+    const resolvedId = resolvePeerId(peerId);
+    if (!resolvedId) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    peerId = resolvedId;
+    const peer = getPeer(peerId);
+    if (!peer) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    if (!peer.tags) {
+        peer.tags = [];
+    }
+    let added = 0;
+    for (const tag of tags) {
+        const trimmed = tag.trim();
+        if (!trimmed)
+            continue;
+        if (!peer.tags.includes(trimmed)) {
+            peer.tags.push(trimmed);
+            added++;
+        }
+    }
+    updatePeer(peerId, peer);
+    if (added > 0) {
+        console.log(`✓ Added ${added} tag(s) to ${peer.displayName}`);
+        console.log(`  Current tags: ${peer.tags.join(', ')}`);
+    }
+    else {
+        console.log('No new tags added (all tags already exist)');
+    }
+}
+/**
+ * Remove tags from a peer
+ */
+export async function federationUntagPeer(peerId, tags) {
+    const resolvedId = resolvePeerId(peerId);
+    if (!resolvedId) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    peerId = resolvedId;
+    const peer = getPeer(peerId);
+    if (!peer) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    if (!peer.tags || peer.tags.length === 0) {
+        console.log('Peer has no tags to remove');
+        return;
+    }
+    const before = peer.tags.length;
+    peer.tags = peer.tags.filter(t => !tags.includes(t));
+    const removed = before - peer.tags.length;
+    updatePeer(peerId, peer);
+    if (removed > 0) {
+        console.log(`✓ Removed ${removed} tag(s) from ${peer.displayName}`);
+        if (peer.tags.length > 0) {
+            console.log(`  Remaining tags: ${peer.tags.join(', ')}`);
+        }
+        else {
+            console.log('  No tags remaining');
+        }
+    }
+    else {
+        console.log('No tags removed (tags not found)');
+    }
 }
 /**
  * Send an agent-comms message to a peer
