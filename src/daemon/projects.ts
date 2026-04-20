@@ -5,10 +5,19 @@ import {
   ensureConfigDir
 } from '../shared/config.js';
 
+export interface AuthorIdentity {
+  displayName?: string;
+  humanName?: string;
+  agentName?: string;
+  organization?: string;
+  tags?: string[];
+}
+
 export interface ProjectContribution {
   id: string;           // unique contribution ID
   timestamp: string;    // ISO timestamp
-  authorId: string;     // peer ID who contributed
+  authorId: string;     // peer ID who contributed (stable key)
+  authorIdentity?: AuthorIdentity; // identity snapshot at contribution time
   entryType?: string;   // preferred contribution category name
   topic?: string;       // legacy alias for entryType
   summary: string;      // human-readable summary
@@ -189,7 +198,8 @@ export function contributeToProject(
   entryTypeName: string,
   authorId: string,
   summary: string,
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  authorIdentity?: AuthorIdentity
 ): string | null {
   const projects = loadProjects();
   const project = projects.find(p => p.id === projectId);
@@ -218,6 +228,7 @@ export function contributeToProject(
     id: contributionId,
     timestamp: now,
     authorId,
+    authorIdentity,
     entryType: entryTypeName,
     topic: entryTypeName,
     summary,

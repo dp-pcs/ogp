@@ -130,7 +130,7 @@ export function ensureProjectTopic(projectId, topicName, description) {
 /**
  * Add a contribution to a project entry type
  */
-export function contributeToProject(projectId, entryTypeName, authorId, summary, metadata) {
+export function contributeToProject(projectId, entryTypeName, authorId, summary, metadata, authorIdentity) {
     const projects = loadProjects();
     const project = projects.find(p => p.id === projectId);
     if (!project)
@@ -156,6 +156,7 @@ export function contributeToProject(projectId, entryTypeName, authorId, summary,
         id: contributionId,
         timestamp: now,
         authorId,
+        authorIdentity,
         entryType: entryTypeName,
         topic: entryTypeName,
         summary,
