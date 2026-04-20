@@ -75,6 +75,13 @@ _ogp_completion() {
       fi
     fi
 
+    # set-identity flags
+    if [ "$subcmd" = "set-identity" ]; then
+      opts="--human-name --agent-name --organization"
+      COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+      return 0
+    fi
+
     # For config commands that need framework ID
     if [[ "$subcmd" == "set-default" || "$subcmd" == "enable" || "$subcmd" == "disable" ]]; then
       if [ $COMP_CWORD -eq 3 ]; then
