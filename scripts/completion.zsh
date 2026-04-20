@@ -225,6 +225,7 @@ _ogp_config() {
     enable\:"Enable a framework"
     disable\:"Disable a framework"
     frameworks\:"Show all detected frameworks"
+    health-check\:"Manage health check configuration"
   ))' \
   '*::arg:->args'
 
@@ -237,9 +238,22 @@ _ogp_config() {
         list)
           _arguments '(-q --quiet)'{-q,--quiet}'[Output framework IDs only]'
           ;;
+        health-check)
+          _ogp_config_health_check
+          ;;
       esac
       ;;
   esac
+}
+
+_ogp_config_health_check() {
+  _arguments '1:subcommand:((
+    show\:"Show current health check configuration"
+    interval\:"Set health check interval in milliseconds"
+    timeout\:"Set health check timeout in milliseconds"
+    max-failures\:"Set max consecutive failures before unhealthy"
+  ))' \
+  '*::arg:->args'
 }
 
 _ogp_intent() {
