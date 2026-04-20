@@ -83,6 +83,7 @@ _ogp_federation() {
     alias\:"Set user-friendly alias for peer"
     tag\:"Add tags to a peer (local categorization)"
     untag\:"Remove tags from a peer"
+    update-identity\:"Send updated identity information to approved peer"
     ping\:"Ping peer gateway to test connectivity"
     send\:"Send message to federated peer"
     scopes\:"Show scope grants for peer"

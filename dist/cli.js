@@ -8,7 +8,7 @@ import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { getHeartbeatConfig, loadHealthCheckConfig } from './daemon/heartbeat.js';
 import { requireConfig, loadConfig } from './shared/config.js';
 import { loadMetaConfig } from './shared/meta-config.js';
-import { federationList, federationStatus, federationRequest, federationApprove, federationReject, federationRemove, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect, federationInvite, federationAccept, federationSetAlias, federationTagPeer, federationUntagPeer } from './cli/federation.js';
+import { federationList, federationStatus, federationRequest, federationApprove, federationReject, federationRemove, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect, federationInvite, federationAccept, federationSetAlias, federationTagPeer, federationUntagPeer, federationUpdateIdentity } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { installCompletion } from './cli/completion.js';
@@ -557,6 +557,13 @@ federation
     .argument('<tags...>', 'Tags to remove')
     .action(async (peerId, tags) => {
     await federationUntagPeer(peerId, tags);
+});
+federation
+    .command('update-identity')
+    .description('Send updated identity information to an approved peer')
+    .argument('<peer-id>', 'Peer ID')
+    .action(async (peerId) => {
+    await federationUpdateIdentity(peerId);
 });
 federation
     .command('ping')
