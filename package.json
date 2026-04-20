@@ -1,6 +1,6 @@
 {
   "name": "@dp-pcs/ogp",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Open Gateway Protocol (OGP) - Peer-to-peer federation daemon for OpenClaw AI gateways with cryptographic signatures",
   "type": "module",
   "main": "./dist/index.js",
