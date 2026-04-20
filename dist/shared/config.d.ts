@@ -87,6 +87,10 @@ export interface OGPConfig {
     openclawHooksToken?: string;
     gatewayUrl: string;
     displayName: string;
+    humanName?: string;
+    agentName?: string;
+    organization?: string;
+    tags?: string[];
     email: string;
     stateDir: string;
     agentComms?: AgentCommsConfig;

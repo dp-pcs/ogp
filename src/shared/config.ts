@@ -120,7 +120,12 @@ export interface OGPConfig {
   openclawToken: string;
   openclawHooksToken?: string;
   gatewayUrl: string;
-  displayName: string;
+  // Identity fields
+  displayName: string;        // Legacy: kept for backward compatibility
+  humanName?: string;         // Human operator name (e.g., "David Proctor")
+  agentName?: string;         // Agent name (e.g., "Junior", "Apollo")
+  organization?: string;      // Organization (e.g., "Trilogy", "AICOE")
+  tags?: string[];           // Flexible tags (e.g., ["work", "production", "client-trilogy"])
   email: string;
   stateDir: string;
   // Agent-comms configuration (optional)
