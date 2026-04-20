@@ -108,11 +108,13 @@ function selectFramework(forFlag) {
     process.exit(1);
 }
 // Cisco IOS-style ? help interceptor (must run before Commander parses)
+// Support both '?' (needs quoting in shell) and 'help' (no quoting needed)
 const args = process.argv;
 const hasQuestionMark = args.includes('?');
-if (hasQuestionMark) {
-    // Extract command chain (everything after 'ogp' but before '?', excluding --flags)
-    const commandChain = args.slice(2).filter(a => a !== '?' && !a.startsWith('--'));
+const hasHelp = args.includes('help');
+if (hasQuestionMark || hasHelp) {
+    // Extract command chain (everything after 'ogp' but before '?'/'help', excluding --flags)
+    const commandChain = args.slice(2).filter(a => a !== '?' && a !== 'help' && !a.startsWith('--'));
     showContextHelp(commandChain);
     process.exit(0);
 }
