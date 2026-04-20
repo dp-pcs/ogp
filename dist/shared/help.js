@@ -88,6 +88,7 @@ function showFederationHelp() {
     console.log('  alias           Set a user-friendly alias for a peer');
     console.log('  tag             Add tags to a peer (local categorization)');
     console.log('  untag           Remove tags from a peer');
+    console.log('  update-identity Send updated identity to an approved peer');
     console.log('  ping            Test connectivity to a peer');
     console.log('  send            Send a message to a federated peer');
     console.log('  agent           Send an agent-comms message to a peer');

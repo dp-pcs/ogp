@@ -1042,6 +1042,66 @@ export async function federationUntagPeer(peerId, tags) {
     }
 }
 /**
+ * Update identity information with an existing peer
+ */
+export async function federationUpdateIdentity(peerId) {
+    const config = requireConfig();
+    const keypair = loadOrGenerateKeyPair();
+    // Resolve peer identifier
+    const resolvedId = resolvePeerId(peerId);
+    if (!resolvedId) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    peerId = resolvedId;
+    const peer = getPeer(peerId);
+    if (!peer) {
+        console.error(`Peer not found: ${peerId}`);
+        return;
+    }
+    if (peer.status !== 'approved') {
+        console.error(`Cannot update identity - peer ${peerId} is not approved (status: ${peer.status})`);
+        return;
+    }
+    console.log(`Sending identity update to ${peer.displayName}...`);
+    // Build identity payload
+    const ourPeerId = keypair.publicKey.substring(0, 32);
+    const identityUpdate = {
+        id: ourPeerId,
+        displayName: config.displayName,
+        humanName: config.humanName,
+        agentName: config.agentName,
+        organization: config.organization,
+        email: config.email,
+        gatewayUrl: config.gatewayUrl,
+        publicKey: keypair.publicKey,
+    };
+    const { sign } = await import('../shared/signing.js');
+    const signature = sign(JSON.stringify(identityUpdate), keypair.privateKey);
+    try {
+        const response = await fetch(`${peer.gatewayUrl}/federation/update-identity`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identity: identityUpdate, signature })
+        });
+        if (!response.ok) {
+            console.error(`Identity update failed: ${response.status} ${response.statusText}`);
+            return;
+        }
+        const result = await response.json();
+        if (result.updated) {
+            console.log('✓ Identity update sent successfully');
+            console.log(`  Peer ${peer.displayName} has been notified of your updated identity`);
+        }
+        else {
+            console.log(`Note: ${result.message || 'Update acknowledged but peer may not support identity updates'}`);
+        }
+    }
+    catch (error) {
+        console.error('Failed to send identity update:', error instanceof Error ? error.message : error);
+    }
+}
+/**
  * Send an agent-comms message to a peer
  */
 export async function federationSendAgentComms(peerId, topic, messageText, options = {}) {

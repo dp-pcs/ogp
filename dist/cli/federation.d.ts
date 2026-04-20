@@ -40,6 +40,10 @@ export declare function federationTagPeer(peerId: string, tags: string[]): Promi
  */
 export declare function federationUntagPeer(peerId: string, tags: string[]): Promise<void>;
 /**
+ * Update identity information with an existing peer
+ */
+export declare function federationUpdateIdentity(peerId: string): Promise<void>;
+/**
  * Send an agent-comms message to a peer
  */
 export declare function federationSendAgentComms(peerId: string, topic: string, messageText: string, options?: {

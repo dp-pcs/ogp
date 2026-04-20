@@ -7,7 +7,7 @@ const _require = createRequire(import.meta.url);
 const OGP_VERSION = _require('../../package.json').version;
 import { requireConfig, loadConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
-import { addPeer, createPendingPeerRecord, derivePeerIdFromPublicKey, findBestPeerForApproval, getPeer, getPeerByUrl, removePeer, replacePeersByIdentity } from './peers.js';
+import { addPeer, createPendingPeerRecord, derivePeerIdFromPublicKey, findBestPeerForApproval, getPeer, getPeerByUrl, removePeer, replacePeersByIdentity, updatePeer } from './peers.js';
 import { listProjectsForPeer } from './projects.js';
 import { handleMessage } from './message-handler.js';
 import { verify } from '../shared/signing.js';
@@ -242,6 +242,50 @@ export function startServer(config, background = false) {
         }
         catch (error) {
             console.error('[OGP] Error handling federation request:', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    });
+    // POST /federation/update-identity - Peer sends updated identity information
+    app.post('/federation/update-identity', async (req, res) => {
+        try {
+            const { identity, signature } = req.body;
+            if (!identity || !signature) {
+                return res.status(400).json({ error: 'Missing identity or signature' });
+            }
+            // Verify signature
+            const { verify } = await import('../shared/signing.js');
+            const isValid = verify(JSON.stringify(identity), signature, identity.publicKey);
+            if (!isValid) {
+                return res.status(401).json({ error: 'Invalid signature' });
+            }
+            // Derive peer ID from public key
+            const peerIdFromKey = derivePeerIdFromPublicKey(identity.publicKey);
+            // Find existing peer
+            const existingPeer = getPeer(peerIdFromKey);
+            if (!existingPeer) {
+                return res.status(404).json({ error: 'Peer not found - no existing federation' });
+            }
+            if (existingPeer.status !== 'approved') {
+                return res.status(403).json({ error: 'Cannot update identity - peer is not approved' });
+            }
+            // Update peer identity fields
+            existingPeer.displayName = identity.displayName;
+            existingPeer.humanName = identity.humanName;
+            existingPeer.agentName = identity.agentName;
+            existingPeer.organization = identity.organization;
+            existingPeer.email = identity.email;
+            updatePeer(peerIdFromKey, existingPeer);
+            console.log(`[OGP] Updated identity for peer ${identity.displayName} (${peerIdFromKey})`);
+            if (identity.humanName || identity.agentName) {
+                console.log(`[OGP]   Human: ${identity.humanName || '-'}, Agent: ${identity.agentName || '-'}, Org: ${identity.organization || '-'}`);
+            }
+            res.json({
+                updated: true,
+                message: 'Identity updated successfully'
+            });
+        }
+        catch (error) {
+            console.error('[OGP] Error handling identity update:', error);
             res.status(500).json({ error: 'Internal server error' });
         }
     });

@@ -38,7 +38,7 @@ _ogp_completion() {
   # federation subcommands
   if [ "$cmd" = "federation" ]; then
     if [ $COMP_CWORD -eq 2 ]; then
-      opts="list status request connect invite accept approve reject remove alias tag untag ping send scopes grant agent"
+      opts="list status request connect invite accept approve reject remove alias tag untag update-identity ping send scopes grant agent"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
     fi

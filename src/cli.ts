@@ -25,7 +25,8 @@ import {
   federationAccept,
   federationSetAlias,
   federationTagPeer,
-  federationUntagPeer
+  federationUntagPeer,
+  federationUpdateIdentity
 } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
@@ -675,6 +676,14 @@ federation
   .argument('<tags...>', 'Tags to remove')
   .action(async (peerId, tags) => {
     await federationUntagPeer(peerId, tags);
+  });
+
+federation
+  .command('update-identity')
+  .description('Send updated identity information to an approved peer')
+  .argument('<peer-id>', 'Peer ID')
+  .action(async (peerId) => {
+    await federationUpdateIdentity(peerId);
   });
 
 federation
