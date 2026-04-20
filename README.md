@@ -316,6 +316,47 @@ After installation, restart your shell or run `source ~/.bashrc` (bash) or `sour
 | `ogp config disable <framework>` | Disable a framework |
 | `ogp config show [--for <framework>]` | Show current configuration |
 
+### Identity Management
+
+OGP separates human operators from agents for clarity in federated networks. This helps multi-agent scenarios, organizational contexts, and agent-to-agent communication.
+
+| Command | Description |
+|---------|-------------|
+| `ogp config show-identity` | Show current identity configuration |
+| `ogp config set-identity --human-name "Name"` | Set human operator name |
+| `ogp config set-identity --agent-name "Name"` | Set agent name |
+| `ogp config set-identity --organization "Org"` | Set organization |
+| `ogp config set-tags work production` | Set tags (replaces existing) |
+| `ogp config add-tag <tag>` | Add a single tag |
+| `ogp config remove-tag <tag>` | Remove a single tag |
+
+**Identity fields:**
+- **humanName**: Human operator (e.g., "David Proctor", "Stephen")
+- **agentName**: Agent name (e.g., "Junior", "Apollo", "TrogdorClaw")
+- **organization**: Organization name (optional, e.g., "Trilogy", "AICOE")
+- **tags**: Flexible categorization (e.g., "work", "production", "personal", "research")
+
+Tags are used for local categorization and filtering. They help organize peers in multi-context scenarios (work/personal, different clients, etc.).
+
+**Examples:**
+
+```bash
+# View current identity
+ogp config show-identity
+
+# Set identity during setup (auto-prompted)
+ogp setup
+
+# Update identity later
+ogp config set-identity --human-name "David Proctor" --agent-name "Junior"
+ogp config set-identity --organization "Trilogy"
+
+# Manage tags
+ogp config set-tags work production client-trilogy
+ogp config add-tag research
+ogp config remove-tag personal
+```
+
 ### Federation Management
 
 | Command | Description |
@@ -323,10 +364,14 @@ After installation, restart your shell or run `source ~/.bashrc` (bash) or `sour
 | `ogp federation list [--for <framework>]` | List all peers |
 | `ogp federation list --status pending` | List pending federation requests |
 | `ogp federation list --status approved` | List approved peers |
+| `ogp federation list --tag <tag>` | Filter peers by tag |
 | `ogp federation request <url> [alias]` | Request federation (alias auto-resolves if omitted) |
 | `ogp federation approve <peer-id> [options]` | Approve with optional scope grants |
 | `ogp federation reject <peer-id>` | Reject a federation request |
 | `ogp federation remove <peer-id>` | Remove a peer from federation (asymmetric tear-down) |
+| `ogp federation alias <peer-id> <alias>` | Set friendly alias for a peer |
+| `ogp federation tag <peer-id> <tags...>` | Add tags to a peer (local categorization) |
+| `ogp federation untag <peer-id> <tags...>` | Remove tags from a peer |
 | `ogp federation send <peer-id> <intent> <json>` | Send a message to an approved peer |
 | `ogp federation scopes <peer-id>` | Show scope grants for a peer |
 | `ogp federation grant <peer-id> [options]` | Update scope grants for a peer |
