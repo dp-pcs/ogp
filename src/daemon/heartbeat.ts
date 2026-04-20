@@ -1,9 +1,57 @@
 import { listPeers, updatePeer, type Peer } from './peers.js';
+import { loadConfig, type HealthCheckConfig } from '../shared/config.js';
 
 let heartbeatTimer: NodeJS.Timeout | null = null;
-const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const HEALTH_CHECK_TIMEOUT_MS = 10000; // 10 seconds
-const MAX_CONSECUTIVE_FAILURES = 3; // Mark unhealthy after 3 consecutive failures
+
+// Default values (can be overridden by config or env vars)
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 10000; // 10 seconds
+const DEFAULT_MAX_CONSECUTIVE_FAILURES = 3; // Mark unhealthy after 3 consecutive failures
+
+// Active configuration (resolved from defaults, config file, and env vars)
+let activeConfig = {
+  intervalMs: DEFAULT_HEARTBEAT_INTERVAL_MS,
+  timeoutMs: DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
+  maxConsecutiveFailures: DEFAULT_MAX_CONSECUTIVE_FAILURES
+};
+
+/**
+ * Load health check configuration from config file and environment variables.
+ * Priority: ENV > config file > defaults
+ */
+export function loadHealthCheckConfig(): void {
+  const config = loadConfig();
+  const configHealthCheck = config?.healthCheck || {};
+
+  // Start with defaults
+  let intervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
+  let timeoutMs = DEFAULT_HEALTH_CHECK_TIMEOUT_MS;
+  let maxConsecutiveFailures = DEFAULT_MAX_CONSECUTIVE_FAILURES;
+
+  // Apply config file values
+  if (configHealthCheck.intervalMs !== undefined) {
+    intervalMs = configHealthCheck.intervalMs;
+  }
+  if (configHealthCheck.timeoutMs !== undefined) {
+    timeoutMs = configHealthCheck.timeoutMs;
+  }
+  if (configHealthCheck.maxConsecutiveFailures !== undefined) {
+    maxConsecutiveFailures = configHealthCheck.maxConsecutiveFailures;
+  }
+
+  // Apply environment variable overrides (highest priority)
+  if (process.env.OGP_HEARTBEAT_INTERVAL_MS) {
+    intervalMs = parseInt(process.env.OGP_HEARTBEAT_INTERVAL_MS, 10);
+  }
+  if (process.env.OGP_HEARTBEAT_TIMEOUT_MS) {
+    timeoutMs = parseInt(process.env.OGP_HEARTBEAT_TIMEOUT_MS, 10);
+  }
+  if (process.env.OGP_HEARTBEAT_MAX_FAILURES) {
+    maxConsecutiveFailures = parseInt(process.env.OGP_HEARTBEAT_MAX_FAILURES, 10);
+  }
+
+  activeConfig = { intervalMs, timeoutMs, maxConsecutiveFailures };
+}
 
 /**
  * Check if a single peer is healthy by fetching their /.well-known/ogp endpoint
@@ -11,7 +59,7 @@ const MAX_CONSECUTIVE_FAILURES = 3; // Mark unhealthy after 3 consecutive failur
 async function checkPeerHealth(peer: Peer): Promise<boolean> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), activeConfig.timeoutMs);
 
     const response = await fetch(`${peer.gatewayUrl}/.well-known/ogp`, {
       signal: controller.signal,
@@ -64,7 +112,7 @@ async function runHealthChecks(): Promise<void> {
       const wasHealthy = peer.healthy !== false;
 
       // Mark as unhealthy if we've reached the threshold
-      const isNowUnhealthy = failures >= MAX_CONSECUTIVE_FAILURES;
+      const isNowUnhealthy = failures >= activeConfig.maxConsecutiveFailures;
 
       if (wasHealthy && isNowUnhealthy) {
         console.warn(`[OGP Heartbeat] Peer ${peer.displayName} (${peer.id}) marked as unhealthy after ${failures} consecutive failures`);
@@ -117,7 +165,10 @@ export function startHeartbeat(): void {
     return;
   }
 
-  console.log(`[OGP Heartbeat] Starting heartbeat (interval: ${HEARTBEAT_INTERVAL_MS / 1000}s)`);
+  // Load configuration (config file + env vars)
+  loadHealthCheckConfig();
+
+  console.log(`[OGP Heartbeat] Starting heartbeat (interval: ${activeConfig.intervalMs / 1000}s, timeout: ${activeConfig.timeoutMs / 1000}s, max failures: ${activeConfig.maxConsecutiveFailures})`);
 
   // Run initial health check after a short delay (30 seconds) to avoid startup congestion
   setTimeout(() => {
@@ -131,7 +182,7 @@ export function startHeartbeat(): void {
     runHealthChecks().catch((error) => {
       console.error('[OGP Heartbeat] Error during health check:', error);
     });
-  }, HEARTBEAT_INTERVAL_MS);
+  }, activeConfig.intervalMs);
 }
 
 /**
@@ -150,9 +201,7 @@ export function stopHeartbeat(): void {
  */
 export function getHeartbeatConfig() {
   return {
-    intervalMs: HEARTBEAT_INTERVAL_MS,
-    timeoutMs: HEALTH_CHECK_TIMEOUT_MS,
-    maxConsecutiveFailures: MAX_CONSECUTIVE_FAILURES,
+    ...activeConfig,
     isRunning: heartbeatTimer !== null
   };
 }

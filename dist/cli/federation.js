@@ -149,8 +149,29 @@ export async function federationList(status) {
                         const aliasDisplay = peer.alias || peer.displayName || '-';
                         const displayName = peer.alias ? peer.displayName : '';
                         const keyShort = peer.publicKey?.substring(0, 16) || '-';
-                        const statusIcon = peer.status === 'approved' ? '✓' : peer.status === 'pending' ? '?' : '✗';
-                        console.log(`  ${statusIcon} ${aliasDisplay.padEnd(15)} ${(displayName || '').padEnd(25)} ${peer.status.padEnd(10)} ${peer.grantedScopes?.scopes.map(s => s.intent).join(', ') || 'none'}`);
+                        // Status and health icons
+                        let statusIcon = peer.status === 'approved' ? '✓' : peer.status === 'pending' ? '?' : '✗';
+                        if (peer.status === 'approved' && peer.healthy === false) {
+                            statusIcon = '✗'; // Show unhealthy status
+                        }
+                        // Health details for approved peers
+                        let healthInfo = '';
+                        if (peer.status === 'approved') {
+                            if (peer.lastSeenAt) {
+                                const lastSeen = new Date(peer.lastSeenAt);
+                                const now = new Date();
+                                const minutesAgo = Math.floor((now.getTime() - lastSeen.getTime()) / 60000);
+                                const timeStr = minutesAgo < 60 ? `${minutesAgo}m` : `${Math.floor(minutesAgo / 60)}h`;
+                                healthInfo = ` [last seen: ${timeStr}]`;
+                            }
+                            else {
+                                healthInfo = ' [never seen]';
+                            }
+                            if (peer.healthCheckFailures && peer.healthCheckFailures > 0) {
+                                healthInfo += ` (${peer.healthCheckFailures} failures)`;
+                            }
+                        }
+                        console.log(`  ${statusIcon} ${aliasDisplay.padEnd(20)} ${(displayName || '').padEnd(25)} ${peer.status.padEnd(10)}${healthInfo}`);
                     });
                 }
                 console.log('');
@@ -271,13 +292,47 @@ export async function federationStatus() {
                 }
                 else {
                     console.log(`  Total: ${peers.length} | Approved: ${approvedPeers.length} | Pending: ${pendingPeers.length} | Rejected: ${rejectedPeers.length} | Removed: ${removedPeers.length}`);
-                    // Show aliases for approved peers
+                    // Show aliases for approved peers with health info
                     if (approvedPeers.length > 0) {
                         console.log('\n  Approved peers:');
                         for (const peer of approvedPeers) {
                             const aliasDisplay = peer.alias || peer.displayName || 'no alias';
+                            // Health status indicator
+                            let healthIcon = '';
+                            if (peer.healthy === true) {
+                                healthIcon = '✓';
+                            }
+                            else if (peer.healthy === false) {
+                                healthIcon = '✗';
+                            }
+                            else {
+                                healthIcon = '?';
+                            }
+                            // Format last seen time
+                            let lastSeenStr = '';
+                            if (peer.lastSeenAt) {
+                                const lastSeen = new Date(peer.lastSeenAt);
+                                const now = new Date();
+                                const minutesAgo = Math.floor((now.getTime() - lastSeen.getTime()) / 60000);
+                                if (minutesAgo < 60) {
+                                    lastSeenStr = `${minutesAgo}m ago`;
+                                }
+                                else if (minutesAgo < 1440) {
+                                    lastSeenStr = `${Math.floor(minutesAgo / 60)}h ago`;
+                                }
+                                else {
+                                    lastSeenStr = `${Math.floor(minutesAgo / 1440)}d ago`;
+                                }
+                            }
+                            else {
+                                lastSeenStr = 'never';
+                            }
+                            // Show health failures if any
+                            const failuresStr = peer.healthCheckFailures && peer.healthCheckFailures > 0
+                                ? ` (${peer.healthCheckFailures} failures)`
+                                : '';
                             const scopes = peer.grantedScopes?.scopes.map(s => s.intent).join(', ') || 'none';
-                            console.log(`    ${aliasDisplay.padEnd(20)} ${scopes}`);
+                            console.log(`    ${healthIcon} ${aliasDisplay.padEnd(20)} [${lastSeenStr.padEnd(8)}${failuresStr}] ${scopes}`);
                         }
                     }
                 }
@@ -305,6 +360,9 @@ export async function federationStatus() {
         console.log(`  Pending:  ${totalPending}`);
         console.log(`  Rejected: ${totalRejected}`);
         console.log(`  Removed:  ${totalRemoved}`);
+        console.log('');
+        console.log('Health checks run every 5 minutes for approved peers.');
+        console.log('Peers are marked unhealthy after 3 consecutive failures (10s timeout each).');
         console.log('');
         return;
     }

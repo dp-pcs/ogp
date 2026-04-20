@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { runAgentCommsInterview, runSetup, runSetupResetKeypair } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
+import { getHeartbeatConfig, loadHealthCheckConfig } from './daemon/heartbeat.js';
 import { requireConfig, loadConfig } from './shared/config.js';
 import { loadMetaConfig } from './shared/meta-config.js';
 import { federationList, federationStatus, federationRequest, federationApprove, federationReject, federationRemove, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect, federationInvite, federationAccept, federationSetAlias } from './cli/federation.js';
@@ -383,6 +384,14 @@ program
     console.log(`  Gateway URL: ${config.gatewayUrl}`);
     console.log(`  Display name: ${config.displayName}`);
     console.log(`  Email: ${config.email}`);
+    // Show health check configuration
+    loadHealthCheckConfig();
+    const heartbeatConfig = getHeartbeatConfig();
+    console.log('\nHealth Check Configuration:');
+    console.log(`  Check interval: ${heartbeatConfig.intervalMs / 1000}s`);
+    console.log(`  Check timeout: ${heartbeatConfig.timeoutMs / 1000}s`);
+    console.log(`  Max consecutive failures: ${heartbeatConfig.maxConsecutiveFailures}`);
+    console.log(`  Heartbeat status: ${heartbeatConfig.isRunning ? 'Running' : 'Stopped'}`);
 });
 /**
  * Pad string to the right with spaces
