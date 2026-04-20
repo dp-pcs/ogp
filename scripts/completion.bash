@@ -61,9 +61,18 @@ _ogp_completion() {
   # config subcommands
   if [ "$cmd" = "config" ]; then
     if [ $COMP_CWORD -eq 2 ]; then
-      opts="show set-default list enable disable frameworks"
+      opts="show set-default list enable disable frameworks health-check"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
+    fi
+
+    # health-check subcommands
+    if [ "$subcmd" = "health-check" ]; then
+      if [ $COMP_CWORD -eq 3 ]; then
+        opts="show interval timeout max-failures"
+        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        return 0
+      fi
     fi
 
     # For config commands that need framework ID
