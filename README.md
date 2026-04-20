@@ -57,6 +57,38 @@ For the current `0.4.2` release line, the changed skills should report:
 - `ogp-agent-comms` `0.6.0`
 - `ogp-project` `2.2.0`
 
+### Shell Completion and Help
+
+OGP includes intelligent tab completion and context-sensitive help (inspired by Cisco IOS).
+
+**Install tab completion:**
+
+```bash
+ogp completion install
+```
+
+This installs completion for your shell (bash or zsh). After installation, **open a new terminal window** for the changes to take effect.
+
+**Context-sensitive help:**
+
+Use `help` at any command level to see available options:
+
+```bash
+ogp help                         # Top-level commands
+ogp config help                  # Config subcommands
+ogp config health-check help     # Health-check options
+ogp federation help              # Federation commands
+```
+
+You can also use `?` (requires quoting in the shell):
+
+```bash
+ogp config '?'
+ogp federation '?'
+```
+
+Both `help` and `?` work identically - use whichever you prefer.
+
 ### Multi-Framework Support
 
 OGP supports running alongside multiple AI frameworks (OpenClaw, Hermes, etc.) with isolated configurations. During setup, OGP automatically detects installed frameworks and creates framework-specific configurations:
