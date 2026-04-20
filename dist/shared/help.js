@@ -23,6 +23,9 @@ export function showContextHelp(commandChain) {
     else if (context === 'config') {
         showConfigHelp();
     }
+    else if (context.startsWith('config health-check')) {
+        showConfigHealthCheckHelp();
+    }
     else if (context === 'project') {
         showProjectHelp();
     }
@@ -213,6 +216,7 @@ function showConfigHelp() {
     console.log('  set-default     Set default framework');
     console.log('  set-alias       Set an alias for a framework');
     console.log('  show            Show configuration for a framework');
+    console.log('  health-check    Manage health check configuration');
     console.log('');
     // Show current frameworks
     try {
@@ -235,6 +239,26 @@ function showConfigHelp() {
     console.log('  ogp config add my-framework "My Framework" ~/.ogp-my-framework');
     console.log('  ogp config set-default my-framework');
     console.log('  ogp config set-alias mf my-framework');
+    console.log('');
+}
+/**
+ * Config health-check commands help
+ */
+function showConfigHealthCheckHelp() {
+    console.log('\nHealth check configuration:');
+    console.log('  show            Show current health check configuration');
+    console.log('  interval        Set health check interval in milliseconds');
+    console.log('  timeout         Set health check timeout in milliseconds');
+    console.log('  max-failures    Set max consecutive failures before unhealthy');
+    console.log('');
+    console.log('Examples:');
+    console.log('  ogp config health-check show');
+    console.log('  ogp config health-check interval 60000');
+    console.log('  ogp config health-check timeout 10000');
+    console.log('  ogp config health-check max-failures 3');
+    console.log('');
+    console.log('Note: Restart daemon for changes to take effect');
+    console.log('  ogp stop && ogp start --background');
     console.log('');
 }
 /**

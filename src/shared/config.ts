@@ -102,6 +102,18 @@ export interface DelegatedAuthorityConfig {
   peers?: Record<string, DelegatedAuthorityPeerOverride>;
 }
 
+/**
+ * Health check configuration for peer heartbeat monitoring
+ */
+export interface HealthCheckConfig {
+  /** Interval between health checks in milliseconds (default: 300000 = 5 minutes) */
+  intervalMs?: number;
+  /** Timeout for each health check request in milliseconds (default: 10000 = 10 seconds) */
+  timeoutMs?: number;
+  /** Number of consecutive failures before marking peer unhealthy (default: 3) */
+  maxConsecutiveFailures?: number;
+}
+
 export interface OGPConfig {
   daemonPort: number;
   openclawUrl: string;
@@ -138,6 +150,9 @@ export interface OGPConfig {
   // Hermes-specific configuration (optional, only used when platform === 'hermes')
   hermesWebhookUrl?: string;
   hermesWebhookSecret?: string;
+
+  // Health check configuration (optional)
+  healthCheck?: HealthCheckConfig;
 }
 
 /**

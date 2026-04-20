@@ -1,6 +1,8 @@
 import { Command } from 'commander';
 import { loadMetaConfig, saveMetaConfig } from '../shared/meta-config.js';
 import { detectFrameworks } from '../shared/framework-detection.js';
+import { loadConfig, saveConfig, requireConfig } from '../shared/config.js';
+import { loadHealthCheckConfig, getHeartbeatConfig } from '../daemon/heartbeat.js';
 /**
  * Show all configured frameworks and default
  */
@@ -161,6 +163,101 @@ function showFrameworks() {
     }
     console.log('');
 }
+/**
+ * Show current health check configuration
+ */
+function showHealthCheckConfig() {
+    const config = loadConfig();
+    if (!config) {
+        console.error('Error: No configuration found. Run "ogp setup" first.');
+        process.exit(1);
+    }
+    // Load and show active config (including env var overrides)
+    loadHealthCheckConfig();
+    const active = getHeartbeatConfig();
+    console.log('\nHealth Check Configuration');
+    console.log('━'.repeat(44));
+    console.log('');
+    console.log(`Check interval:           ${active.intervalMs / 1000}s (${active.intervalMs}ms)`);
+    console.log(`Check timeout:            ${active.timeoutMs / 1000}s (${active.timeoutMs}ms)`);
+    console.log(`Max consecutive failures: ${active.maxConsecutiveFailures}`);
+    console.log(`Heartbeat status:         ${active.isRunning ? 'Running' : 'Stopped'}`);
+    console.log('');
+    // Show config file values if different from active
+    const configValues = config.healthCheck || {};
+    if (Object.keys(configValues).length > 0) {
+        console.log('Config file values:');
+        if (configValues.intervalMs !== undefined) {
+            console.log(`  intervalMs:              ${configValues.intervalMs}`);
+        }
+        if (configValues.timeoutMs !== undefined) {
+            console.log(`  timeoutMs:               ${configValues.timeoutMs}`);
+        }
+        if (configValues.maxConsecutiveFailures !== undefined) {
+            console.log(`  maxConsecutiveFailures:  ${configValues.maxConsecutiveFailures}`);
+        }
+        console.log('');
+    }
+    console.log('Environment variable overrides:');
+    console.log(`  OGP_HEARTBEAT_INTERVAL_MS:   ${process.env.OGP_HEARTBEAT_INTERVAL_MS || '(not set)'}`);
+    console.log(`  OGP_HEARTBEAT_TIMEOUT_MS:    ${process.env.OGP_HEARTBEAT_TIMEOUT_MS || '(not set)'}`);
+    console.log(`  OGP_HEARTBEAT_MAX_FAILURES:  ${process.env.OGP_HEARTBEAT_MAX_FAILURES || '(not set)'}`);
+    console.log('');
+}
+/**
+ * Set health check interval
+ */
+function setHealthCheckInterval(intervalMs) {
+    const config = requireConfig();
+    const value = parseInt(intervalMs, 10);
+    if (isNaN(value) || value < 1000) {
+        console.error('Error: Interval must be a positive number >= 1000 milliseconds');
+        process.exit(1);
+    }
+    if (!config.healthCheck) {
+        config.healthCheck = {};
+    }
+    config.healthCheck.intervalMs = value;
+    saveConfig(config);
+    console.log(`✓ Set health check interval to ${value}ms (${value / 1000}s)`);
+    console.log('  Restart daemon for changes to take effect: ogp stop && ogp start --background');
+}
+/**
+ * Set health check timeout
+ */
+function setHealthCheckTimeout(timeoutMs) {
+    const config = requireConfig();
+    const value = parseInt(timeoutMs, 10);
+    if (isNaN(value) || value < 1000) {
+        console.error('Error: Timeout must be a positive number >= 1000 milliseconds');
+        process.exit(1);
+    }
+    if (!config.healthCheck) {
+        config.healthCheck = {};
+    }
+    config.healthCheck.timeoutMs = value;
+    saveConfig(config);
+    console.log(`✓ Set health check timeout to ${value}ms (${value / 1000}s)`);
+    console.log('  Restart daemon for changes to take effect: ogp stop && ogp start --background');
+}
+/**
+ * Set max consecutive failures threshold
+ */
+function setHealthCheckMaxFailures(maxFailures) {
+    const config = requireConfig();
+    const value = parseInt(maxFailures, 10);
+    if (isNaN(value) || value < 1) {
+        console.error('Error: Max failures must be a positive number >= 1');
+        process.exit(1);
+    }
+    if (!config.healthCheck) {
+        config.healthCheck = {};
+    }
+    config.healthCheck.maxConsecutiveFailures = value;
+    saveConfig(config);
+    console.log(`✓ Set max consecutive failures to ${value}`);
+    console.log('  Restart daemon for changes to take effect: ogp stop && ogp start --background');
+}
 // Create the config command
 export const configCommand = new Command('config')
     .description('Manage OGP framework configuration');
@@ -203,5 +300,36 @@ configCommand
     .description('Show all detected frameworks (detected vs enabled)')
     .action(() => {
     showFrameworks();
+});
+// Health check configuration commands
+const healthCheckCommand = configCommand
+    .command('health-check')
+    .description('Manage health check configuration');
+healthCheckCommand
+    .command('show')
+    .description('Show current health check configuration')
+    .action(() => {
+    showHealthCheckConfig();
+});
+healthCheckCommand
+    .command('interval')
+    .description('Set health check interval in milliseconds')
+    .argument('<ms>', 'Interval in milliseconds (minimum 1000)')
+    .action((ms) => {
+    setHealthCheckInterval(ms);
+});
+healthCheckCommand
+    .command('timeout')
+    .description('Set health check timeout in milliseconds')
+    .argument('<ms>', 'Timeout in milliseconds (minimum 1000)')
+    .action((ms) => {
+    setHealthCheckTimeout(ms);
+});
+healthCheckCommand
+    .command('max-failures')
+    .description('Set maximum consecutive failures before marking unhealthy')
+    .argument('<count>', 'Number of failures (minimum 1)')
+    .action((count) => {
+    setHealthCheckMaxFailures(count);
 });
 //# sourceMappingURL=config.js.map
