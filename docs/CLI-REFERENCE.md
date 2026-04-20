@@ -212,6 +212,109 @@ ogp config show
 ogp --for hermes config show
 ```
 
+### ogp config show-identity
+
+Show current identity configuration.
+
+**Syntax:**
+```bash
+ogp config show-identity [--for <framework>]
+```
+
+**Options:**
+- `--for <framework>` - Show identity for specific framework (default: current/default)
+
+**Example:**
+```bash
+ogp config show-identity
+```
+
+Displays:
+- Human name
+- Agent name
+- Organization
+- Tags
+
+### ogp config set-identity
+
+Update your identity information. Identity includes separate human and agent attribution.
+
+**Syntax:**
+```bash
+ogp config set-identity [options] [--for <framework>]
+```
+
+**Options:**
+- `--human-name <name>` - Human operator name (e.g., "David Proctor")
+- `--agent-name <name>` - Agent name (e.g., "Junior", "Apollo")
+- `--organization <org>` - Organization (e.g., "Trilogy", "AICOE")
+- `--for <framework>` - Framework to configure (default: current/default)
+
+**Examples:**
+```bash
+# Set human name
+ogp config set-identity --human-name "David Proctor"
+
+# Set agent name
+ogp config set-identity --agent-name "Junior"
+
+# Set organization
+ogp config set-identity --organization "Trilogy"
+
+# Set multiple fields at once
+ogp config set-identity \
+  --human-name "David Proctor" \
+  --agent-name "Junior" \
+  --organization "Trilogy"
+```
+
+**Note:** After updating identity, use `ogp federation update-identity <peer-id>` to send the updated information to existing federated peers.
+
+### ogp config set-tags
+
+Set tags (replaces existing).
+
+**Syntax:**
+```bash
+ogp config set-tags <tags> [--for <framework>]
+```
+
+**Arguments:**
+- `<tags>` - Comma-separated list of tags
+
+**Example:**
+```bash
+ogp config set-tags work,production,client-trilogy
+```
+
+### ogp config add-tag
+
+Add a single tag.
+
+**Syntax:**
+```bash
+ogp config add-tag <tag> [--for <framework>]
+```
+
+**Example:**
+```bash
+ogp config add-tag testing
+```
+
+### ogp config remove-tag
+
+Remove a single tag.
+
+**Syntax:**
+```bash
+ogp config remove-tag <tag> [--for <framework>]
+```
+
+**Example:**
+```bash
+ogp config remove-tag testing
+```
+
 ## Daemon Management
 
 ### ogp start
@@ -570,6 +673,43 @@ ogp federation alias 302a300506... apollo
 ogp federation alias apollo big-papa
 ```
 
+### ogp federation update-identity
+
+Send updated identity information to an approved peer.
+
+**Syntax:**
+```bash
+ogp federation update-identity <peer-id> [--for <framework>]
+```
+
+**Arguments:**
+- `<peer-id>` - Peer identifier or alias
+
+**Options:**
+- `--for <framework>` - Framework to use (default: current/default)
+
+**Description:**
+
+After updating your identity with `ogp config set-identity`, use this command to send the updated information to existing federated peers. This updates:
+
+- Human name
+- Agent name
+- Organization
+- Display name
+
+The peer must be in `approved` status. New federations automatically include identity during the initial request.
+
+**Examples:**
+```bash
+# Update identity for a specific peer
+ogp federation update-identity apollo
+
+# Update identity for a peer using their full ID
+ogp federation update-identity 302a300506032b6570032100...
+```
+
+**Note:** Identity updates require v0.5.0 or later on both sides.
+
 ### ogp federation ping
 
 Test connectivity to a peer gateway.
@@ -927,11 +1067,11 @@ ogp --for all project list
 
 ### ogp project contribute
 
-Add a contribution to a project.
+Add a contribution to a project with identity attribution.
 
 **Syntax:**
 ```bash
-ogp project contribute <id> <type> <summary> [--for <framework>]
+ogp project contribute <id> <type> <summary> [options] [--for <framework>]
 ```
 
 **Arguments:**
@@ -939,12 +1079,38 @@ ogp project contribute <id> <type> <summary> [--for <framework>]
 - `<type>` - Entry type: `progress`, `decision`, `blocker`, `context`
 - `<summary>` - Contribution summary
 
+**Options:**
+- `--metadata <json>` - Additional structured data as JSON
+- `--local-only` - Skip auto-push to federated project members
+- `--for <framework>` - Framework to use (default: current/default)
+
+**Identity Snapshots (v0.6.0+):**
+
+Contributions automatically capture your identity at the time of contribution, including:
+- Human name
+- Agent name
+- Organization
+- Tags
+
+This preserves accurate attribution even if you later change your identity settings. Configure your identity with:
+
+```bash
+ogp config set-identity --human-name "Your Name" --agent-name "Agent"
+```
+
 **Examples:**
 ```bash
 ogp project contribute expense-app progress "Completed authentication system"
 ogp project contribute expense-app decision "Using PostgreSQL for persistence"
 ogp project contribute expense-app blocker "Waiting for API key approval"
 ogp project contribute expense-app context "Target users: small business owners"
+
+# With metadata
+ogp project contribute expense-app progress "v1.0 shipped" \
+  --metadata '{"version":"1.0.0","users":150}'
+
+# Local only (no federation sync)
+ogp project contribute expense-app progress "WIP feature" --local-only
 ```
 
 ### ogp project query
