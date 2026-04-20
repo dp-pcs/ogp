@@ -13,11 +13,63 @@ import {
   getProjectStatus,
   updateProject,
   ensureProjectTopic,
-  getContributionEntryType
+  getContributionEntryType,
+  type ProjectContribution
 } from '../daemon/projects.js';
 import { loadConfig } from '../shared/config.js';
 import { getPeer } from '../daemon/peers.js';
 import { federationSend } from './federation.js';
+
+/**
+ * Format author display with 3-tier fallback:
+ * 1. Use authorIdentity if available (humanName + agentName)
+ * 2. Fall back to peer lookup
+ * 3. Last resort: raw authorId
+ */
+function formatAuthorDisplay(contribution: ProjectContribution): string {
+  // Tier 1: Use snapshot identity if available
+  if (contribution.authorIdentity) {
+    const parts: string[] = [];
+    if (contribution.authorIdentity.humanName) {
+      parts.push(contribution.authorIdentity.humanName);
+    }
+    if (contribution.authorIdentity.agentName) {
+      parts.push(`(${contribution.authorIdentity.agentName})`);
+    }
+    if (parts.length > 0) {
+      return parts.join(' ');
+    }
+    // Fall back to displayName if humanName/agentName not set
+    if (contribution.authorIdentity.displayName) {
+      return contribution.authorIdentity.displayName;
+    }
+  }
+
+  // Tier 2: Try peer lookup
+  try {
+    const peer = getPeer(contribution.authorId);
+    if (peer) {
+      const parts: string[] = [];
+      if (peer.humanName) {
+        parts.push(peer.humanName);
+      }
+      if (peer.agentName) {
+        parts.push(`(${peer.agentName})`);
+      }
+      if (parts.length > 0) {
+        return parts.join(' ');
+      }
+      if (peer.displayName) {
+        return peer.displayName;
+      }
+    }
+  } catch {
+    // Peer lookup failed, continue to tier 3
+  }
+
+  // Tier 3: Raw authorId
+  return contribution.authorId;
+}
 
 interface ProjectJoinOptions {
   description?: string;
@@ -219,13 +271,23 @@ export async function projectContribute(
   // Keep the existing topic bucket structure on disk; user-facing terminology is "entry type".
   ensureProjectTopic(projectId, entryType);
 
+  // Build author identity from local config
+  const authorIdentity = {
+    displayName: config.displayName,
+    humanName: config.humanName,
+    agentName: config.agentName,
+    organization: config.organization,
+    tags: config.tags
+  };
+
   // Add the contribution
   const contributionId = contributeToProject(
     projectId,
     entryType,
     config.email,
     summary,
-    metadata
+    metadata,
+    authorIdentity
   );
 
   if (contributionId) {
@@ -245,7 +307,14 @@ export async function projectContribute(
     const { listPeers } = await import('../daemon/peers.js');
     const peers = listPeers('approved').filter(peer => listProjectsForPeer(peer.id, [project]).length > 0);
     if (peers.length > 0) {
-      const payload = JSON.stringify({ projectId, entryType, topic: entryType, summary, ...(metadata && { metadata }) });
+      const payload = JSON.stringify({
+        projectId,
+        entryType,
+        topic: entryType,
+        summary,
+        authorIdentity,
+        ...(metadata && { metadata })
+      });
       let pushed = 0;
       for (const peer of peers) {
         try {
@@ -320,7 +389,7 @@ export async function projectQuery(
 
   console.log();
   for (const contrib of contributions) {
-    console.log(`[${new Date(contrib.timestamp).toLocaleString()}] ${contrib.authorId}`);
+    console.log(`[${new Date(contrib.timestamp).toLocaleString()}] ${formatAuthorDisplay(contrib)}`);
     console.log(`  Entry type: ${getContributionEntryType(contrib)}`);
     console.log(`  Summary: ${contrib.summary}`);
     if (contrib.metadata) {
@@ -369,7 +438,7 @@ export async function projectStatus(projectId: string): Promise<void> {
 
     if (topic.lastContribution) {
       console.log(`  Last activity: ${new Date(topic.lastContribution.timestamp).toLocaleString()}`);
-      console.log(`    by ${topic.lastContribution.authorId}: ${topic.lastContribution.summary}`);
+      console.log(`    by ${formatAuthorDisplay(topic.lastContribution)}: ${topic.lastContribution.summary}`);
     }
     console.log();
   }
@@ -499,11 +568,21 @@ export async function projectSendContribution(
     }
   }
 
+  // Build author identity from local config
+  const authorIdentity = {
+    displayName: config.displayName,
+    humanName: config.humanName,
+    agentName: config.agentName,
+    organization: config.organization,
+    tags: config.tags
+  };
+
   const payload = {
     projectId,
     entryType,
     topic: entryType,
     summary,
+    authorIdentity,
     ...(metadata && { metadata })
   };
 
@@ -575,7 +654,7 @@ export async function projectQueryPeer(
 
       contributions.forEach((contribution: any, index: number) => {
         const timestamp = new Date(contribution.timestamp).toLocaleString();
-        console.log(`${index + 1}. [${getContributionEntryType(contribution)}] by ${contribution.authorId} (${timestamp})`);
+        console.log(`${index + 1}. [${getContributionEntryType(contribution)}] by ${formatAuthorDisplay(contribution)} (${timestamp})`);
         console.log(`   ${contribution.summary}`);
         if (contribution.metadata) {
           console.log(`   Metadata: ${JSON.stringify(contribution.metadata, null, 2)}`);

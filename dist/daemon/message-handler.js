@@ -558,7 +558,7 @@ async function handleProjectJoin(message, displayName, payload) {
  * Handle project.contribute intent
  */
 async function handleProjectContribute(message, displayName, payload) {
-    const { projectId, summary, metadata } = payload;
+    const { projectId, summary, metadata, authorIdentity } = payload;
     const entryType = payload.entryType || payload.topic;
     if (!projectId || !entryType || !summary) {
         return {
@@ -588,8 +588,23 @@ async function handleProjectContribute(message, displayName, payload) {
     }
     // Keep the existing topic bucket structure on disk; user-facing terminology is "entry type".
     ensureProjectTopic(projectId, entryType);
+    // Build authorIdentity with 3-tier fallback: payload → peer lookup → undefined
+    let identity = authorIdentity;
+    if (!identity) {
+        // Fall back to peer lookup
+        const peer = getPeer(message.from);
+        if (peer) {
+            identity = {
+                displayName: peer.displayName,
+                humanName: peer.humanName,
+                agentName: peer.agentName,
+                organization: peer.organization,
+                tags: peer.tags
+            };
+        }
+    }
     // Add the contribution
-    const contributionId = contributeToProject(projectId, entryType, message.from, summary, metadata);
+    const contributionId = contributeToProject(projectId, entryType, message.from, summary, metadata, identity);
     if (contributionId) {
         const notificationText = `[OGP Project] ${displayName} contributed to '${project.name}' entry type '${entryType}': ${summary}`;
         await notifyOpenClaw({

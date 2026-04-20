@@ -1,7 +1,15 @@
+export interface AuthorIdentity {
+    displayName?: string;
+    humanName?: string;
+    agentName?: string;
+    organization?: string;
+    tags?: string[];
+}
 export interface ProjectContribution {
     id: string;
     timestamp: string;
     authorId: string;
+    authorIdentity?: AuthorIdentity;
     entryType?: string;
     topic?: string;
     summary: string;
@@ -51,7 +59,7 @@ export declare function ensureProjectTopic(projectId: string, topicName: string,
 /**
  * Add a contribution to a project entry type
  */
-export declare function contributeToProject(projectId: string, entryTypeName: string, authorId: string, summary: string, metadata?: Record<string, any>): string | null;
+export declare function contributeToProject(projectId: string, entryTypeName: string, authorId: string, summary: string, metadata?: Record<string, any>, authorIdentity?: AuthorIdentity): string | null;
 /**
  * Get contributions for a specific entry type across all projects
  */
