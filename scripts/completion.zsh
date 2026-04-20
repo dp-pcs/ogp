@@ -248,6 +248,12 @@ _ogp_config() {
         health-check)
           _ogp_config_health_check
           ;;
+        set-identity)
+          _arguments \
+            '--human-name[Human operator name]:name:' \
+            '--agent-name[Agent name]:name:' \
+            '--organization[Organization name]:org:'
+          ;;
       esac
       ;;
   esac
