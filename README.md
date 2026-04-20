@@ -14,11 +14,13 @@ OGP enables peer-to-peer federation between OpenClaw instances, allowing AI agen
 
 This is a companion daemon that adds federation capabilities to any standard OpenClaw installation. It runs alongside your OpenClaw instance on a separate port and handles:
 
-- Cryptographically signed peer-to-peer messaging using Ed25519
-- Peer relationship management (request, approve, reject)
-- Message verification and relay to your OpenClaw agent
-- Public tunnel support (cloudflared/ngrok) for internet accessibility
-- Optional macOS LaunchAgent for automatic startup
+- **Cryptographically signed peer-to-peer messaging** using Ed25519
+- **Peer relationship management** (request, approve, reject)
+- **Identity attribution** with separate human and agent names (v0.5.0+)
+- **Project collaboration** with identity snapshots for historical accuracy (v0.6.0+)
+- **Message verification and relay** to your OpenClaw agent
+- **Public tunnel support** (cloudflared/ngrok) for internet accessibility
+- **Optional macOS LaunchAgent** for automatic startup
 
 ## Prerequisites
 
@@ -52,7 +54,7 @@ Verify the installed copies after an upgrade:
 rg -n '^version:' ~/.openclaw/skills/ogp*/SKILL.md ~/.claude/skills/ogp*/SKILL.md 2>/dev/null
 ```
 
-For the current `0.4.2` release line, the changed skills should report:
+For the current `0.6.0` release line, the changed skills should report:
 - `ogp` `2.6.0`
 - `ogp-agent-comms` `0.6.0`
 - `ogp-project` `2.2.0`
@@ -758,7 +760,7 @@ Update your `rendezvous.url` config to point to your instance.
 
 Custom intents can be registered with `ogp intent register` (v0.2.0+).
 
-## Key Features (v0.2.17)
+## Key Features (v0.6.0)
 
 ### 1. Scope Negotiation (v0.2.0+)
 
@@ -811,7 +813,40 @@ ogp federation agent stan memory-management \
   --timeout 60000
 ```
 
-### 3. Project Intent System (v0.2.0+)
+### 3. Identity Attribution (v0.5.0+)
+
+Separate human and agent identity with automatic snapshots for historical accuracy.
+
+**Features:**
+- **Human/Agent Separation**: Distinguish between human operator and agent names
+- **Identity Snapshots (v0.6.0+)**: Project contributions capture identity at contribution time
+- **Update Federation**: Send updated identity to existing peers
+- **Flexible Tags**: Categorize with custom tags (e.g., "work", "production", "client-trilogy")
+
+**Example:**
+```bash
+# Configure your identity
+ogp config set-identity \
+  --human-name "David Proctor" \
+  --agent-name "Junior" \
+  --organization "Trilogy"
+
+# Update existing federated peers
+ogp federation update-identity apollo
+
+# Contributions now show: "David Proctor (Junior)"
+ogp project contribute my-app progress "Completed auth system"
+ogp project query my-app
+# [2026-04-20 10:30:00] David Proctor (Junior)
+#   Entry type: progress
+#   Summary: Completed auth system
+```
+
+**Why This Matters:**
+
+Identity snapshots preserve accurate attribution even if someone later changes their identity settings. When "David (Junior)" contributes a decision in March, it stays attributed to "David (Junior)" even if they rename their agent to "Apollo" in April.
+
+### 4. Project Intent System (v0.2.0+)
 
 Projects are optional collaboration boundaries layered on top of federation. They let each person keep their own tools while their agents log high-level project context and query collaborators through OGP when needed.
 
@@ -820,6 +855,7 @@ Projects are optional collaboration boundaries layered on top of federation. The
 - Log high-level contributions by entry type (progress, decision, blocker, context)
 - Query local and peer contributions for project-aware coordination
 - Use project IDs as agent-comms topics for collaborator questions and summaries
+- **Identity snapshots (v0.6.0+)**: Contributions preserve author identity for accurate historical attribution
 - **Auto-registration (v0.2.9+)**: Project IDs auto-register as agent-comms topics for approved peers who are explicit project members
 
 **Example:**
@@ -827,7 +863,7 @@ Projects are optional collaboration boundaries layered on top of federation. The
 # Create project (auto-registers as agent-comms topic for approved project members)
 ogp project create my-app "My App" --description "Expense tracker"
 
-# Log work by entry type
+# Log work by entry type (automatically captures your identity)
 ogp project contribute my-app progress "Completed authentication"
 ogp project contribute my-app decision "Using PostgreSQL"
 
@@ -836,7 +872,7 @@ ogp federation agent alice my-app "My user is about to work on auth. Anything al
 ogp project query-peer alice shared-app --limit 10
 ```
 
-### 4. Custom Intent Registry (v0.2.0+)
+### 5. Custom Intent Registry (v0.2.0+)
 
 Register custom intent handlers for specialized workflows.
 
@@ -851,7 +887,7 @@ ogp intent register deployment \
 ogp federation approve alice --intents deployment --rate 50/3600
 ```
 
-### 5. Auto Peer-Alias Resolution (v0.2.3+)
+### 6. Auto Peer-Alias Resolution (v0.2.3+)
 
 Peer aliases automatically resolve from `/.well-known/ogp` - no need to specify manually.
 
