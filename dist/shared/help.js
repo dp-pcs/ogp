@@ -68,7 +68,7 @@ function showTopLevelHelp() {
     console.log('  ogp setup --reset-keypair');
     console.log('  ogp start');
     console.log('  ogp --for hermes federation list');
-    console.log('  ogp federation ?');
+    console.log('  ogp federation help  (or: ogp federation \\\'?\\\')');
     console.log('');
 }
 /**
@@ -96,7 +96,7 @@ function showFederationHelp() {
     console.log('  ogp federation list');
     console.log('  ogp federation request https://peer.example.com --alias big-papa');
     console.log('  ogp federation approve <peer-id> --intents message,agent-comms');
-    console.log('  ogp federation send ?');
+    console.log('  ogp federation send help');
     console.log('');
 }
 /**
