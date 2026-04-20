@@ -81,6 +81,8 @@ _ogp_federation() {
     reject\:"Reject pending federation request"
     remove\:"Remove peer from federation list"
     alias\:"Set user-friendly alias for peer"
+    tag\:"Add tags to a peer (local categorization)"
+    untag\:"Remove tags from a peer"
     ping\:"Ping peer gateway to test connectivity"
     send\:"Send message to federated peer"
     scopes\:"Show scope grants for peer"
@@ -226,6 +228,11 @@ _ogp_config() {
     disable\:"Disable a framework"
     frameworks\:"Show all detected frameworks"
     health-check\:"Manage health check configuration"
+    show-identity\:"Show current identity configuration"
+    set-identity\:"Update identity information"
+    set-tags\:"Set tags (replaces existing)"
+    add-tag\:"Add a tag"
+    remove-tag\:"Remove a tag"
   ))' \
   '*::arg:->args'
 

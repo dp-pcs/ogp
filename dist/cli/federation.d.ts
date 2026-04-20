@@ -11,7 +11,7 @@ export declare function fetchFederationCard(gatewayUrl: string, fetchImpl?: type
     card: FederationCard;
 }>;
 export declare function ensureLocalGatewayReachable(config: Pick<OGPConfig, 'gatewayUrl'>, actionLabel: string, fetchImpl?: typeof fetch): Promise<boolean>;
-export declare function federationList(status?: 'pending' | 'approved' | 'rejected' | 'removed'): Promise<void>;
+export declare function federationList(status?: 'pending' | 'approved' | 'rejected' | 'removed', filterTag?: string): Promise<void>;
 export declare function federationStatus(): Promise<void>;
 export declare function federationRequest(peerUrl: string, peerId: string, alias?: string): Promise<boolean>;
 export interface ApproveOptions {

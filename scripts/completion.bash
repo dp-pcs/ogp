@@ -38,7 +38,7 @@ _ogp_completion() {
   # federation subcommands
   if [ "$cmd" = "federation" ]; then
     if [ $COMP_CWORD -eq 2 ]; then
-      opts="list status request connect invite accept approve reject remove alias ping send scopes grant agent"
+      opts="list status request connect invite accept approve reject remove alias tag untag ping send scopes grant agent"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
     fi
@@ -61,7 +61,7 @@ _ogp_completion() {
   # config subcommands
   if [ "$cmd" = "config" ]; then
     if [ $COMP_CWORD -eq 2 ]; then
-      opts="show set-default list enable disable frameworks health-check"
+      opts="show set-default list enable disable frameworks health-check show-identity set-identity set-tags add-tag remove-tag"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
     fi

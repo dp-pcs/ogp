@@ -520,8 +520,9 @@ federation
   .command('list')
   .description('List all peers (use --for all to show all frameworks)')
   .option('-s, --status <status>', 'Filter by status (pending|approved|rejected)')
+  .option('-t, --tag <tag>', 'Filter by tag')
   .action(async (options) => {
-    await federationList(options.status);
+    await federationList(options.status, options.tag);
   });
 
 federation
