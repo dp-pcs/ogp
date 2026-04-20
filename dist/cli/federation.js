@@ -107,7 +107,7 @@ function resolvePeerId(identifier) {
     }
     return null;
 }
-export async function federationList(status) {
+export async function federationList(status, filterTag) {
     // Check if --for all was specified
     if (process.env.OGP_FOR_ALL === 'true') {
         const metaConfig = loadMetaConfig();
@@ -198,12 +198,19 @@ export async function federationList(status) {
     // Single framework mode (existing behavior)
     // listPeers() doesn't filter 'removed' — load all and filter manually if needed
     const allPeers = loadPeers();
-    const peers = status ? allPeers.filter(p => p.status === status) : allPeers.filter(p => p.status !== 'removed');
+    let peers = status ? allPeers.filter(p => p.status === status) : allPeers.filter(p => p.status !== 'removed');
+    // Filter by tag if specified
+    if (filterTag) {
+        peers = peers.filter(p => p.tags && p.tags.includes(filterTag));
+    }
     if (peers.length === 0) {
         console.log('No peers found.');
         return;
     }
-    console.log(`\n${status ? status.toUpperCase() : 'ALL'} PEERS:\n`);
+    const listHeader = filterTag
+        ? `${status ? status.toUpperCase() : 'ALL'} PEERS (tag: ${filterTag})`
+        : `${status ? status.toUpperCase() : 'ALL'} PEERS`;
+    console.log(`\n${listHeader}:\n`);
     // Column headers
     console.log('  ALIAS                DISPLAY NAME           PUBLIC KEY          STATUS');
     console.log('  ' + '-'.repeat(80));
@@ -228,6 +235,21 @@ export async function federationList(status) {
         console.log(`  ${healthIcon ? healthIcon + ' ' : ''}${aliasCol} ${displayCol} ${keyCol.padEnd(20)} ${statusCol}`);
         console.log(`    Gateway: ${peer.gatewayUrl}`);
         console.log(`    ID: ${peer.id}`);
+        // Show identity if available
+        if (peer.humanName || peer.agentName || peer.organization) {
+            const parts = [];
+            if (peer.humanName)
+                parts.push(`Human: ${peer.humanName}`);
+            if (peer.agentName)
+                parts.push(`Agent: ${peer.agentName}`);
+            if (peer.organization)
+                parts.push(`Org: ${peer.organization}`);
+            console.log(`    ${parts.join(', ')}`);
+        }
+        // Show local tags if any
+        if (peer.tags && peer.tags.length > 0) {
+            console.log(`    Tags: ${peer.tags.join(', ')}`);
+        }
         // Show health details for approved peers
         if (peer.status === 'approved') {
             if (peer.lastSeenAt) {

@@ -86,6 +86,8 @@ function showFederationHelp() {
     console.log('  reject          Reject a pending federation request');
     console.log('  remove          Remove a peer from federation list');
     console.log('  alias           Set a user-friendly alias for a peer');
+    console.log('  tag             Add tags to a peer (local categorization)');
+    console.log('  untag           Remove tags from a peer');
     console.log('  ping            Test connectivity to a peer');
     console.log('  send            Send a message to a federated peer');
     console.log('  agent           Send an agent-comms message to a peer');
@@ -217,6 +219,11 @@ function showConfigHelp() {
     console.log('  set-alias       Set an alias for a framework');
     console.log('  show            Show configuration for a framework');
     console.log('  health-check    Manage health check configuration');
+    console.log('  show-identity   Show current identity configuration');
+    console.log('  set-identity    Update identity information');
+    console.log('  set-tags        Set tags (replaces existing)');
+    console.log('  add-tag         Add a tag');
+    console.log('  remove-tag      Remove a tag');
     console.log('');
     // Show current frameworks
     try {
