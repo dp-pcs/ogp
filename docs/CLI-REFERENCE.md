@@ -1321,6 +1321,8 @@ ogp intent remove deployment
 
 Start a public tunnel to expose the daemon to the internet.
 
+**Note:** This command is **optional**. Only use it if you need help getting public access to your gateway. If you already have a publicly accessible URL (cloud server, VPS, reverse proxy, etc.), just set your `gatewayUrl` in the config and skip this command.
+
 **Syntax:**
 ```bash
 ogp expose [--background] [--method <method>] [--for <framework>]

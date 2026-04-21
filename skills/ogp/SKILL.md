@@ -1,6 +1,6 @@
 ---
 skill_name: ogp
-version: 2.6.0
+version: 0.6.0
 description: >
   OGP (Open Gateway Protocol) — federated agent communication, peer management,
   and project collaboration across OpenClaw and Hermes gateways. Use when the user
