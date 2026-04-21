@@ -15,7 +15,7 @@ import { installCompletion } from './cli/completion.js';
 import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, showActivity, clearActivity, setDefault, setLogging, setTopic, setPeerDefault } from './cli/agent-comms.js';
 import { registerNewIntent, listRegisteredIntents, removeIntent } from './cli/intent-registry.js';
 import { projectCreate, projectJoin, projectList, projectRemove, projectContribute, projectQuery, projectStatus, projectRequestJoin, projectSendContribution, projectQueryPeer, projectStatusPeer } from './cli/project.js';
-import { configCommand } from './cli/config.js';
+import { configCommand, whoami } from './cli/config.js';
 import { showContextHelp } from './shared/help.js';
 /**
  * Expand tilde in paths
@@ -668,6 +668,12 @@ program
     .description('Uninstall LaunchAgent (macOS)')
     .action(async () => {
     await uninstallLaunchAgent();
+});
+program
+    .command('whoami')
+    .description('Show current identity and configuration')
+    .action(() => {
+    whoami();
 });
 program.addCommand(configCommand);
 // Agent-comms configuration commands

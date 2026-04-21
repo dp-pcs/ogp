@@ -25,6 +25,7 @@ _ogp() {
         start\:"Start OGP daemon"
         stop\:"Stop OGP daemon"
         status\:"Show daemon status"
+        whoami\:"Show current identity and configuration"
         federation\:"Manage federation"
         agent-comms\:"Configure agent-to-agent messaging"
         config\:"Manage configuration"

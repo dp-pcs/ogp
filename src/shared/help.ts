@@ -41,6 +41,7 @@ function showTopLevelHelp(): void {
   console.log('  start           Start OGP daemon');
   console.log('  stop            Stop OGP daemon');
   console.log('  status          Show daemon status');
+  console.log('  whoami          Show current identity and configuration');
   console.log('  federation      Manage federation with peers');
   console.log('  agent-comms     Configure agent-to-agent communication policies');
   console.log('  project         Manage project contexts for collaboration');

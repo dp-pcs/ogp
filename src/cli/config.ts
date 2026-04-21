@@ -303,6 +303,60 @@ function showIdentity(): void {
 }
 
 /**
+ * Show comprehensive identity and configuration ("whoami")
+ */
+export function whoami(): void {
+  const config = requireConfig();
+  const meta = loadMetaConfig();
+
+  console.log('\nWho Am I?');
+  console.log('━'.repeat(44));
+  console.log('');
+
+  // Identity
+  if (config.humanName || config.agentName) {
+    const parts = [];
+    if (config.humanName) parts.push(config.humanName);
+    if (config.agentName) parts.push(`(${config.agentName})`);
+    console.log(`Identity:      ${parts.join(' ')}`);
+  } else {
+    console.log(`Identity:      ${config.displayName}`);
+  }
+
+  if (config.organization) {
+    console.log(`Organization:  ${config.organization}`);
+  }
+
+  if (config.tags && config.tags.length > 0) {
+    console.log(`Tags:          ${config.tags.join(', ')}`);
+  }
+
+  console.log(`Email:         ${config.email}`);
+  console.log('');
+
+  // Gateway
+  console.log(`Gateway URL:   ${config.gatewayUrl}`);
+  console.log(`Daemon port:   ${config.daemonPort}`);
+  console.log('');
+
+  // Framework
+  const currentFramework = meta.frameworks.find(f => f.configDir === config.stateDir);
+  if (currentFramework) {
+    console.log(`Framework:     ${currentFramework.name} (${currentFramework.id})`);
+    console.log(`Config dir:    ${currentFramework.configDir}`);
+  } else if (meta.default) {
+    console.log(`Framework:     ${meta.default}`);
+  }
+
+  // Platform
+  if (config.platform) {
+    console.log(`Platform:      ${config.platform}`);
+  }
+
+  console.log('');
+}
+
+/**
  * Update identity information
  */
 function setIdentity(options: { humanName?: string; agentName?: string; organization?: string }): void {

@@ -62,7 +62,7 @@ import {
   projectQueryPeer,
   projectStatusPeer
 } from './cli/project.js';
-import { configCommand } from './cli/config.js';
+import { configCommand, whoami } from './cli/config.js';
 import type { ResponseLevel } from './daemon/peers.js';
 import { showContextHelp } from './shared/help.js';
 
@@ -796,6 +796,13 @@ program
   .description('Uninstall LaunchAgent (macOS)')
   .action(async () => {
     await uninstallLaunchAgent();
+  });
+
+program
+  .command('whoami')
+  .description('Show current identity and configuration')
+  .action(() => {
+    whoami();
   });
 
 program.addCommand(configCommand);
