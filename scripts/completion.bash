@@ -30,7 +30,7 @@ _ogp_completion() {
 
   # Top-level commands
   if [ $COMP_CWORD -eq 1 ]; then
-    opts="setup start stop status federation agent-comms config expose expose-stop shutdown install uninstall intent project completion"
+    opts="setup start stop status whoami federation agent-comms config expose expose-stop shutdown install uninstall intent project completion"
     COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
     return 0
   fi
