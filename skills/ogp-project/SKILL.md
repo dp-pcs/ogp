@@ -1,6 +1,6 @@
 ---
 skill_name: ogp-project
-version: 2.2.0
+version: 0.6.0
 description: >
   Tool-agnostic project collaboration for AI assistants. Users keep their own tools
   (Linear, Jira, Obsidian, GitHub, iCloud, local files — anything). This skill makes

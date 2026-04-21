@@ -1,6 +1,6 @@
 ---
 skill_name: ogp-expose
-version: 0.4.0
+version: 0.6.0
 description: Expose OGP via a public HTTPS endpoint, usually a stable Cloudflare hostname or named tunnel. Use when the user wants to verify or fix gateway reachability, align `gatewayUrl` with the real public endpoint, or set up temporary cloudflared/ngrok exposure for testing.
 trigger: Use when the user wants to expose their OGP daemon to the internet, get a public URL for federation, or set up a tunnel for peer discovery.
 requires:
