@@ -1376,13 +1376,6 @@ export async function federationSendAgentComms(
     ? `${config.gatewayUrl}/federation/reply/${nonce}`
     : undefined;
 
-  // SECURITY (F-05): Remember which peer this nonce was sent to so the
-  // inbound POST /federation/reply/:nonce can authenticate the reply.
-  if (replyTo) {
-    const { trackOutboundNonce } = await import('../daemon/reply-handler.js');
-    trackOutboundNonce(nonce, peerId);
-  }
-
   const message = {
     intent: 'agent-comms',
     from: ourId,
