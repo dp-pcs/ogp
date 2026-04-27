@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { runAgentCommsInterview, runSetup, runSetupResetKeypair } from './cli/setup.js';
+import { runAgentCommsInterview, runNonInteractiveSetup, runSetup, runSetupResetKeypair } from './cli/setup.js';
 import { startServer, stopServer, getDaemonStatus } from './daemon/server.js';
 import { getHeartbeatConfig, loadHealthCheckConfig } from './daemon/heartbeat.js';
 import { requireConfig, loadConfig } from './shared/config.js';
@@ -139,11 +139,28 @@ program
     .command('setup')
     .description('Interactive setup wizard')
     .option('--reset-keypair', 'Delete the active framework keypair and generate a new one')
+    .option('--non-interactive', 'Run setup without prompts (requires --answers)')
+    .option('--answers <path>', 'Path to a JSON answers file for non-interactive setup')
     .action(async (options) => {
     if (options.resetKeypair) {
         const forFlag = program.opts().for;
         selectFramework(forFlag);
         await runSetupResetKeypair();
+        return;
+    }
+    if (options.nonInteractive || options.answers) {
+        if (!options.answers) {
+            console.error('Error: --non-interactive requires --answers <path>');
+            process.exit(1);
+        }
+        try {
+            await runNonInteractiveSetup(options.answers);
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error(`Error: ${message}`);
+            process.exit(1);
+        }
         return;
     }
     await runSetup();

@@ -1,12 +1,72 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { generateKeyPair, type KeyPair } from '../shared/signing.js';
 import { getConfigDir, ensureConfigDir, loadConfig } from '../shared/config.js';
 
 const KEYCHAIN_ACCOUNT = 'private-key';
 const KEYPAIR_ENCRYPTION_VERSION = 1;
+
+interface KeychainOptions {
+  path?: string;
+  passwordFile?: string;
+}
+
+function expandHome(p: string): string {
+  if (p.startsWith('~/') || p === '~') {
+    return path.join(os.homedir(), p.slice(2));
+  }
+  return p;
+}
+
+function getKeychainOptions(): KeychainOptions {
+  const envPath = process.env.OGP_KEYCHAIN_PATH?.trim();
+  const envPasswordFile = process.env.OGP_KEYCHAIN_PASSWORD_FILE?.trim();
+
+  let configPath: string | undefined;
+  let configPasswordFile: string | undefined;
+  try {
+    const config = loadConfig();
+    configPath = config?.keychainPath?.trim() || undefined;
+    configPasswordFile = config?.keychainPasswordFile?.trim() || undefined;
+  } catch {
+    // loadConfig may fail before setup completes — env vars only in that case
+  }
+
+  const resolvedPath = envPath || configPath;
+  const resolvedPasswordFile = envPasswordFile || configPasswordFile;
+  return {
+    path: resolvedPath ? expandHome(resolvedPath) : undefined,
+    passwordFile: resolvedPasswordFile ? expandHome(resolvedPasswordFile) : undefined
+  };
+}
+
+let keychainUnlockedFor: string | null = null;
+
+function unlockKeychainIfConfigured(opts: KeychainOptions): void {
+  if (!opts.path) {
+    return;
+  }
+  if (!opts.passwordFile) {
+    return;
+  }
+  if (keychainUnlockedFor === opts.path) {
+    return;
+  }
+  if (!fs.existsSync(opts.passwordFile)) {
+    throw new Error(`[OGP] Keychain password file not found: ${opts.passwordFile}`);
+  }
+  const password = fs.readFileSync(opts.passwordFile, 'utf-8').replace(/\r?\n$/, '');
+  try {
+    execFileSync('security', ['unlock-keychain', '-p', password, opts.path], { stdio: 'pipe' });
+    keychainUnlockedFor = opts.path;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`[OGP] Failed to unlock keychain at ${opts.path}: ${message}`);
+  }
+}
 
 interface EncryptedKeypairRecord {
   publicKey: string;
@@ -39,35 +99,58 @@ function isMacOS(): boolean {
 }
 
 function keychainStore(privateKey: string): void {
+  const opts = getKeychainOptions();
+  unlockKeychainIfConfigured(opts);
+  // -A allows non-interactive write to non-default keychains; without it macOS
+  // exits with "User interaction is not allowed" and any caller relying on a
+  // silent fallback will end up with a private-key-less keypair.json.
+  const args = [
+    'add-generic-password',
+    '-U',
+    '-A',
+    '-s', getKeychainService(),
+    '-a', KEYCHAIN_ACCOUNT,
+    '-w', privateKey
+  ];
+  if (opts.path) {
+    args.push(opts.path);
+  }
   try {
-    execSync(
-      `security add-generic-password -U -s ${getKeychainService()} -a ${KEYCHAIN_ACCOUNT} -w ${JSON.stringify(privateKey)}`,
-      { stdio: 'pipe' }
-    );
-  } catch {
-    // ignore — falls back to file
+    execFileSync('security', args, { stdio: 'pipe' });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`[OGP] Failed to store private key in macOS Keychain: ${message}`);
   }
 }
 
 function keychainLoad(): string | null {
+  const opts = getKeychainOptions();
+  unlockKeychainIfConfigured(opts);
+
+  const buildFindArgs = (service: string): string[] => {
+    const args = ['find-generic-password', '-s', service, '-a', KEYCHAIN_ACCOUNT, '-w'];
+    if (opts.path) {
+      args.push(opts.path);
+    }
+    return args;
+  };
+
   try {
-    // Try new instance-specific service name first
-    const result = execSync(
-      `security find-generic-password -s ${getKeychainService()} -a ${KEYCHAIN_ACCOUNT} -w`,
-      { stdio: 'pipe' }
-    ).toString().trim();
+    const result = execFileSync('security', buildFindArgs(getKeychainService()), { stdio: 'pipe' }).toString().trim();
     return result || null;
   } catch {
     // Migration: try old shared service name (pre-v0.3.4)
     try {
-      const oldService = 'ogp-federation';  // Old hardcoded service name
-      const oldResult = execSync(
-        `security find-generic-password -s ${oldService} -a ${KEYCHAIN_ACCOUNT} -w`,
-        { stdio: 'pipe' }
-      ).toString().trim();
+      const oldService = 'ogp-federation';
+      const oldResult = execFileSync('security', buildFindArgs(oldService), { stdio: 'pipe' }).toString().trim();
       if (oldResult) {
         console.log(`[OGP] Migrating private key from shared keychain (${oldService}) to instance-specific keychain (${getKeychainService()})`);
-        keychainStore(oldResult);
+        try {
+          keychainStore(oldResult);
+        } catch (storeErr) {
+          const message = storeErr instanceof Error ? storeErr.message : String(storeErr);
+          console.warn(`[OGP] Could not migrate private key into instance-specific keychain entry: ${message}`);
+        }
         return oldResult;
       }
     } catch {}
@@ -76,11 +159,14 @@ function keychainLoad(): string | null {
 }
 
 function keychainDelete(): void {
+  const opts = getKeychainOptions();
+  unlockKeychainIfConfigured(opts);
+  const args = ['delete-generic-password', '-s', getKeychainService(), '-a', KEYCHAIN_ACCOUNT];
+  if (opts.path) {
+    args.push(opts.path);
+  }
   try {
-    execSync(
-      `security delete-generic-password -s ${getKeychainService()} -a ${KEYCHAIN_ACCOUNT}`,
-      { stdio: 'pipe' }
-    );
+    execFileSync('security', args, { stdio: 'pipe' });
   } catch {
     // ignore — may not exist
   }
@@ -204,22 +290,42 @@ export function loadOrGenerateKeyPair(): KeyPair {
     if (data.privateKey && isMacOS()) {
       const existing = keychainLoad();
       if (!existing) {
-        keychainStore(data.privateKey);
-        console.log('[OGP] Migrated private key to macOS Keychain');
+        try {
+          keychainStore(data.privateKey);
+          console.log('[OGP] Migrated private key to macOS Keychain');
+          const safe = { publicKey: data.publicKey };
+          fs.writeFileSync(keypairFile, JSON.stringify(safe, null, 2), 'utf-8');
+        } catch (keychainErr) {
+          const message = keychainErr instanceof Error ? keychainErr.message : String(keychainErr);
+          console.warn(`[OGP] Could not migrate private key to macOS Keychain: ${message}`);
+          console.warn('[OGP] Leaving private key in keypair.json — set OGP_KEYCHAIN_PATH/OGP_KEYCHAIN_PASSWORD_FILE for headless macOS, or OGP_KEYPAIR_SECRET to encrypt at rest.');
+        }
+      } else {
+        // Already stored in keychain — safe to scrub the file copy.
+        const safe = { publicKey: data.publicKey };
+        fs.writeFileSync(keypairFile, JSON.stringify(safe, null, 2), 'utf-8');
       }
-      // Scrub private key from file
-      const safe = { publicKey: data.publicKey };
-      fs.writeFileSync(keypairFile, JSON.stringify(safe, null, 2), 'utf-8');
     }
 
     // Load private key from Keychain (macOS) or file (other)
     let privateKey: string;
     if (isMacOS()) {
       const fromKeychain = keychainLoad();
-      if (!fromKeychain) {
-        throw new Error('[OGP] Private key not found in macOS Keychain. On macOS, keypair.json stores only the public key cache. Run `ogp setup --reset-keypair` to regenerate.');
+      if (fromKeychain) {
+        privateKey = fromKeychain;
+      } else if (isEncryptedKeypairRecord(data)) {
+        // macOS keychain unavailable but a previous run wrote an encrypted file fallback — use it.
+        const secretConfig = getKeyEncryptionSecret();
+        if (!secretConfig) {
+          throw new Error('[OGP] Encrypted private key fallback present but no decryption secret is available. Set OGP_KEYPAIR_SECRET before starting OGP.');
+        }
+        privateKey = decryptPrivateKey(data, secretConfig.secret);
+      } else if (data.privateKey) {
+        // Legacy plaintext fallback left behind by a failed migration.
+        privateKey = data.privateKey;
+      } else {
+        throw new Error('[OGP] Private key not found in macOS Keychain. On macOS, keypair.json stores only the public key cache. Run `ogp setup --reset-keypair` to regenerate, or set OGP_KEYCHAIN_PATH/OGP_KEYCHAIN_PASSWORD_FILE to use a dedicated keychain on headless macOS.');
       }
-      privateKey = fromKeychain;
     } else {
       const secretConfig = getKeyEncryptionSecret();
 
@@ -255,10 +361,20 @@ export function loadOrGenerateKeyPair(): KeyPair {
 
   if (isMacOS()) {
     // Store private key in Keychain, public key in file only
-    keychainStore(keypair.privateKey);
-    fs.writeFileSync(keypairFile, JSON.stringify({ publicKey: keypair.publicKey }, null, 2), 'utf-8');
-    console.log(`[OGP] Generated new Ed25519 keypair (private key stored in macOS Keychain service ${getKeychainService()}, public key cached in keypair.json)`);
-  } else {
+    try {
+      keychainStore(keypair.privateKey);
+      fs.writeFileSync(keypairFile, JSON.stringify({ publicKey: keypair.publicKey }, null, 2), 'utf-8');
+      console.log(`[OGP] Generated new Ed25519 keypair (private key stored in macOS Keychain service ${getKeychainService()}, public key cached in keypair.json)`);
+      return keypair;
+    } catch (keychainErr) {
+      const message = keychainErr instanceof Error ? keychainErr.message : String(keychainErr);
+      console.warn(`[OGP] Could not store private key in macOS Keychain: ${message}`);
+      console.warn('[OGP] Falling back to encrypted-file storage. Set OGP_KEYCHAIN_PATH/OGP_KEYCHAIN_PASSWORD_FILE to use a dedicated keychain on headless macOS.');
+      // Fall through to the file-based storage path below.
+    }
+  }
+
+  {
     const secretConfig = getKeyEncryptionSecret();
     if (secretConfig) {
       writeEncryptedKeypairFile(keypairFile, keypair, secretConfig.secret, secretConfig.source);
