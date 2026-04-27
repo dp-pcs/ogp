@@ -1,4 +1,4 @@
-import { listPeers, updatePeer, derivePeerIdFromPublicKey, type Peer } from './peers.js';
+import { listPeers, updatePeer, derivePeerIdFromPublicKey, deriveFederationState, type Peer, type FederationState } from './peers.js';
 import { loadConfig, type HealthCheckConfig } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
 
@@ -131,6 +131,21 @@ export interface HealthCheckResult {
     lastCheckFailedAt?: string;
     healthCheckFailures?: number;
   };
+}
+
+function buildFederationStateReason(
+  newState: FederationState,
+  prevFailures: number | undefined,
+  nextFailures: number | undefined
+): string {
+  const failures = nextFailures ?? prevFailures ?? 0;
+  switch (newState) {
+    case 'established': return failures === 0 ? 'outbound + inbound healthy' : 'failures cleared';
+    case 'degraded': return `outbound failures: ${failures}`;
+    case 'down': return failures > 0 ? `${failures} consecutive failures` : 'no recent contact';
+    case 'twoWay': return 'awaiting first bidirectional health check';
+    default: return '';
+  }
 }
 
 function getLocalPeerId(): string | null {
@@ -283,6 +298,23 @@ async function runHealthChecks(): Promise<void> {
       console.log(`[OGP Heartbeat] Peer ${peer.displayName} (${peer.id}): healthState ${peer.healthState ?? 'unknown'} → ${newState}`);
       updates.healthState = newState;
       updates.healthStateChangedAt = now;
+    }
+
+    // Issue #4: derive lifecycle federationState from the post-update view.
+    const newFederationState = deriveFederationState({
+      status: peer.status,
+      healthState: newState,
+      lastOutboundCheckAt: result.reachable ? now : peer.lastOutboundCheckAt,
+      lastOutboundCheckFailedAt: result.reachable ? peer.lastOutboundCheckFailedAt : now,
+      lastInboundContactAt: peer.lastInboundContactAt,
+      inboundHealthReport: nextInboundReport
+    });
+    if (newFederationState !== peer.federationState) {
+      const reason = buildFederationStateReason(newFederationState, peer.healthCheckFailures, updates.healthCheckFailures);
+      console.log(`[OGP Federation] ${peer.displayName} (${peer.id}): ${peer.federationState ?? 'unknown'} → ${newFederationState}${reason ? ` (${reason})` : ''}`);
+      updates.federationState = newFederationState;
+      updates.federationStateChangedAt = now;
+      if (reason) updates.federationStateReason = reason;
     }
 
     updatePeer(peer.id, updates);
