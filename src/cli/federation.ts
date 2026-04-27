@@ -53,6 +53,18 @@ function healthStateLabel(state?: Peer['healthState']): { icon: string; label: s
   }
 }
 
+function federationStateLabel(state?: Peer['federationState']): { icon: string; label: string } {
+  switch (state) {
+    case 'init': return { icon: '◐', label: 'INIT' };
+    case 'twoWay': return { icon: '◑', label: 'TWO-WAY' };
+    case 'established': return { icon: '✓', label: 'ESTABLISHED' };
+    case 'degraded': return { icon: '⚠', label: 'DEGRADED' };
+    case 'down': return { icon: '✗', label: 'DOWN' };
+    case 'tombstoned': return { icon: '☠', label: 'TOMBSTONED' };
+    default: return { icon: '?', label: 'UNKNOWN' };
+  }
+}
+
 type FederationCard = {
   displayName?: string;
   email?: string;
@@ -323,6 +335,14 @@ export async function federationList(status?: 'pending' | 'approved' | 'rejected
       console.log(`    Tags: ${peer.tags.join(', ')}`);
     }
 
+    // Issue #4: federation lifecycle line for any non-tombstoned peer.
+    if (peer.status !== 'rejected' && peer.status !== 'removed') {
+      const { label: fedLabel } = federationStateLabel(peer.federationState);
+      const since = peer.federationStateChangedAt ? ` since ${formatRelative(peer.federationStateChangedAt)}` : '';
+      const reason = peer.federationStateReason ? ` — ${peer.federationStateReason}` : '';
+      console.log(`    Federation:  ${fedLabel}${since}${reason}`);
+    }
+
     // Show health details for approved peers (Issue #3: directional, Issue #5: authoritative inbound)
     if (peer.status === 'approved') {
       const { label } = healthStateLabel(peer.healthState);
@@ -490,6 +510,29 @@ export async function federationStatus(): Promise<void> {
     console.log(`  Degraded in:      ${stateCounts['degraded-inbound']} (⚠ they haven't reached me)`);
     console.log(`  Down:             ${stateCounts.down} (✗)`);
     console.log(`  Unknown:          ${stateCounts.unknown} (?)`);
+    console.log('');
+  }
+
+  // Issue #4: federation lifecycle state breakdown across all non-tombstoned peers.
+  const lifecycleCounts: Record<string, number> = {
+    init: 0, twoWay: 0, established: 0, degraded: 0, down: 0, unknown: 0
+  };
+  for (const p of peers) {
+    if (p.status === 'rejected' || p.status === 'removed') continue;
+    const s = p.federationState ?? 'unknown';
+    if (s === 'tombstoned') continue;
+    lifecycleCounts[s] = (lifecycleCounts[s] ?? 0) + 1;
+  }
+  if (peers.some(p => p.status !== 'rejected' && p.status !== 'removed')) {
+    console.log('🔗 FEDERATION LIFECYCLE:\n');
+    console.log(`  Init:        ${lifecycleCounts.init}`);
+    console.log(`  Two-way:     ${lifecycleCounts.twoWay}`);
+    console.log(`  Established: ${lifecycleCounts.established}`);
+    console.log(`  Degraded:    ${lifecycleCounts.degraded}`);
+    console.log(`  Down:        ${lifecycleCounts.down}`);
+    if (lifecycleCounts.unknown > 0) {
+      console.log(`  Unknown:     ${lifecycleCounts.unknown}`);
+    }
     console.log('');
   }
 
