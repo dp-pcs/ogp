@@ -16,6 +16,7 @@ import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, sh
 import { registerNewIntent, listRegisteredIntents, removeIntent } from './cli/intent-registry.js';
 import { projectCreate, projectJoin, projectList, projectRemove, projectContribute, projectQuery, projectStatus, projectRequestJoin, projectSendContribution, projectQueryPeer, projectStatusPeer } from './cli/project.js';
 import { configCommand, whoami } from './cli/config.js';
+import { keychainCommand } from './cli/keychain.js';
 import { showContextHelp } from './shared/help.js';
 /**
  * Expand tilde in paths
@@ -693,6 +694,7 @@ program
     whoami();
 });
 program.addCommand(configCommand);
+program.addCommand(keychainCommand);
 // Agent-comms configuration commands
 const agentComms = program
     .command('agent-comms')
