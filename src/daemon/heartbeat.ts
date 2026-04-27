@@ -174,6 +174,20 @@ async function checkPeerHealth(peer: Peer): Promise<HealthCheckResult> {
     const localPeerId = getLocalPeerId();
     if (localPeerId) {
       headers['X-OGP-Peer-ID'] = localPeerId;
+      // SECURITY (F-12): Sign the peer-id assertion with our private key so
+      // the responder can verify we actually own this peerId before exposing
+      // their view of our health. Unsigned X-OGP-Peer-ID was a topology probe.
+      try {
+        const { sign } = await import('../shared/signing.js');
+        const { getPrivateKey } = await import('./keypair.js');
+        const timestamp = new Date().toISOString();
+        const message = JSON.stringify({ peerId: localPeerId, timestamp });
+        headers['X-OGP-Timestamp'] = timestamp;
+        headers['X-OGP-Signature'] = sign(message, getPrivateKey());
+      } catch {
+        // If keypair is unavailable just send the unsigned peer-id; responder
+        // will fall through to the unauthenticated discovery path.
+      }
     }
 
     const response = await fetch(`${peer.gatewayUrl}/.well-known/ogp`, {

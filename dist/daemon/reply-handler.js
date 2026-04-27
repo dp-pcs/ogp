@@ -105,7 +105,7 @@ export async function sendReply(peerId, replyToUrl, payload) {
         from: ourId,
         to: peerId
     };
-    const { payload: signedPayload, signature } = signObject(signedReply, getPrivateKey());
+    const { payload: signedPayload, payloadStr: replyStr, signature } = signObject(signedReply, getPrivateKey());
     try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
@@ -116,6 +116,7 @@ export async function sendReply(peerId, replyToUrl, payload) {
             },
             body: JSON.stringify({
                 reply: signedPayload,
+                replyStr, // F-05: raw signed bytes for exact verification
                 signature
             }),
             signal: controller.signal

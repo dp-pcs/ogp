@@ -137,7 +137,7 @@ export async function sendReply(
     to: peerId
   };
 
-  const { payload: signedPayload, signature } = signObject(signedReply, getPrivateKey());
+  const { payload: signedPayload, payloadStr: replyStr, signature } = signObject(signedReply, getPrivateKey());
 
   try {
     const controller = new AbortController();
@@ -150,6 +150,7 @@ export async function sendReply(
       },
       body: JSON.stringify({
         reply: signedPayload,
+        replyStr,        // F-05: raw signed bytes for exact verification
         signature
       }),
       signal: controller.signal
