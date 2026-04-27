@@ -230,15 +230,17 @@ export async function federationList(status?: 'pending' | 'approved' | 'rejected
               statusIcon = '✗'; // Show unhealthy status
             }
 
-            // Issue #3: directional health summary for approved peers
+            // Issue #3 + #5: directional health summary for approved peers
             let healthInfo = '';
             if (peer.status === 'approved') {
               const { icon, label } = healthStateLabel(peer.healthState);
               const out = peer.lastOutboundCheckFailedAt && (!peer.lastOutboundCheckAt || peer.lastOutboundCheckFailedAt > peer.lastOutboundCheckAt)
                 ? `out: FAIL ${formatRelative(peer.lastOutboundCheckFailedAt)}`
                 : `out: ${formatRelative(peer.lastOutboundCheckAt)}`;
-              const inb = `in: ${formatRelative(peer.lastInboundContactAt)}`;
-              healthInfo = ` [${icon} ${label}  ${out}  ${inb}]`;
+              const inboundLabel = peer.inboundHealthReport
+                ? `in (reported): ${peer.inboundHealthReport.healthy ? 'OK' : 'FAIL'} ${formatRelative(peer.inboundHealthReport.receivedAt)}`
+                : `in: ${formatRelative(peer.lastInboundContactAt)}`;
+              healthInfo = ` [${icon} ${label}  ${out}  ${inboundLabel}]`;
               if (peer.healthCheckFailures && peer.healthCheckFailures > 0) {
                 healthInfo += ` (${peer.healthCheckFailures} failures)`;
               }
@@ -321,12 +323,17 @@ export async function federationList(status?: 'pending' | 'approved' | 'rejected
       console.log(`    Tags: ${peer.tags.join(', ')}`);
     }
 
-    // Show health details for approved peers (Issue #3: directional)
+    // Show health details for approved peers (Issue #3: directional, Issue #5: authoritative inbound)
     if (peer.status === 'approved') {
       const { label } = healthStateLabel(peer.healthState);
       console.log(`    Health state: ${label}${peer.healthStateChangedAt ? ` (since ${formatRelative(peer.healthStateChangedAt)})` : ''}`);
       console.log(`    Outbound:    last ok ${formatRelative(peer.lastOutboundCheckAt)}, last fail ${formatRelative(peer.lastOutboundCheckFailedAt)}`);
       console.log(`    Inbound:     last contact ${formatRelative(peer.lastInboundContactAt)}`);
+      if (peer.inboundHealthReport) {
+        const r = peer.inboundHealthReport;
+        console.log(`    Inbound (reported): ${r.healthy ? 'healthy' : 'unhealthy'} as of ${formatRelative(r.receivedAt)}` +
+          (r.healthCheckFailures && r.healthCheckFailures > 0 ? ` (${r.healthCheckFailures} failures from peer)` : ''));
+      }
       if (peer.healthCheckFailures && peer.healthCheckFailures > 0) {
         console.log(`    Health check failures: ${peer.healthCheckFailures}`);
       }
