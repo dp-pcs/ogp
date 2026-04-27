@@ -3,6 +3,7 @@
 **Date:** 2026-04-27
 **Scope:** OGP daemon (`src/daemon/**`), shared crypto (`src/shared/signing.ts`), CLI (`src/cli/**`), and the standalone rendezvous service (`packages/rendezvous/src/index.ts`).
 **Stack reviewed against:** TypeScript / Node.js / Express 4.x backend (no frontend, no DB, no cookie auth).
+**Re-verified at:** commit `0536c43` after rebase pulled in 11 upstream commits (`fabede0` keychain hardening, `f462990` directional health, `b111d74` bidirectional health, `1aa0581` OSPF state machine, `3450355` keychain helpers, etc.). F-07 was resolved upstream; F-12 is a new finding introduced by the bidirectional-health feature.
 
 ---
 
@@ -22,11 +23,12 @@ Secondary findings are conventional Express hardening: missing helmet/body limit
 | F-04 | **High** | `/federation/request` ignores its own `signature` field; no rate limit on unauthenticated POST that triggers user notifications |
 | F-05 | **High** | `/federation/reply/:nonce` (POST) accepts unauthenticated reply bodies and stores them verbatim |
 | F-06 | **High** | Rendezvous trusts `X-Forwarded-For` blindly; spoofed IP becomes the published federation address |
-| F-07 | Medium | Keypair stored to macOS Keychain via shell-string subprocess invocation instead of an argv form |
+| F-07 | ~~Medium~~ | ~~Keypair stored to macOS Keychain via shell-string subprocess invocation~~ — **resolved upstream in `fabede0`** |
 | F-08 | Medium | No `helmet()`, no `app.disable('x-powered-by')`, no custom 404/error handler |
 | F-09 | Medium | No explicit `express.json({ limit })`; no rate limiting on any HTTP endpoint above the doorman |
 | F-10 | Low | Federation request triggers `notifyOpenClaw` *before* approval, with no abuse controls |
 | F-11 | Low | `executeIntentHandler` exposes peer-controlled JSON in env vars / stdin to a local script with only a soft 30 s spawn timeout |
+| F-12 | Low | `/.well-known/ogp` returns per-peer health status when the (unauthenticated) `X-OGP-Peer-ID` header matches an approved peer — federation-topology and reachability probe |
 
 ---
 
@@ -128,18 +130,8 @@ Secondary findings are conventional Express hardening: missing helmet/body limit
 
 ## Medium findings
 
-### F-07 · `keypair.ts` shells out via string-concatenated subprocess invocation
-- **Rule:** EXPRESS-CMD-001 (defense-in-depth — the inputs today are app-controlled and not exploitable, but the pattern is fragile).
-- **Location:** `src/daemon/keypair.ts:41-87`
-- **Evidence:**
-  ```ts
-  execSync(
-    `security add-generic-password -U -s ${getKeychainService()} -a ${KEYCHAIN_ACCOUNT} -w ${JSON.stringify(privateKey)}`,
-    { stdio: 'pipe' }
-  );
-  ```
-  The values today are: a hex hash slice, a constant, and a hex-encoded Ed25519 key. None of them are reachable from the network, so this is not exploitable in current code. The risk is regression — the next refactor that makes the service name user-influenced introduces a real injection.
-- **Fix:** Replace each `execSync(...)` invocation with the `execFileSync('security', [args...], ...)` argv form so quoting is handled by the OS rather than shell-string interpolation.
+### ~~F-07 · `keypair.ts` shells out via string-concatenated subprocess invocation~~ (resolved)
+- **Status:** **Fixed upstream in commit `fabede0` ("fix: harden macOS keychain handling and add non-interactive setup").** `src/daemon/keypair.ts:5,63,119,139,145,169` now use `execFileSync('security', [...args])` everywhere — the argv form, no shell-string interpolation. No further action needed.
 
 ### F-08 · Missing baseline Express hardening
 - **Rule:** EXPRESS-HEADERS-001, EXPRESS-FINGERPRINT-001, EXPRESS-ERROR-001
@@ -184,6 +176,39 @@ Secondary findings are conventional Express hardening: missing helmet/body limit
 - **Evidence:** `spawn(handlerPath, [], { env, stdio: ['pipe','pipe','pipe'], timeout: 30_000 })`. Node's `timeout` option sends `SIGTERM`; a misbehaving handler that ignores SIGTERM keeps the slot held indefinitely.
 - **Fix:** Track the child and `child.kill('SIGKILL')` after a follow-up grace period; or use AbortController with `killSignal: 'SIGKILL'`.
 
+### F-12 · `/.well-known/ogp` leaks per-peer health status via spoofable `X-OGP-Peer-ID` header
+- **Rule:** EXPRESS-INPUT-001, EXPRESS-AUTH-001
+- **Location:** `src/daemon/server.ts:138-160` (introduced by upstream commit `b111d74`, "feat: bidirectional health status exchange")
+- **Evidence:**
+  ```ts
+  const requesterIdRaw = req.header('x-ogp-peer-id');
+  if (requesterIdRaw) {
+    const requesterId = String(requesterIdRaw).trim();
+    if (requesterId) {
+      const requester = getPeer(requesterId);
+      if (requester && requester.status === 'approved') {
+        peerStatus = {
+          peerId: requester.id,
+          healthy: requester.healthy !== false,
+          healthState: requester.healthState ?? null,
+          lastCheckedAt: requester.lastOutboundCheckAt ?? null,
+          lastCheckFailedAt: requester.lastOutboundCheckFailedAt ?? null,
+          healthCheckFailures: requester.healthCheckFailures ?? 0
+        };
+      }
+    }
+  }
+  ```
+  The header value is **not signature-verified**. Any unauthenticated client can supply a peer ID it has observed (peer IDs are 32-char prefixes of the publicKey, and publicKeys are advertised at `/.well-known/ogp` by every federated daemon — i.e. effectively public).
+- **Impact:** The in-code comment claims *"never expose health data about peer A to peer B"*, but this implementation exposes peer A's health state (and indirectly: their approval status, last-check timestamps, failure counts) to any unauthenticated requester who supplies peer A's ID. Concrete leaks:
+  - **Membership probe:** distinguishes "approved peer" from "pending/rejected/unknown" by whether `peerStatus` is present in the response.
+  - **Reachability probe:** `healthState` and `lastCheckFailedAt` reveal whether the daemon can currently reach a given peer — useful for an attacker mapping the federation graph or timing a hijack with F-01 against a peer that's already detected as "down".
+  - **Topology enumeration:** combined with public publicKeys exchanged during normal federation, an attacker can enumerate the daemon's full peer list and current health state without authentication.
+- **Fix:**
+  1. Require the requester to prove possession of the claimed peerId. The simplest path: require an `X-OGP-Signature` header carrying `sign(peerId + timestamp, privateKey)` and verify against the stored peer's publicKey before populating `peerStatus`.
+  2. Reject stale timestamps (~5 min window).
+  3. Until 1 lands, treat `peerStatus` as opt-in and disable it by default behind a config flag, or only return it in response to a *signed* `/federation/message` (which already has authentication built in) rather than the unauthenticated `/.well-known/ogp` discovery endpoint.
+
 ---
 
 ## What looks correct (for the record)
@@ -199,11 +224,11 @@ Secondary findings are conventional Express hardening: missing helmet/body limit
 
 ## Suggested fix order
 
-1. **F-01** then **F-04 / F-05** (close the unauthenticated-control surface). These are one focused PR — re-use the signed-payload + timestamp pattern already in `/federation/removed`.
+1. **F-01** then **F-04 / F-05 / F-12** (close the unauthenticated-control surface and the new bidirectional-health info leak). These can be one focused PR — they all reuse the signed-payload + timestamp pattern already in `/federation/removed`.
 2. **F-02 / F-06** (rendezvous). Until signed registration lands, document that the rendezvous service must be considered untrusted and is suitable only as a discovery cache.
 3. **F-03** (TLS verification scope reduction).
 4. **F-08 / F-09** (helmet, body limit, rate limit, error handler) — single small PR.
-5. **F-07, F-10, F-11** as cleanup.
+5. **F-10, F-11** as cleanup. (F-07 already resolved upstream.)
 
 ---
 
