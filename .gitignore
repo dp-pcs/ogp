@@ -28,3 +28,8 @@ tunnel.pid
 coverage/
 .vitest/
 CURRENT_WORK.md
+
+# Local-only security working docs
+# (the published security_best_practices_report.md is intentionally tracked;
+# the implementation plan stays local until the fixes ship — see B0033-B0037)
+security_fix_plan.md
