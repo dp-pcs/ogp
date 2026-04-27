@@ -10,6 +10,8 @@ import { getPrivateKey } from './keypair.js';
 import { requireConfig } from '../shared/config.js';
 // In-memory reply store (keyed by nonce)
 const pendingReplies = new Map();
+const outboundNonces = new Map();
+const MAX_OUTBOUND_NONCES = 1000;
 // Max replies to keep in memory
 const MAX_PENDING_REPLIES = 1000;
 // Reply TTL (10 minutes)
@@ -35,7 +37,7 @@ export function stopReplyCleanup() {
     }
 }
 /**
- * Clean up expired replies
+ * Clean up expired replies and outbound-nonce tracking entries
  */
 function cleanupExpiredReplies() {
     const now = Date.now();
@@ -45,6 +47,47 @@ function cleanupExpiredReplies() {
             pendingReplies.delete(nonce);
         }
     }
+    for (const [nonce, entry] of outboundNonces.entries()) {
+        if (now - entry.sentAt > REPLY_TTL_MS) {
+            outboundNonces.delete(nonce);
+        }
+    }
+}
+/**
+ * Record that we sent an outbound message with this nonce to this peer,
+ * so a later inbound reply at /federation/reply/:nonce can be authenticated.
+ * Call this whenever a message is sent with `replyTo` pointing back at us.
+ */
+export function trackOutboundNonce(nonce, peerId) {
+    if (outboundNonces.size >= MAX_OUTBOUND_NONCES) {
+        // Drop the oldest 100 entries
+        const oldest = Array.from(outboundNonces.entries())
+            .sort((a, b) => a[1].sentAt - b[1].sentAt)
+            .slice(0, 100);
+        for (const [key] of oldest) {
+            outboundNonces.delete(key);
+        }
+    }
+    outboundNonces.set(nonce, { peerId, sentAt: Date.now() });
+}
+/**
+ * Look up the peer that owns a nonce we previously sent. Returns null if the
+ * nonce is unknown or expired. Used by the inbound reply handler to find
+ * which peer's publicKey to verify against.
+ */
+export function getOutboundNoncePeer(nonce) {
+    const entry = outboundNonces.get(nonce);
+    if (!entry)
+        return null;
+    if (Date.now() - entry.sentAt > REPLY_TTL_MS) {
+        outboundNonces.delete(nonce);
+        return null;
+    }
+    return entry.peerId;
+}
+/** For tests. */
+export function clearOutboundNoncesForTests() {
+    outboundNonces.clear();
 }
 /**
  * Store a reply for later retrieval via polling
@@ -105,7 +148,7 @@ export async function sendReply(peerId, replyToUrl, payload) {
         from: ourId,
         to: peerId
     };
-    const { payload: signedPayload, signature } = signObject(signedReply, getPrivateKey());
+    const { payload: signedPayload, payloadStr: replyStr, signature } = signObject(signedReply, getPrivateKey());
     try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
@@ -116,6 +159,7 @@ export async function sendReply(peerId, replyToUrl, payload) {
             },
             body: JSON.stringify({
                 reply: signedPayload,
+                replyStr, // F-05: raw signed bytes for exact verification
                 signature
             }),
             signal: controller.signal

@@ -25,6 +25,20 @@ export declare function startReplyCleanup(): void;
  */
 export declare function stopReplyCleanup(): void;
 /**
+ * Record that we sent an outbound message with this nonce to this peer,
+ * so a later inbound reply at /federation/reply/:nonce can be authenticated.
+ * Call this whenever a message is sent with `replyTo` pointing back at us.
+ */
+export declare function trackOutboundNonce(nonce: string, peerId: string): void;
+/**
+ * Look up the peer that owns a nonce we previously sent. Returns null if the
+ * nonce is unknown or expired. Used by the inbound reply handler to find
+ * which peer's publicKey to verify against.
+ */
+export declare function getOutboundNoncePeer(nonce: string): string | null;
+/** For tests. */
+export declare function clearOutboundNoncesForTests(): void;
+/**
  * Store a reply for later retrieval via polling
  */
 export declare function storePendingReply(nonce: string, reply: ReplyPayload): void;
