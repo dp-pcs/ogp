@@ -112,6 +112,11 @@ export interface HealthCheckConfig {
   timeoutMs?: number;
   /** Number of consecutive failures before marking peer unhealthy (default: 3) */
   maxConsecutiveFailures?: number;
+  /**
+   * Recency multiplier (Issue #3): how many heartbeat intervals back counts as
+   * "recent" inbound contact when deriving healthState. Default: 2.
+   */
+  recencyMultiplier?: number;
 }
 
 export interface OGPConfig {
