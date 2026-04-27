@@ -51,6 +51,17 @@ export interface Peer {
   lastOutboundCheckAt?: string;      // last time my outbound health check succeeded
   lastOutboundCheckFailedAt?: string;// last time my outbound health check failed
   lastInboundContactAt?: string;     // last time this peer sent me an authenticated message
+  // Issue #5: authoritative inbound health report received from the peer's
+  // /.well-known/ogp response. Populated when the peer recognises us via the
+  // X-OGP-Peer-ID header and includes their view of our reachability.
+  inboundHealthReport?: {
+    healthy: boolean;                 // peer's view of our reachability
+    healthState?: 'established' | 'degraded-outbound' | 'degraded-inbound' | 'down';
+    lastCheckedAt?: string;           // ISO timestamp from peer
+    lastCheckFailedAt?: string;       // ISO timestamp from peer
+    healthCheckFailures?: number;     // peer's failure counter for us
+    receivedAt: string;               // when we recorded this report
+  };
   // Federation resync snapshot (when gateway URL is re-used with new keys)
   resyncSnapshot?: {
     oldPeerId: string;
