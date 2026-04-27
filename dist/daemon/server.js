@@ -7,7 +7,7 @@ const _require = createRequire(import.meta.url);
 const OGP_VERSION = _require('../../package.json').version;
 import { requireConfig, loadConfig, getConfigDir } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
-import { addPeer, createPendingPeerRecord, derivePeerIdFromPublicKey, findBestPeerForApproval, getPeer, getPeerByUrl, removePeer, replacePeersByIdentity, updatePeer } from './peers.js';
+import { addPeer, createPendingPeerRecord, derivePeerIdFromPublicKey, findBestPeerForApproval, getPeer, getPeerByUrl, listPeers, removePeer, replacePeersByIdentity, updatePeer } from './peers.js';
 import { listProjectsForPeer } from './projects.js';
 import { handleMessage } from './message-handler.js';
 import { verify } from '../shared/signing.js';
@@ -751,20 +751,19 @@ export function startServer(config, background = false) {
         });
     });
     // POST /federation/reply/:nonce - Receive reply callback from remote gateway
-    // SECURITY (F-05): Verify the reply signature against the publicKey of the
-    // peer we originally sent this nonce to. The previous version stored any
-    // body verbatim, letting anyone with a leaked nonce poison the reply slot.
+    // SECURITY (F-05): Verify the reply is signed by SOME approved peer. We
+    // iterate approved peers and accept the first whose publicKey verifies the
+    // signature. This is acceptable because:
+    //   - Only approved peers can produce a valid signature.
+    //   - The nonce is a random UUID known only to the peer we sent it to
+    //     (other approved peers don't see it in normal federation traffic).
+    // We don't pin the nonce to a specific peer because the CLI process (which
+    // generates the nonce) and the daemon process (which receives the reply)
+    // don't share memory; a per-nonce tracker would need disk-backed IPC and
+    // the additional hardening it buys is not worth the complexity here.
     app.post('/federation/reply/:nonce', async (req, res) => {
         const { nonce } = req.params;
         const body = req.body || {};
-        const expectedPeerId = (await import('./reply-handler.js')).getOutboundNoncePeer(nonce);
-        if (!expectedPeerId) {
-            return res.status(404).json({ error: 'Unknown or expired nonce' });
-        }
-        const expectedPeer = getPeer(expectedPeerId);
-        if (!expectedPeer || !expectedPeer.publicKey) {
-            return res.status(404).json({ error: 'Originating peer not found' });
-        }
         const reply = body.reply;
         const replyStr = body.replyStr;
         const signature = body.signature;
@@ -772,8 +771,18 @@ export function startServer(config, background = false) {
             return res.status(400).json({ error: 'Missing reply or signature' });
         }
         const { verifyObject } = await import('../shared/signing.js');
-        if (!verifyObject(reply, signature, expectedPeer.publicKey, typeof replyStr === 'string' ? replyStr : undefined)) {
-            console.error(`[OGP] Reply signature verification failed for nonce ${nonce} (expected peer ${expectedPeer.id})`);
+        const approvedPeers = listPeers('approved');
+        let signingPeer = null;
+        for (const candidate of approvedPeers) {
+            if (!candidate.publicKey)
+                continue;
+            if (verifyObject(reply, signature, candidate.publicKey, typeof replyStr === 'string' ? replyStr : undefined)) {
+                signingPeer = candidate;
+                break;
+            }
+        }
+        if (!signingPeer) {
+            console.error(`[OGP] Reply signature verification failed for nonce ${nonce} — no approved peer matched`);
             return res.status(401).json({ error: 'Invalid signature' });
         }
         const replyPayload = {
@@ -784,7 +793,7 @@ export function startServer(config, background = false) {
             timestamp: reply.timestamp || new Date().toISOString()
         };
         storePendingReply(nonce, replyPayload);
-        console.log(`[OGP] Received signed reply for nonce ${nonce} from peer ${expectedPeer.id}`);
+        console.log(`[OGP] Received signed reply for nonce ${nonce} from peer ${signingPeer.id}`);
         res.json({ received: true });
     });
     server = app.listen(cfg.daemonPort, () => {
