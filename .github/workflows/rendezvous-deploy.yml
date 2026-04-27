@@ -1,0 +1,112 @@
+name: Deploy rendezvous
+
+# Builds packages/rendezvous, pushes the image to ECR, and rolls the
+# ogp-rendezvous Fargate service in the ogp-rendezvous-prod cluster.
+#
+# Triggers:
+#   - push to main when the rendezvous code or this workflow file changes
+#   - manual workflow_dispatch
+#
+# Auth: GitHub OIDC -> IAM role github-actions-ogp-rendezvous-deploy.
+# No long-lived AWS access keys are stored in this repo.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/rendezvous/**'
+      - '.github/workflows/rendezvous-deploy.yml'
+  workflow_dispatch:
+
+# Required for OIDC token exchange
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  # One deploy at a time. Newer pushes wait until the running one finishes.
+  group: rendezvous-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: 913524910742.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: ogp/rendezvous
+  ECS_CLUSTER: ogp-rendezvous-prod
+  ECS_SERVICE: ogp-rendezvous
+  ECS_TASK_FAMILY: ogp-rendezvous
+  CONTAINER_NAME: ogp-rendezvous
+  IAM_ROLE_ARN: arn:aws:iam::913524910742:role/github-actions-ogp-rendezvous-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          version=$(node -p "require('./packages/rendezvous/package.json').version")
+          sha=$(git rev-parse --short HEAD)
+          tag="${version}-${sha}"
+          echo "version_tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Image tag: ${tag}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./packages/rendezvous
+          file: ./packages/rendezvous/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.version_tag }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Render new ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition-family: ${{ env.ECS_TASK_FAMILY }}
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.version_tag }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          wait-for-minutes: 10
+
+      - name: Smoke test
+        run: |
+          echo "Hitting public endpoint..."
+          curl -sf https://rendezvous.elelem.expert/ | tee /dev/stderr | grep -q '"ok":true'
+          echo "OK. Verifying signed-handshake enforcement..."
+          response=$(curl -s -X POST https://rendezvous.elelem.expert/register \
+            -H 'Content-Type: application/json' -d '{}')
+          echo "$response"
+          echo "$response" | grep -q "Missing payloadStr or signature" \
+            || (echo "Endpoint returned wrong error - old code may still be live"; exit 1)
+          echo "Deployed code is enforcing F-02."
