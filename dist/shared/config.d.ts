@@ -105,6 +105,8 @@ export interface OGPConfig {
     hermesWebhookUrl?: string;
     hermesWebhookSecret?: string;
     healthCheck?: HealthCheckConfig;
+    keychainPath?: string;
+    keychainPasswordFile?: string;
 }
 /**
  * Get the config directory (computed dynamically based on OGP_HOME)

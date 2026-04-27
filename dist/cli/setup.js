@@ -508,6 +508,136 @@ export function formatKeypairResetSummary(publicKey) {
         '  Re-approve this gateway with peers if they pin or expect the old identity.'
     ];
 }
+export function buildFrameworkConfigsFromAnswers(answers) {
+    if (!answers.id) {
+        throw new Error('answers.framework.id is required (one of: openclaw, hermes, standalone)');
+    }
+    const detected = detectFrameworks().find(f => f.id === answers.id);
+    if (!detected) {
+        throw new Error(`Unknown framework id: ${answers.id} (expected openclaw, hermes, or standalone)`);
+    }
+    const configDir = answers.configDir || detected.suggestedConfigDir;
+    const daemonPort = answers.daemonPort ?? detected.suggestedPort;
+    const gatewayUrl = answers.gatewayUrl ? normalizeGatewayUrlInput(answers.gatewayUrl) : '';
+    if (gatewayUrl && !isValidGatewayUrl(gatewayUrl)) {
+        throw new Error(`Invalid gatewayUrl in answers: ${answers.gatewayUrl}`);
+    }
+    const humanName = answers.humanName?.trim();
+    const agentName = answers.agentName?.trim();
+    const displayName = humanName && agentName
+        ? `${humanName} - ${agentName}`
+        : (humanName || agentName || `${detected.name} Gateway`);
+    const inboundFederationMode = answers.inboundFederationMode ?? 'summarize';
+    const humanSurfacingMode = answers.humanSurfacingMode ?? getHumanSurfacingDefault(inboundFederationMode);
+    const relayHandlingMode = answers.relayHandlingMode ?? getRelayHandlingDefault(inboundFederationMode);
+    const approvalTopics = answers.approvalTopics ?? [];
+    const trustedPeerAutonomy = answers.trustedPeerAutonomy ?? true;
+    const delegatedAuthority = buildDelegatedAuthorityConfig({
+        inboundMode: inboundFederationMode,
+        humanSurfacingMode,
+        relayHandlingMode,
+        approvalTopics,
+        trustedPeerAutonomy
+    });
+    const framework = {
+        id: detected.id,
+        name: detected.name,
+        enabled: true,
+        configDir,
+        daemonPort,
+        gatewayUrl: gatewayUrl || undefined,
+        displayName,
+        platform: detected.id === 'standalone' ? undefined : detected.id
+    };
+    const ogpConfig = {
+        daemonPort,
+        openclawUrl: answers.openclawUrl?.trim() || 'http://localhost:18789',
+        openclawToken: answers.openclawToken?.trim() || '',
+        gatewayUrl: gatewayUrl || '',
+        displayName,
+        humanName: humanName || undefined,
+        agentName: agentName || undefined,
+        organization: answers.organization?.trim() || undefined,
+        tags: answers.tags && answers.tags.length > 0 ? answers.tags : undefined,
+        email: answers.email?.trim() || '',
+        stateDir: configDir,
+        agentId: answers.agentId?.trim() || 'main',
+        humanDeliveryTarget: answers.humanDeliveryTarget?.trim() || undefined,
+        delegatedAuthority,
+        inboundFederationPolicy: { mode: inboundFederationMode },
+        platform: detected.id === 'standalone' ? undefined : detected.id,
+        hermesWebhookUrl: answers.hermesWebhookUrl?.trim() || undefined,
+        hermesWebhookSecret: answers.hermesWebhookSecret?.trim() || undefined,
+        keychainPath: answers.keychainPath?.trim() || undefined,
+        keychainPasswordFile: answers.keychainPasswordFile?.trim() || undefined
+    };
+    const expandedConfigDir = configDir.replace(/^~/, os.homedir());
+    return { framework, ogpConfig, expandedConfigDir };
+}
+function loadAnswersFile(answersPath) {
+    const expanded = answersPath.replace(/^~/, os.homedir());
+    if (!fs.existsSync(expanded)) {
+        throw new Error(`Answers file not found: ${expanded}`);
+    }
+    const raw = fs.readFileSync(expanded, 'utf-8');
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`Failed to parse answers file as JSON: ${message}`);
+    }
+    return parsed;
+}
+export async function runNonInteractiveSetup(answersPath) {
+    console.log('=== OGP Non-Interactive Setup ===\n');
+    const answers = loadAnswersFile(answersPath);
+    const frameworkAnswers = answers.frameworks
+        ?? (answers.framework ? [answers.framework] : []);
+    if (frameworkAnswers.length === 0) {
+        throw new Error('answers file must contain either `framework` (object) or `frameworks` (array)');
+    }
+    const metaConfig = loadMetaConfig();
+    for (const fwAnswers of frameworkAnswers) {
+        const { framework: frameworkConfig, ogpConfig, expandedConfigDir } = buildFrameworkConfigsFromAnswers(fwAnswers);
+        if (!fs.existsSync(expandedConfigDir)) {
+            fs.mkdirSync(expandedConfigDir, { recursive: true });
+        }
+        const configPath = path.join(expandedConfigDir, 'config.json');
+        fs.writeFileSync(configPath, JSON.stringify(ogpConfig, null, 2), 'utf-8');
+        const originalOgpHome = process.env.OGP_HOME;
+        process.env.OGP_HOME = expandedConfigDir;
+        try {
+            const keypair = loadOrGenerateKeyPair();
+            console.log(`✓ ${frameworkConfig.name}: configuration saved to ${expandedConfigDir}`);
+            console.log(`  ✓ Public key: ${keypair.publicKey.substring(0, 16)}...`);
+            console.log(`  ✓ Agent: ${ogpConfig.agentId}`);
+            console.log(`  ✓ Inbound federation mode: ${ogpConfig.inboundFederationPolicy?.mode}`);
+        }
+        finally {
+            if (originalOgpHome) {
+                process.env.OGP_HOME = originalOgpHome;
+            }
+            else {
+                delete process.env.OGP_HOME;
+            }
+        }
+        const existingIndex = metaConfig.frameworks.findIndex(f => f.id === frameworkConfig.id);
+        if (existingIndex !== -1) {
+            metaConfig.frameworks.splice(existingIndex, 1);
+        }
+        metaConfig.frameworks.push(frameworkConfig);
+    }
+    if (answers.default) {
+        metaConfig.default = answers.default;
+    }
+    else if (!metaConfig.default && metaConfig.frameworks.length > 0) {
+        metaConfig.default = frameworkAnswers[0].id;
+    }
+    saveMetaConfig(metaConfig);
+    console.log(`\n✓ Meta configuration saved (default: ${metaConfig.default})`);
+}
 export async function runSetup() {
     console.log('=== OGP Multi-Framework Setup ===\n');
     const rl = readline.createInterface({ input, output });
