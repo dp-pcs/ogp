@@ -1490,10 +1490,13 @@ export async function federationInvite(): Promise<void> {
   const port = config.daemonPort ?? 18790;
 
   try {
+    // SECURITY (F-02): /invite now requires a signed envelope, same as /register.
+    const { signCanonical } = await import('../shared/signing.js');
+    const { payloadStr, signature } = signCanonical({ pubkey, port }, getPrivateKey());
     const res = await fetch(`${config.rendezvous.url}/invite`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pubkey, port }),
+      body: JSON.stringify({ payloadStr, signature }),
       signal: AbortSignal.timeout(10000),
     });
 

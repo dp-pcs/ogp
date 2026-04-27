@@ -25,18 +25,20 @@ async function detectPublicIp() {
     return data.ip;
 }
 async function doRegister(config, pubkey, port, publicUrl) {
-    const body = {
-        pubkey,
-        port,
-        timestamp: Date.now()
-    };
+    // SECURITY (F-02): Sign the registration so the rendezvous server can verify
+    // we actually hold the private key matching this pubkey. Without this, anyone
+    // could squat on someone else's pubkey at the rendezvous.
+    const { signCanonical } = await import('../shared/signing.js');
+    const { getPrivateKey } = await import('./keypair.js');
+    const innerPayload = { pubkey, port };
     if (publicUrl) {
-        body.publicUrl = publicUrl;
+        innerPayload.publicUrl = publicUrl;
     }
+    const { payloadStr, signature } = signCanonical(innerPayload, getPrivateKey());
     const res = await fetch(`${config.url}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ payloadStr, signature }),
         signal: AbortSignal.timeout(8000)
     });
     if (!res.ok) {
