@@ -602,9 +602,6 @@ export async function federationRequest(peerUrl: string, peerId: string, alias?:
     ...(config.organization ? { organization: config.organization } : {}),
   };
 
-  const { sign } = await import('../shared/signing.js');
-  const signature = sign(JSON.stringify(peer), keypair.privateKey);
-
   // Fetch our capabilities to include in the request (BUILD-110: intent negotiation)
   let ourIntents = loadIntents().map((i: { name: string }) => i.name);
   if (ourIntents.length === 0) {
@@ -612,7 +609,15 @@ export async function federationRequest(peerUrl: string, peerId: string, alias?:
     ourIntents = ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'];
   }
 
-  const requestBody = { peer, signature, offeredIntents: ourIntents };
+  // SECURITY (F-04): Send a signed canonical envelope. The receiver verifies
+  // the signature against peer.publicKey from the payload — proves we hold
+  // the private key for the publicKey we're announcing.
+  const { signCanonical } = await import('../shared/signing.js');
+  const { payloadStr, signature } = signCanonical(
+    { peer, offeredIntents: ourIntents },
+    keypair.privateKey
+  );
+  const requestBody = { payloadStr, signature };
 
   // Send request
   try {
@@ -785,25 +790,27 @@ export async function federationApprove(peerId: string, options: ApproveOptions 
 
   try {
     const nonce = crypto.randomUUID();
+    // SECURITY (F-01): Approval is a canonical signed envelope.
+    const { signCanonical } = await import('../shared/signing.js');
+    const { payloadStr, signature } = signCanonical({
+      // Package format
+      peerId: peer.id,
+      approved: true,
+      // Fork format (for interoperability)
+      fromGatewayId: `${new URL(ourConfig.gatewayUrl).hostname}:${ourConfig.daemonPort}`,
+      fromDisplayName: ourConfig.displayName,
+      fromGatewayUrl: ourConfig.gatewayUrl,
+      fromPublicKey: keypair.publicKey,
+      fromEmail: ourConfig.email,
+      nonce,
+      // v0.2.0: Include scope grants
+      protocolVersion: '0.2.0',
+      scopeGrants
+    }, keypair.privateKey);
     await fetch(`${peerGatewayUrl}/federation/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        // Package format
-        peerId: peer.id,
-        approved: true,
-        // Fork format (for interoperability)
-        fromGatewayId: `${new URL(ourConfig.gatewayUrl).hostname}:${ourConfig.daemonPort}`,
-        fromDisplayName: ourConfig.displayName,
-        fromGatewayUrl: ourConfig.gatewayUrl,
-        fromPublicKey: keypair.publicKey,
-        fromEmail: ourConfig.email,
-        timestamp: new Date().toISOString(),
-        nonce,
-        // v0.2.0: Include scope grants
-        protocolVersion: '0.2.0',
-        scopeGrants
-      })
+      body: JSON.stringify({ payloadStr, signature })
     });
     console.log('✓ Notified peer of approval');
   } catch (error) {
@@ -1368,6 +1375,13 @@ export async function federationSendAgentComms(
   const replyTo = options.waitForReply
     ? `${config.gatewayUrl}/federation/reply/${nonce}`
     : undefined;
+
+  // SECURITY (F-05): Remember which peer this nonce was sent to so the
+  // inbound POST /federation/reply/:nonce can authenticate the reply.
+  if (replyTo) {
+    const { trackOutboundNonce } = await import('../daemon/reply-handler.js');
+    trackOutboundNonce(nonce, peerId);
+  }
 
   const message = {
     intent: 'agent-comms',

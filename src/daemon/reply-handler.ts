@@ -26,6 +26,17 @@ export interface StoredReply extends ReplyPayload {
 // In-memory reply store (keyed by nonce)
 const pendingReplies: Map<string, StoredReply> = new Map();
 
+// SECURITY (F-05): Outbound nonce → peerId tracking. Used to authenticate
+// inbound replies on POST /federation/reply/:nonce — we verify the reply
+// signature against the publicKey of the peer we originally sent the nonce
+// to. Without this, anyone who learns a nonce can poison the reply slot.
+interface OutboundNonceEntry {
+  peerId: string;
+  sentAt: number;
+}
+const outboundNonces: Map<string, OutboundNonceEntry> = new Map();
+const MAX_OUTBOUND_NONCES = 1000;
+
 // Max replies to keep in memory
 const MAX_PENDING_REPLIES = 1000;
 
@@ -55,7 +66,7 @@ export function stopReplyCleanup(): void {
 }
 
 /**
- * Clean up expired replies
+ * Clean up expired replies and outbound-nonce tracking entries
  */
 function cleanupExpiredReplies(): void {
   const now = Date.now();
@@ -65,6 +76,49 @@ function cleanupExpiredReplies(): void {
       pendingReplies.delete(nonce);
     }
   }
+  for (const [nonce, entry] of outboundNonces.entries()) {
+    if (now - entry.sentAt > REPLY_TTL_MS) {
+      outboundNonces.delete(nonce);
+    }
+  }
+}
+
+/**
+ * Record that we sent an outbound message with this nonce to this peer,
+ * so a later inbound reply at /federation/reply/:nonce can be authenticated.
+ * Call this whenever a message is sent with `replyTo` pointing back at us.
+ */
+export function trackOutboundNonce(nonce: string, peerId: string): void {
+  if (outboundNonces.size >= MAX_OUTBOUND_NONCES) {
+    // Drop the oldest 100 entries
+    const oldest = Array.from(outboundNonces.entries())
+      .sort((a, b) => a[1].sentAt - b[1].sentAt)
+      .slice(0, 100);
+    for (const [key] of oldest) {
+      outboundNonces.delete(key);
+    }
+  }
+  outboundNonces.set(nonce, { peerId, sentAt: Date.now() });
+}
+
+/**
+ * Look up the peer that owns a nonce we previously sent. Returns null if the
+ * nonce is unknown or expired. Used by the inbound reply handler to find
+ * which peer's publicKey to verify against.
+ */
+export function getOutboundNoncePeer(nonce: string): string | null {
+  const entry = outboundNonces.get(nonce);
+  if (!entry) return null;
+  if (Date.now() - entry.sentAt > REPLY_TTL_MS) {
+    outboundNonces.delete(nonce);
+    return null;
+  }
+  return entry.peerId;
+}
+
+/** For tests. */
+export function clearOutboundNoncesForTests(): void {
+  outboundNonces.clear();
 }
 
 /**
@@ -137,7 +191,7 @@ export async function sendReply(
     to: peerId
   };
 
-  const { payload: signedPayload, signature } = signObject(signedReply, getPrivateKey());
+  const { payload: signedPayload, payloadStr: replyStr, signature } = signObject(signedReply, getPrivateKey());
 
   try {
     const controller = new AbortController();
@@ -150,6 +204,7 @@ export async function sendReply(
       },
       body: JSON.stringify({
         reply: signedPayload,
+        replyStr,        // F-05: raw signed bytes for exact verification
         signature
       }),
       signal: controller.signal
