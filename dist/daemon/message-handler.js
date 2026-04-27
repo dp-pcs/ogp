@@ -1,5 +1,5 @@
 import { verifyObject } from '../shared/signing.js';
-import { getPeer } from './peers.js';
+import { getPeer, updatePeer } from './peers.js';
 import { getIntent } from './intent-registry.js';
 import { notifyOpenClaw } from './notify.js';
 import { checkAccess } from './doorman.js';
@@ -63,6 +63,12 @@ export async function handleMessage(message, signature, messageStr // raw JSON s
             statusCode: 401
         };
     }
+    // Issue #3: record authenticated inbound contact for directional health diagnostics.
+    const inboundAt = new Date().toISOString();
+    updatePeer(peer.id, {
+        lastInboundContactAt: inboundAt,
+        lastSeenAt: inboundAt
+    });
     // 3. Doorman scope check (v0.2.0)
     const accessResult = checkAccess(message.from, message.intent, message.payload);
     if (!accessResult.allowed) {

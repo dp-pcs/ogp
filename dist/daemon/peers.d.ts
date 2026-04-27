@@ -29,6 +29,11 @@ export interface Peer {
     lastSeenAt?: string;
     healthy?: boolean;
     healthCheckFailures?: number;
+    healthState?: 'established' | 'degraded-outbound' | 'degraded-inbound' | 'down';
+    healthStateChangedAt?: string;
+    lastOutboundCheckAt?: string;
+    lastOutboundCheckFailedAt?: string;
+    lastInboundContactAt?: string;
     resyncSnapshot?: {
         oldPeerId: string;
         oldPublicKey: string;

@@ -7,13 +7,50 @@ let heartbeatTimer: NodeJS.Timeout | null = null;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 10000; // 10 seconds
 const DEFAULT_MAX_CONSECUTIVE_FAILURES = 3; // Mark unhealthy after 3 consecutive failures
+const DEFAULT_RECENCY_MULTIPLIER = 2; // Issue #3: "recent" = 2× heartbeat interval
 
 // Active configuration (resolved from defaults, config file, and env vars)
 let activeConfig = {
   intervalMs: DEFAULT_HEARTBEAT_INTERVAL_MS,
   timeoutMs: DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
-  maxConsecutiveFailures: DEFAULT_MAX_CONSECUTIVE_FAILURES
+  maxConsecutiveFailures: DEFAULT_MAX_CONSECUTIVE_FAILURES,
+  recencyMultiplier: DEFAULT_RECENCY_MULTIPLIER
 };
+
+export type HealthState = NonNullable<Peer['healthState']>;
+
+/**
+ * Derive directional health state from local data alone (Issue #3).
+ *
+ * Pure function — exported for testing.
+ *
+ * @param peer       The peer being evaluated. Must contain at least the fields
+ *                   the health-check loop populates.
+ * @param now        Current time in ms since epoch.
+ * @param recencyMs  Threshold beyond which lastInboundContactAt counts as stale.
+ *                   Typically `intervalMs * recencyMultiplier`.
+ */
+export function deriveHealthState(
+  peer: Pick<Peer, 'healthy' | 'lastInboundContactAt'>,
+  now: number,
+  recencyMs: number
+): HealthState {
+  const outboundOk = peer.healthy !== false;
+
+  if (!peer.lastInboundContactAt) {
+    // No inbound history yet — fall back to the legacy outbound-only judgment to
+    // avoid flagging fresh peers as `degraded-inbound` indefinitely.
+    return outboundOk ? 'established' : 'down';
+  }
+
+  const inboundAge = now - new Date(peer.lastInboundContactAt).getTime();
+  const inboundRecent = inboundAge >= 0 && inboundAge < recencyMs;
+
+  if (outboundOk && inboundRecent) return 'established';
+  if (outboundOk && !inboundRecent) return 'degraded-inbound';
+  if (!outboundOk && inboundRecent) return 'degraded-outbound';
+  return 'down';
+}
 
 /**
  * Load health check configuration from config file and environment variables.
@@ -27,6 +64,7 @@ export function loadHealthCheckConfig(): void {
   let intervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
   let timeoutMs = DEFAULT_HEALTH_CHECK_TIMEOUT_MS;
   let maxConsecutiveFailures = DEFAULT_MAX_CONSECUTIVE_FAILURES;
+  let recencyMultiplier = DEFAULT_RECENCY_MULTIPLIER;
 
   // Apply config file values
   if (configHealthCheck.intervalMs !== undefined) {
@@ -37,6 +75,9 @@ export function loadHealthCheckConfig(): void {
   }
   if (configHealthCheck.maxConsecutiveFailures !== undefined) {
     maxConsecutiveFailures = configHealthCheck.maxConsecutiveFailures;
+  }
+  if (configHealthCheck.recencyMultiplier !== undefined) {
+    recencyMultiplier = configHealthCheck.recencyMultiplier;
   }
 
   // Apply environment variable overrides (highest priority)
@@ -49,8 +90,11 @@ export function loadHealthCheckConfig(): void {
   if (process.env.OGP_HEARTBEAT_MAX_FAILURES) {
     maxConsecutiveFailures = parseInt(process.env.OGP_HEARTBEAT_MAX_FAILURES, 10);
   }
+  if (process.env.OGP_HEARTBEAT_RECENCY_MULTIPLIER) {
+    recencyMultiplier = parseFloat(process.env.OGP_HEARTBEAT_RECENCY_MULTIPLIER);
+  }
 
-  activeConfig = { intervalMs, timeoutMs, maxConsecutiveFailures };
+  activeConfig = { intervalMs, timeoutMs, maxConsecutiveFailures, recencyMultiplier };
 }
 
 /**
@@ -90,39 +134,59 @@ async function runHealthChecks(): Promise<void> {
 
   console.log(`[OGP Heartbeat] Checking health of ${peers.length} peer(s)...`);
 
+  const recencyMs = activeConfig.intervalMs * activeConfig.recencyMultiplier;
+
   // Check all peers in parallel
   const healthCheckPromises = peers.map(async (peer) => {
     const isHealthy = await checkPeerHealth(peer);
-    const now = new Date().toISOString();
+    const nowDate = new Date();
+    const now = nowDate.toISOString();
+    const nowMs = nowDate.getTime();
+
+    let nextHealthy: boolean;
+    let updates: Partial<Peer>;
 
     if (isHealthy) {
-      // Peer is healthy - reset failure count and update lastSeenAt
       if (peer.healthy === false) {
         console.log(`[OGP Heartbeat] Peer ${peer.displayName} (${peer.id}) is now healthy`);
       }
-
-      updatePeer(peer.id, {
+      nextHealthy = true;
+      updates = {
         lastSeenAt: now,
+        lastOutboundCheckAt: now,
         healthy: true,
         healthCheckFailures: 0
-      });
+      };
     } else {
-      // Peer is unhealthy - increment failure count
       const failures = (peer.healthCheckFailures || 0) + 1;
       const wasHealthy = peer.healthy !== false;
-
-      // Mark as unhealthy if we've reached the threshold
       const isNowUnhealthy = failures >= activeConfig.maxConsecutiveFailures;
 
       if (wasHealthy && isNowUnhealthy) {
         console.warn(`[OGP Heartbeat] Peer ${peer.displayName} (${peer.id}) marked as unhealthy after ${failures} consecutive failures`);
       }
 
-      updatePeer(peer.id, {
+      nextHealthy = isNowUnhealthy ? false : peer.healthy !== false;
+      updates = {
+        lastOutboundCheckFailedAt: now,
         healthy: isNowUnhealthy ? false : peer.healthy,
         healthCheckFailures: failures
-      });
+      };
     }
+
+    // Issue #3: derive directional health state from the post-update view of the peer.
+    const newState = deriveHealthState(
+      { healthy: nextHealthy, lastInboundContactAt: peer.lastInboundContactAt },
+      nowMs,
+      recencyMs
+    );
+    if (newState !== peer.healthState) {
+      console.log(`[OGP Heartbeat] Peer ${peer.displayName} (${peer.id}): healthState ${peer.healthState ?? 'unknown'} → ${newState}`);
+      updates.healthState = newState;
+      updates.healthStateChangedAt = now;
+    }
+
+    updatePeer(peer.id, updates);
   });
 
   await Promise.allSettled(healthCheckPromises);
