@@ -515,15 +515,18 @@ export async function federationRequest(peerUrl, peerId, alias) {
         ...(config.agentName ? { agentName: config.agentName } : {}),
         ...(config.organization ? { organization: config.organization } : {}),
     };
-    const { sign } = await import('../shared/signing.js');
-    const signature = sign(JSON.stringify(peer), keypair.privateKey);
     // Fetch our capabilities to include in the request (BUILD-110: intent negotiation)
     let ourIntents = loadIntents().map((i) => i.name);
     if (ourIntents.length === 0) {
         // Fallback to default intents if none registered
         ourIntents = ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'];
     }
-    const requestBody = { peer, signature, offeredIntents: ourIntents };
+    // SECURITY (F-04): Send a signed canonical envelope. The receiver verifies
+    // the signature against peer.publicKey from the payload — proves we hold
+    // the private key for the publicKey we're announcing.
+    const { signCanonical } = await import('../shared/signing.js');
+    const { payloadStr, signature } = signCanonical({ peer, offeredIntents: ourIntents }, keypair.privateKey);
+    const requestBody = { payloadStr, signature };
     // Send request
     try {
         const response = await fetch(`${resolvedPeerUrl}/federation/request`, {
@@ -671,25 +674,27 @@ export async function federationApprove(peerId, options = {}) {
     const ourConfig = requireConfig();
     try {
         const nonce = crypto.randomUUID();
+        // SECURITY (F-01): Approval is a canonical signed envelope.
+        const { signCanonical } = await import('../shared/signing.js');
+        const { payloadStr, signature } = signCanonical({
+            // Package format
+            peerId: peer.id,
+            approved: true,
+            // Fork format (for interoperability)
+            fromGatewayId: `${new URL(ourConfig.gatewayUrl).hostname}:${ourConfig.daemonPort}`,
+            fromDisplayName: ourConfig.displayName,
+            fromGatewayUrl: ourConfig.gatewayUrl,
+            fromPublicKey: keypair.publicKey,
+            fromEmail: ourConfig.email,
+            nonce,
+            // v0.2.0: Include scope grants
+            protocolVersion: '0.2.0',
+            scopeGrants
+        }, keypair.privateKey);
         await fetch(`${peerGatewayUrl}/federation/approve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                // Package format
-                peerId: peer.id,
-                approved: true,
-                // Fork format (for interoperability)
-                fromGatewayId: `${new URL(ourConfig.gatewayUrl).hostname}:${ourConfig.daemonPort}`,
-                fromDisplayName: ourConfig.displayName,
-                fromGatewayUrl: ourConfig.gatewayUrl,
-                fromPublicKey: keypair.publicKey,
-                fromEmail: ourConfig.email,
-                timestamp: new Date().toISOString(),
-                nonce,
-                // v0.2.0: Include scope grants
-                protocolVersion: '0.2.0',
-                scopeGrants
-            })
+            body: JSON.stringify({ payloadStr, signature })
         });
         console.log('✓ Notified peer of approval');
     }
