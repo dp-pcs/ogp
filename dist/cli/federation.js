@@ -45,6 +45,17 @@ function healthStateLabel(state) {
         default: return { icon: '?', label: 'unknown' };
     }
 }
+function federationStateLabel(state) {
+    switch (state) {
+        case 'init': return { icon: '◐', label: 'INIT' };
+        case 'twoWay': return { icon: '◑', label: 'TWO-WAY' };
+        case 'established': return { icon: '✓', label: 'ESTABLISHED' };
+        case 'degraded': return { icon: '⚠', label: 'DEGRADED' };
+        case 'down': return { icon: '✗', label: 'DOWN' };
+        case 'tombstoned': return { icon: '☠', label: 'TOMBSTONED' };
+        default: return { icon: '?', label: 'UNKNOWN' };
+    }
+}
 function normalizeGatewayUrl(url) {
     const trimmed = url.trim();
     if (!trimmed) {
@@ -263,6 +274,13 @@ export async function federationList(status, filterTag) {
         if (peer.tags && peer.tags.length > 0) {
             console.log(`    Tags: ${peer.tags.join(', ')}`);
         }
+        // Issue #4: federation lifecycle line for any non-tombstoned peer.
+        if (peer.status !== 'rejected' && peer.status !== 'removed') {
+            const { label: fedLabel } = federationStateLabel(peer.federationState);
+            const since = peer.federationStateChangedAt ? ` since ${formatRelative(peer.federationStateChangedAt)}` : '';
+            const reason = peer.federationStateReason ? ` — ${peer.federationStateReason}` : '';
+            console.log(`    Federation:  ${fedLabel}${since}${reason}`);
+        }
         // Show health details for approved peers (Issue #3: directional, Issue #5: authoritative inbound)
         if (peer.status === 'approved') {
             const { label } = healthStateLabel(peer.healthState);
@@ -413,6 +431,30 @@ export async function federationStatus() {
         console.log(`  Degraded in:      ${stateCounts['degraded-inbound']} (⚠ they haven't reached me)`);
         console.log(`  Down:             ${stateCounts.down} (✗)`);
         console.log(`  Unknown:          ${stateCounts.unknown} (?)`);
+        console.log('');
+    }
+    // Issue #4: federation lifecycle state breakdown across all non-tombstoned peers.
+    const lifecycleCounts = {
+        init: 0, twoWay: 0, established: 0, degraded: 0, down: 0, unknown: 0
+    };
+    for (const p of peers) {
+        if (p.status === 'rejected' || p.status === 'removed')
+            continue;
+        const s = p.federationState ?? 'unknown';
+        if (s === 'tombstoned')
+            continue;
+        lifecycleCounts[s] = (lifecycleCounts[s] ?? 0) + 1;
+    }
+    if (peers.some(p => p.status !== 'rejected' && p.status !== 'removed')) {
+        console.log('🔗 FEDERATION LIFECYCLE:\n');
+        console.log(`  Init:        ${lifecycleCounts.init}`);
+        console.log(`  Two-way:     ${lifecycleCounts.twoWay}`);
+        console.log(`  Established: ${lifecycleCounts.established}`);
+        console.log(`  Degraded:    ${lifecycleCounts.degraded}`);
+        console.log(`  Down:        ${lifecycleCounts.down}`);
+        if (lifecycleCounts.unknown > 0) {
+            console.log(`  Unknown:     ${lifecycleCounts.unknown}`);
+        }
         console.log('');
     }
     // Alias → Public Key mapping section
