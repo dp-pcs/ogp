@@ -42,6 +42,9 @@ export interface Peer {
         healthCheckFailures?: number;
         receivedAt: string;
     };
+    federationState?: 'init' | 'twoWay' | 'established' | 'degraded' | 'down' | 'tombstoned';
+    federationStateChangedAt?: string;
+    federationStateReason?: string;
     resyncSnapshot?: {
         oldPeerId: string;
         oldPublicKey: string;
@@ -60,6 +63,21 @@ export interface PeerIdentityLookup {
     publicKey?: string;
 }
 export declare const CANONICAL_PEER_ID_LENGTH = 32;
+export type FederationState = NonNullable<Peer['federationState']>;
+/**
+ * Derive the OSPF/BGP-inspired federation lifecycle state (Issue #4) from a
+ * peer's current handshake status, health state, and contact history.
+ *
+ * Pure function — exported for testing.
+ *
+ * Mapping:
+ *   peer.status = pending                              → init
+ *   peer.status = rejected | removed                   → tombstoned
+ *   peer.status = approved + no contact history        → twoWay
+ *   peer.status = approved + healthState present       → mirror healthState
+ *                                                        (degraded-* collapse to degraded)
+ */
+export declare function deriveFederationState(peer: Pick<Peer, 'status' | 'healthState' | 'lastOutboundCheckAt' | 'lastOutboundCheckFailedAt' | 'lastInboundContactAt' | 'inboundHealthReport'>): FederationState;
 export declare function derivePeerIdFromPublicKey(publicKey: string): string;
 type PendingPeerInput = Pick<Peer, 'id' | 'displayName' | 'email' | 'gatewayUrl' | 'publicKey'> & {
     agentId?: string;

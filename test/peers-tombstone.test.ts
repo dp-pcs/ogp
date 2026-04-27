@@ -140,7 +140,11 @@ describe('peer tombstone persistence', () => {
       status: 'pending',
       requestedAt: '2026-04-09T09:00:00.000Z',
       offeredIntents: ['project.status'],
-      agentId: 'main'
+      agentId: 'main',
+      // Issue #4: pending peers seed federation lifecycle state immediately.
+      federationState: 'init',
+      federationStateChangedAt: '2026-04-09T09:00:00.000Z',
+      federationStateReason: 'federation request received'
     });
   });
 

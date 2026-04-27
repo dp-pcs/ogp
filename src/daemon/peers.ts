@@ -62,6 +62,12 @@ export interface Peer {
     healthCheckFailures?: number;     // peer's failure counter for us
     receivedAt: string;               // when we recorded this report
   };
+  // Issue #4: OSPF/BGP-inspired federation lifecycle state machine. A coarser
+  // view than `healthState` that includes pre-approval and warming-up phases.
+  // Derived from `peer.status` + `healthState` + handshake/contact history.
+  federationState?: 'init' | 'twoWay' | 'established' | 'degraded' | 'down' | 'tombstoned';
+  federationStateChangedAt?: string;  // ISO timestamp of last transition
+  federationStateReason?: string;     // human-readable reason for last transition
   // Federation resync snapshot (when gateway URL is re-used with new keys)
   resyncSnapshot?: {
     oldPeerId: string;
@@ -83,6 +89,40 @@ export interface PeerIdentityLookup {
 }
 
 export const CANONICAL_PEER_ID_LENGTH = 32;
+
+export type FederationState = NonNullable<Peer['federationState']>;
+
+/**
+ * Derive the OSPF/BGP-inspired federation lifecycle state (Issue #4) from a
+ * peer's current handshake status, health state, and contact history.
+ *
+ * Pure function — exported for testing.
+ *
+ * Mapping:
+ *   peer.status = pending                              → init
+ *   peer.status = rejected | removed                   → tombstoned
+ *   peer.status = approved + no contact history        → twoWay
+ *   peer.status = approved + healthState present       → mirror healthState
+ *                                                        (degraded-* collapse to degraded)
+ */
+export function deriveFederationState(
+  peer: Pick<Peer, 'status' | 'healthState' | 'lastOutboundCheckAt' | 'lastOutboundCheckFailedAt' | 'lastInboundContactAt' | 'inboundHealthReport'>
+): FederationState {
+  if (peer.status === 'pending') return 'init';
+  if (peer.status === 'rejected' || peer.status === 'removed') return 'tombstoned';
+
+  const hasOutboundHistory = Boolean(peer.lastOutboundCheckAt || peer.lastOutboundCheckFailedAt);
+  const hasInboundHistory = Boolean(peer.lastInboundContactAt || peer.inboundHealthReport);
+  if (!hasOutboundHistory && !hasInboundHistory) return 'twoWay';
+
+  switch (peer.healthState) {
+    case 'established': return 'established';
+    case 'degraded-outbound':
+    case 'degraded-inbound': return 'degraded';
+    case 'down': return 'down';
+    default: return 'twoWay'; // approved + some history but no healthState yet (warming up)
+  }
+}
 
 function getPeersFile(): string {
   return path.join(getConfigDir(), 'peers.json');
@@ -158,6 +198,7 @@ function createPeerTombstone(peer: Peer, status: 'rejected' | 'removed', changed
 }
 
 export function createPendingPeerRecord(input: PendingPeerInput): Peer {
+  const requestedAt = input.requestedAt ?? new Date().toISOString();
   return {
     id: input.id,
     displayName: input.displayName,
@@ -165,7 +206,11 @@ export function createPendingPeerRecord(input: PendingPeerInput): Peer {
     gatewayUrl: input.gatewayUrl,
     publicKey: input.publicKey,
     status: 'pending',
-    requestedAt: input.requestedAt ?? new Date().toISOString(),
+    requestedAt,
+    // Issue #4: seed federation lifecycle state from the start.
+    federationState: 'init',
+    federationStateChangedAt: requestedAt,
+    federationStateReason: 'federation request received',
     ...(input.humanName ? { humanName: input.humanName } : {}),
     ...(input.agentName ? { agentName: input.agentName } : {}),
     ...(input.organization ? { organization: input.organization } : {}),
@@ -317,8 +362,21 @@ export function approvePeer(peerId: string): boolean {
   const peer = peers.find(p => p.id === peerId);
   if (!peer) return false;
 
+  const previousFederationState = peer.federationState;
+  const now = new Date().toISOString();
   peer.status = 'approved';
-  peer.approvedAt = new Date().toISOString();
+  peer.approvedAt = now;
+
+  // Issue #4: Init → TwoWay on approval. Heartbeat will promote to Established
+  // once the first bidirectional health check succeeds.
+  const newFederationState = deriveFederationState(peer);
+  if (newFederationState !== previousFederationState) {
+    peer.federationState = newFederationState;
+    peer.federationStateChangedAt = now;
+    peer.federationStateReason = 'peer approved (awaiting first bidirectional health check)';
+    console.log(`[OGP Federation] ${peer.displayName} (${peer.id}): ${previousFederationState ?? 'unknown'} → ${newFederationState} (peer approved)`);
+  }
+
   const saved = savePeers(peers);
   if (!saved) {
     console.error(`[OGP] Failed to persist approval for peer ${peerId}`);
@@ -331,7 +389,15 @@ export function rejectPeer(peerId: string): boolean {
   const peerIndex = peers.findIndex(p => p.id === peerId);
   if (peerIndex === -1) return false;
 
-  peers[peerIndex] = createPeerTombstone(peers[peerIndex], 'rejected');
+  const previous = peers[peerIndex];
+  const tombstone = createPeerTombstone(previous, 'rejected');
+  tombstone.federationState = 'tombstoned';
+  tombstone.federationStateChangedAt = new Date().toISOString();
+  tombstone.federationStateReason = 'peer rejected';
+  if (previous.federationState !== 'tombstoned') {
+    console.log(`[OGP Federation] ${previous.displayName} (${previous.id}): ${previous.federationState ?? 'unknown'} → tombstoned (rejected)`);
+  }
+  peers[peerIndex] = tombstone;
   return savePeers(peers);
 }
 
@@ -340,9 +406,17 @@ export function removePeer(peerId: string): boolean {
   const peerIndex = peers.findIndex(p => p.id === peerId);
   if (peerIndex === -1) return false;
 
+  const previous = peers[peerIndex];
   // Keep an auditable tombstone, but clear mutable relationship state so it
   // cannot leak into later federation attempts.
-  peers[peerIndex] = createPeerTombstone(peers[peerIndex], 'removed');
+  const tombstone = createPeerTombstone(previous, 'removed');
+  tombstone.federationState = 'tombstoned';
+  tombstone.federationStateChangedAt = new Date().toISOString();
+  tombstone.federationStateReason = 'peer removed';
+  if (previous.federationState !== 'tombstoned') {
+    console.log(`[OGP Federation] ${previous.displayName} (${previous.id}): ${previous.federationState ?? 'unknown'} → tombstoned (removed)`);
+  }
+  peers[peerIndex] = tombstone;
   return savePeers(peers);
 }
 
