@@ -34,6 +34,14 @@ export interface Peer {
     lastOutboundCheckAt?: string;
     lastOutboundCheckFailedAt?: string;
     lastInboundContactAt?: string;
+    inboundHealthReport?: {
+        healthy: boolean;
+        healthState?: 'established' | 'degraded-outbound' | 'degraded-inbound' | 'down';
+        lastCheckedAt?: string;
+        lastCheckFailedAt?: string;
+        healthCheckFailures?: number;
+        receivedAt: string;
+    };
     resyncSnapshot?: {
         oldPeerId: string;
         oldPublicKey: string;

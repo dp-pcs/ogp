@@ -1,5 +1,6 @@
-import { listPeers, updatePeer, type Peer } from './peers.js';
+import { listPeers, updatePeer, derivePeerIdFromPublicKey, type Peer } from './peers.js';
 import { loadConfig, type HealthCheckConfig } from '../shared/config.js';
+import { getPublicKey } from './keypair.js';
 
 let heartbeatTimer: NodeJS.Timeout | null = null;
 
@@ -20,22 +21,41 @@ let activeConfig = {
 export type HealthState = NonNullable<Peer['healthState']>;
 
 /**
- * Derive directional health state from local data alone (Issue #3).
+ * Derive directional health state from local data alone (Issue #3) plus, when
+ * available, the authoritative inbound report from the peer (Issue #5).
  *
  * Pure function — exported for testing.
  *
- * @param peer       The peer being evaluated. Must contain at least the fields
- *                   the health-check loop populates.
+ * Resolution order for the inbound side:
+ *   1. `inboundHealthReport` if recent — authoritative (the peer told us
+ *      whether they can reach us).
+ *   2. `lastInboundContactAt` recency — inferred from cryptographically
+ *      attributed inbound traffic.
+ *   3. No inbound signal at all — fall back to outbound-only.
+ *
+ * @param peer       The peer being evaluated.
  * @param now        Current time in ms since epoch.
- * @param recencyMs  Threshold beyond which lastInboundContactAt counts as stale.
+ * @param recencyMs  Threshold beyond which inbound signals count as stale.
  *                   Typically `intervalMs * recencyMultiplier`.
  */
 export function deriveHealthState(
-  peer: Pick<Peer, 'healthy' | 'lastInboundContactAt'>,
+  peer: Pick<Peer, 'healthy' | 'lastInboundContactAt' | 'inboundHealthReport'>,
   now: number,
   recencyMs: number
 ): HealthState {
   const outboundOk = peer.healthy !== false;
+
+  // Issue #5: prefer the authoritative report when it's recent.
+  if (peer.inboundHealthReport) {
+    const reportAge = now - new Date(peer.inboundHealthReport.receivedAt).getTime();
+    if (reportAge >= 0 && reportAge < recencyMs) {
+      const inboundOk = peer.inboundHealthReport.healthy;
+      if (outboundOk && inboundOk) return 'established';
+      if (outboundOk && !inboundOk) return 'degraded-inbound';
+      if (!outboundOk && inboundOk) return 'degraded-outbound';
+      return 'down';
+    }
+  }
 
   if (!peer.lastInboundContactAt) {
     // No inbound history yet — fall back to the legacy outbound-only judgment to
@@ -97,28 +117,83 @@ export function loadHealthCheckConfig(): void {
   activeConfig = { intervalMs, timeoutMs, maxConsecutiveFailures, recencyMultiplier };
 }
 
+export interface HealthCheckResult {
+  reachable: boolean;
+  /**
+   * Issue #5: authoritative inbound report parsed from the peer's
+   * /.well-known/ogp response body when they recognised our
+   * X-OGP-Peer-ID header.
+   */
+  peerStatus?: {
+    healthy: boolean;
+    healthState?: Peer['healthState'];
+    lastCheckedAt?: string;
+    lastCheckFailedAt?: string;
+    healthCheckFailures?: number;
+  };
+}
+
+function getLocalPeerId(): string | null {
+  try {
+    return derivePeerIdFromPublicKey(getPublicKey());
+  } catch {
+    // Keypair may be unavailable in some test/setup paths — degrade silently.
+    return null;
+  }
+}
+
 /**
- * Check if a single peer is healthy by fetching their /.well-known/ogp endpoint
+ * Check if a single peer is healthy by fetching their /.well-known/ogp endpoint.
+ *
+ * Issue #5: sends X-OGP-Peer-ID so the responder can include their view of our
+ * health in `peerStatus`, parsed and returned alongside the boolean reachability.
  */
-async function checkPeerHealth(peer: Peer): Promise<boolean> {
+async function checkPeerHealth(peer: Peer): Promise<HealthCheckResult> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), activeConfig.timeoutMs);
 
+    const headers: Record<string, string> = {
+      'User-Agent': 'OGP-Heartbeat/1.0'
+    };
+    const localPeerId = getLocalPeerId();
+    if (localPeerId) {
+      headers['X-OGP-Peer-ID'] = localPeerId;
+    }
+
     const response = await fetch(`${peer.gatewayUrl}/.well-known/ogp`, {
       signal: controller.signal,
-      headers: {
-        'User-Agent': 'OGP-Heartbeat/1.0'
-      }
+      headers
     });
 
     clearTimeout(timeoutId);
 
-    // Consider any 2xx response as healthy
-    return response.ok;
-  } catch (error) {
+    if (!response.ok) {
+      return { reachable: false };
+    }
+
+    let peerStatus: HealthCheckResult['peerStatus'];
+    try {
+      const body = await response.json() as { peerStatus?: HealthCheckResult['peerStatus'] };
+      if (body && body.peerStatus && typeof body.peerStatus === 'object' && typeof body.peerStatus.healthy === 'boolean') {
+        peerStatus = {
+          healthy: body.peerStatus.healthy,
+          healthState: body.peerStatus.healthState,
+          lastCheckedAt: body.peerStatus.lastCheckedAt ?? undefined,
+          lastCheckFailedAt: body.peerStatus.lastCheckFailedAt ?? undefined,
+          healthCheckFailures: typeof body.peerStatus.healthCheckFailures === 'number'
+            ? body.peerStatus.healthCheckFailures
+            : undefined
+        };
+      }
+    } catch {
+      // Non-JSON or malformed body — peer reachable but no peerStatus available.
+    }
+
+    return { reachable: true, peerStatus };
+  } catch {
     // Network errors, timeouts, etc. = unhealthy
-    return false;
+    return { reachable: false };
   }
 }
 
@@ -138,15 +213,16 @@ async function runHealthChecks(): Promise<void> {
 
   // Check all peers in parallel
   const healthCheckPromises = peers.map(async (peer) => {
-    const isHealthy = await checkPeerHealth(peer);
+    const result = await checkPeerHealth(peer);
     const nowDate = new Date();
     const now = nowDate.toISOString();
     const nowMs = nowDate.getTime();
 
     let nextHealthy: boolean;
     let updates: Partial<Peer>;
+    let nextInboundReport: Peer['inboundHealthReport'] = peer.inboundHealthReport;
 
-    if (isHealthy) {
+    if (result.reachable) {
       if (peer.healthy === false) {
         console.log(`[OGP Heartbeat] Peer ${peer.displayName} (${peer.id}) is now healthy`);
       }
@@ -157,6 +233,25 @@ async function runHealthChecks(): Promise<void> {
         healthy: true,
         healthCheckFailures: 0
       };
+
+      // Issue #5: store the authoritative inbound report when the peer
+      // returned one (i.e. they recognised our X-OGP-Peer-ID).
+      if (result.peerStatus) {
+        const previous = peer.inboundHealthReport;
+        nextInboundReport = {
+          healthy: result.peerStatus.healthy,
+          healthState: result.peerStatus.healthState,
+          lastCheckedAt: result.peerStatus.lastCheckedAt,
+          lastCheckFailedAt: result.peerStatus.lastCheckFailedAt,
+          healthCheckFailures: result.peerStatus.healthCheckFailures,
+          receivedAt: now
+        };
+        updates.inboundHealthReport = nextInboundReport;
+
+        if (!previous || previous.healthy !== nextInboundReport.healthy) {
+          console.log(`[OGP Heartbeat] Peer ${peer.displayName} (${peer.id}): inbound report = ${nextInboundReport.healthy ? 'healthy' : 'unhealthy'} (peer's view of us)`);
+        }
+      }
     } else {
       const failures = (peer.healthCheckFailures || 0) + 1;
       const wasHealthy = peer.healthy !== false;
@@ -174,9 +269,13 @@ async function runHealthChecks(): Promise<void> {
       };
     }
 
-    // Issue #3: derive directional health state from the post-update view of the peer.
+    // Issues #3 + #5: derive directional health state from the post-update view of the peer.
     const newState = deriveHealthState(
-      { healthy: nextHealthy, lastInboundContactAt: peer.lastInboundContactAt },
+      {
+        healthy: nextHealthy,
+        lastInboundContactAt: peer.lastInboundContactAt,
+        inboundHealthReport: nextInboundReport
+      },
       nowMs,
       recencyMs
     );

@@ -68,4 +68,62 @@ describe('deriveHealthState (Issue #3)', () => {
       )
     ).toBe('established');
   });
+
+  describe('Issue #5: authoritative inbound report wins over inferred lastInboundContactAt', () => {
+    it('uses report.healthy=true to flip degraded-inbound back to established', () => {
+      // Inferred signal would say degraded-inbound (no recent contact),
+      // but the peer just told us they can reach us — trust them.
+      expect(
+        deriveHealthState(
+          {
+            healthy: true,
+            lastInboundContactAt: isoMinutesAgo(now, 30),
+            inboundHealthReport: {
+              healthy: true,
+              receivedAt: isoMinutesAgo(now, 1)
+            }
+          },
+          now,
+          RECENCY_MS
+        )
+      ).toBe('established');
+    });
+
+    it('uses report.healthy=false to flip established to degraded-inbound', () => {
+      // Inferred signal would say established (recent contact),
+      // but the peer says they can't reach us — trust them.
+      expect(
+        deriveHealthState(
+          {
+            healthy: true,
+            lastInboundContactAt: isoMinutesAgo(now, 1),
+            inboundHealthReport: {
+              healthy: false,
+              receivedAt: isoMinutesAgo(now, 1)
+            }
+          },
+          now,
+          RECENCY_MS
+        )
+      ).toBe('degraded-inbound');
+    });
+
+    it('falls back to inferred signal when report is stale', () => {
+      // Report is older than recencyMs → don't trust it; inferred wins.
+      expect(
+        deriveHealthState(
+          {
+            healthy: true,
+            lastInboundContactAt: isoMinutesAgo(now, 1),
+            inboundHealthReport: {
+              healthy: false,
+              receivedAt: isoMinutesAgo(now, 60)
+            }
+          },
+          now,
+          RECENCY_MS
+        )
+      ).toBe('established');
+    });
+  });
 });
