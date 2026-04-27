@@ -158,6 +158,14 @@ export interface OGPConfig {
 
   // Health check configuration (optional)
   healthCheck?: HealthCheckConfig;
+
+  // macOS dedicated-keychain support for headless deployments.
+  // When set, all `security` invocations target this keychain instead of the
+  // login keychain. If keychainPasswordFile is also set, the keychain is
+  // unlocked at daemon start using the password read from that file.
+  // Env vars OGP_KEYCHAIN_PATH and OGP_KEYCHAIN_PASSWORD_FILE override these.
+  keychainPath?: string;
+  keychainPasswordFile?: string;
 }
 
 /**
