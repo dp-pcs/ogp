@@ -134,6 +134,30 @@ export function startServer(config?: OGPConfig, background = false): void {
     const intents = loadIntents();
     const intentNames = intents.map(i => i.name);
 
+    // Issue #5: bidirectional health status exchange.
+    // If the requester identifies themselves via X-OGP-Peer-ID and they're an
+    // approved peer, include our view of their health so they can detect
+    // one-way routing failures (e.g. their tunnel is down to us but theirs is
+    // up to them). Privacy: never expose health data about peer A to peer B.
+    let peerStatus: Record<string, unknown> | undefined;
+    const requesterIdRaw = req.header('x-ogp-peer-id');
+    if (requesterIdRaw) {
+      const requesterId = String(requesterIdRaw).trim();
+      if (requesterId) {
+        const requester = getPeer(requesterId);
+        if (requester && requester.status === 'approved') {
+          peerStatus = {
+            peerId: requester.id,
+            healthy: requester.healthy !== false,
+            healthState: requester.healthState ?? null,
+            lastCheckedAt: requester.lastOutboundCheckAt ?? null,
+            lastCheckFailedAt: requester.lastOutboundCheckFailedAt ?? null,
+            healthCheckFailures: requester.healthCheckFailures ?? 0
+          };
+        }
+      }
+    }
+
     res.json({
       version: OGP_VERSION,
       displayName: cfg.displayName,
@@ -142,14 +166,15 @@ export function startServer(config?: OGPConfig, background = false): void {
       publicKey: getPublicKey(),
       capabilities: {
         intents: intentNames,
-        features: ['scope-negotiation', 'reply-callback']
+        features: ['scope-negotiation', 'reply-callback', 'bidirectional-health']
       },
       endpoints: {
         request: `${cfg.gatewayUrl}/federation/request`,
         approve: `${cfg.gatewayUrl}/federation/approve`,
         message: `${cfg.gatewayUrl}/federation/message`,
         reply: `${cfg.gatewayUrl}/federation/reply/:nonce`
-      }
+      },
+      ...(peerStatus ? { peerStatus } : {})
     });
   });
 
