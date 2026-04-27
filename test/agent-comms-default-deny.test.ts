@@ -36,7 +36,8 @@ vi.mock('node:fs', () => ({
 
 vi.mock('../src/daemon/peers.js', () => ({
   getPeer: vi.fn((peerId: string) => (peerId === 'apollo' ? peerRecord : null)),
-  getPeerByPublicKey: vi.fn(() => peerRecord)
+  getPeerByPublicKey: vi.fn(() => peerRecord),
+  updatePeer: vi.fn()
 }));
 
 vi.mock('../src/shared/config.js', () => ({

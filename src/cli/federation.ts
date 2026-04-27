@@ -31,6 +31,28 @@ function expandTilde(filePath: string): string {
   return filePath;
 }
 
+function formatRelative(iso?: string): string {
+  if (!iso) return 'never';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return 'in the future';
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return '<1m';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function healthStateLabel(state?: Peer['healthState']): { icon: string; label: string } {
+  switch (state) {
+    case 'established': return { icon: '✓', label: 'established' };
+    case 'degraded-outbound': return { icon: '⚠', label: 'degraded-out' };
+    case 'degraded-inbound': return { icon: '⚠', label: 'degraded-in' };
+    case 'down': return { icon: '✗', label: 'down' };
+    default: return { icon: '?', label: 'unknown' };
+  }
+}
+
 type FederationCard = {
   displayName?: string;
   email?: string;
@@ -201,7 +223,6 @@ export async function federationList(status?: 'pending' | 'approved' | 'rejected
           peers.forEach(peer => {
             const aliasDisplay = peer.alias || peer.displayName || '-';
             const displayName = peer.alias ? peer.displayName : '';
-            const keyShort = peer.publicKey?.substring(0, 16) || '-';
 
             // Status and health icons
             let statusIcon = peer.status === 'approved' ? '✓' : peer.status === 'pending' ? '?' : '✗';
@@ -209,18 +230,15 @@ export async function federationList(status?: 'pending' | 'approved' | 'rejected
               statusIcon = '✗'; // Show unhealthy status
             }
 
-            // Health details for approved peers
+            // Issue #3: directional health summary for approved peers
             let healthInfo = '';
             if (peer.status === 'approved') {
-              if (peer.lastSeenAt) {
-                const lastSeen = new Date(peer.lastSeenAt);
-                const now = new Date();
-                const minutesAgo = Math.floor((now.getTime() - lastSeen.getTime()) / 60000);
-                const timeStr = minutesAgo < 60 ? `${minutesAgo}m` : `${Math.floor(minutesAgo / 60)}h`;
-                healthInfo = ` [last seen: ${timeStr}]`;
-              } else {
-                healthInfo = ' [never seen]';
-              }
+              const { icon, label } = healthStateLabel(peer.healthState);
+              const out = peer.lastOutboundCheckFailedAt && (!peer.lastOutboundCheckAt || peer.lastOutboundCheckFailedAt > peer.lastOutboundCheckAt)
+                ? `out: FAIL ${formatRelative(peer.lastOutboundCheckFailedAt)}`
+                : `out: ${formatRelative(peer.lastOutboundCheckAt)}`;
+              const inb = `in: ${formatRelative(peer.lastInboundContactAt)}`;
+              healthInfo = ` [${icon} ${label}  ${out}  ${inb}]`;
               if (peer.healthCheckFailures && peer.healthCheckFailures > 0) {
                 healthInfo += ` (${peer.healthCheckFailures} failures)`;
               }
@@ -280,17 +298,10 @@ export async function federationList(status?: 'pending' | 'approved' | 'rejected
     const keyCol = (peer.publicKey?.substring(0, 16) || '-') + '...';
     const statusCol = peer.status;
 
-    // Health status indicator
-    let healthIcon = '';
-    if (peer.status === 'approved') {
-      if (peer.healthy === true) {
-        healthIcon = '✓';
-      } else if (peer.healthy === false) {
-        healthIcon = '✗';
-      } else {
-        healthIcon = '?'; // Unknown health status
-      }
-    }
+    // Health status indicator (Issue #3: directional)
+    const { icon: healthIcon } = peer.status === 'approved'
+      ? healthStateLabel(peer.healthState)
+      : { icon: '' };
 
     console.log(`  ${healthIcon ? healthIcon + ' ' : ''}${aliasCol} ${displayCol} ${keyCol.padEnd(20)} ${statusCol}`);
     console.log(`    Gateway: ${peer.gatewayUrl}`);
@@ -310,14 +321,12 @@ export async function federationList(status?: 'pending' | 'approved' | 'rejected
       console.log(`    Tags: ${peer.tags.join(', ')}`);
     }
 
-    // Show health details for approved peers
+    // Show health details for approved peers (Issue #3: directional)
     if (peer.status === 'approved') {
-      if (peer.lastSeenAt) {
-        const lastSeen = new Date(peer.lastSeenAt);
-        const now = new Date();
-        const minutesAgo = Math.floor((now.getTime() - lastSeen.getTime()) / 60000);
-        console.log(`    Last seen: ${minutesAgo < 60 ? minutesAgo + 'm ago' : Math.floor(minutesAgo / 60) + 'h ago'}`);
-      }
+      const { label } = healthStateLabel(peer.healthState);
+      console.log(`    Health state: ${label}${peer.healthStateChangedAt ? ` (since ${formatRelative(peer.healthStateChangedAt)})` : ''}`);
+      console.log(`    Outbound:    last ok ${formatRelative(peer.lastOutboundCheckAt)}, last fail ${formatRelative(peer.lastOutboundCheckFailedAt)}`);
+      console.log(`    Inbound:     last contact ${formatRelative(peer.lastInboundContactAt)}`);
       if (peer.healthCheckFailures && peer.healthCheckFailures > 0) {
         console.log(`    Health check failures: ${peer.healthCheckFailures}`);
       }
@@ -391,40 +400,18 @@ export async function federationStatus(): Promise<void> {
             for (const peer of approvedPeers) {
               const aliasDisplay = peer.alias || peer.displayName || 'no alias';
 
-              // Health status indicator
-              let healthIcon = '';
-              if (peer.healthy === true) {
-                healthIcon = '✓';
-              } else if (peer.healthy === false) {
-                healthIcon = '✗';
-              } else {
-                healthIcon = '?';
-              }
-
-              // Format last seen time
-              let lastSeenStr = '';
-              if (peer.lastSeenAt) {
-                const lastSeen = new Date(peer.lastSeenAt);
-                const now = new Date();
-                const minutesAgo = Math.floor((now.getTime() - lastSeen.getTime()) / 60000);
-                if (minutesAgo < 60) {
-                  lastSeenStr = `${minutesAgo}m ago`;
-                } else if (minutesAgo < 1440) {
-                  lastSeenStr = `${Math.floor(minutesAgo / 60)}h ago`;
-                } else {
-                  lastSeenStr = `${Math.floor(minutesAgo / 1440)}d ago`;
-                }
-              } else {
-                lastSeenStr = 'never';
-              }
-
-              // Show health failures if any
+              // Issue #3: directional health
+              const { icon: healthIcon, label } = healthStateLabel(peer.healthState);
+              const out = peer.lastOutboundCheckFailedAt && (!peer.lastOutboundCheckAt || peer.lastOutboundCheckFailedAt > peer.lastOutboundCheckAt)
+                ? `out FAIL ${formatRelative(peer.lastOutboundCheckFailedAt)}`
+                : `out ${formatRelative(peer.lastOutboundCheckAt)}`;
+              const inb = `in ${formatRelative(peer.lastInboundContactAt)}`;
               const failuresStr = peer.healthCheckFailures && peer.healthCheckFailures > 0
                 ? ` (${peer.healthCheckFailures} failures)`
                 : '';
 
               const scopes = peer.grantedScopes?.scopes.map(s => s.intent).join(', ') || 'none';
-              console.log(`    ${healthIcon} ${aliasDisplay.padEnd(20)} [${lastSeenStr.padEnd(8)}${failuresStr}] ${scopes}`);
+              console.log(`    ${healthIcon} ${aliasDisplay.padEnd(20)} ${label.padEnd(13)} ${out.padEnd(20)} ${inb.padEnd(15)}${failuresStr} ${scopes}`);
             }
           }
         }
@@ -465,10 +452,18 @@ export async function federationStatus(): Promise<void> {
   const rejectedPeers = peers.filter(p => p.status === 'rejected');
   const removedPeers = peers.filter(p => p.status === 'removed');
 
-  // Health statistics for approved peers
-  const healthyPeers = approvedPeers.filter(p => p.healthy === true);
-  const unhealthyPeers = approvedPeers.filter(p => p.healthy === false);
-  const unknownHealthPeers = approvedPeers.filter(p => p.healthy === undefined);
+  // Health statistics for approved peers (Issue #3: directional)
+  const stateCounts = {
+    established: 0,
+    'degraded-outbound': 0,
+    'degraded-inbound': 0,
+    down: 0,
+    unknown: 0
+  };
+  for (const p of approvedPeers) {
+    const state = p.healthState ?? 'unknown';
+    stateCounts[state] = (stateCounts[state] ?? 0) + 1;
+  }
 
   console.log('\n📊 FEDERATION STATUS\n');
 
@@ -480,12 +475,14 @@ export async function federationStatus(): Promise<void> {
   console.log(`  Removed:  ${removedPeers.length}`);
   console.log('');
 
-  // Health summary for approved peers
+  // Health summary for approved peers (Issue #3: directional state breakdown)
   if (approvedPeers.length > 0) {
     console.log('🏥 PEER HEALTH:\n');
-    console.log(`  Healthy:   ${healthyPeers.length} (✓)`);
-    console.log(`  Unhealthy: ${unhealthyPeers.length} (✗)`);
-    console.log(`  Unknown:   ${unknownHealthPeers.length} (?)`);
+    console.log(`  Established:      ${stateCounts.established} (✓)`);
+    console.log(`  Degraded out:     ${stateCounts['degraded-outbound']} (⚠ I can't reach them)`);
+    console.log(`  Degraded in:      ${stateCounts['degraded-inbound']} (⚠ they haven't reached me)`);
+    console.log(`  Down:             ${stateCounts.down} (✗)`);
+    console.log(`  Unknown:          ${stateCounts.unknown} (?)`);
     console.log('');
   }
 

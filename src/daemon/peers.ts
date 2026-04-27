@@ -42,9 +42,15 @@ export interface Peer {
   // BUILD-115: Agent-specific notification routing
   agentId?: string;                  // which local agent "owns" this federation relationship
   // Heartbeat/health tracking
-  lastSeenAt?: string;               // ISO timestamp of last successful health check
+  lastSeenAt?: string;               // ISO timestamp of most recent activity from peer (outbound success OR authenticated inbound contact)
   healthy?: boolean;                 // current health status (undefined = unknown, true = healthy, false = unhealthy)
   healthCheckFailures?: number;      // consecutive health check failure count
+  // Issue #3: directional health diagnostics derived from local data alone.
+  healthState?: 'established' | 'degraded-outbound' | 'degraded-inbound' | 'down';
+  healthStateChangedAt?: string;     // ISO timestamp of last healthState transition
+  lastOutboundCheckAt?: string;      // last time my outbound health check succeeded
+  lastOutboundCheckFailedAt?: string;// last time my outbound health check failed
+  lastInboundContactAt?: string;     // last time this peer sent me an authenticated message
   // Federation resync snapshot (when gateway URL is re-used with new keys)
   resyncSnapshot?: {
     oldPeerId: string;
