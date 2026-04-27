@@ -1,6 +1,15 @@
 import express from 'express';
+import { verifyCanonical } from './verify.js';
 const app = express();
 app.use(express.json());
+// SECURITY (F-06): Configure proxy trust explicitly so req.ip reflects the
+// real client, and X-Forwarded-For from non-trusted hops is ignored.
+// Default: trust 1 hop (typical: cloudflared / ALB / nginx in front of us).
+// Override via TRUST_PROXY_HOPS env var (number of hops, or 'false' to use
+// the socket address only).
+const trustProxyEnv = (process.env.TRUST_PROXY_HOPS ?? '1').trim();
+const trustProxySetting = trustProxyEnv === 'false' ? false : (Number.isFinite(Number(trustProxyEnv)) ? Number(trustProxyEnv) : 1);
+app.set('trust proxy', trustProxySetting);
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const TTL_MS = 90_000; // 90 seconds
 const CLEANUP_INTERVAL_MS = 60_000; // cleanup every 60 seconds
@@ -41,17 +50,46 @@ setInterval(() => {
     }
 }, CLEANUP_INTERVAL_MS);
 /**
- * Extract caller IP from request.
- * Respects x-forwarded-for (set by ALB/proxies).
+ * SECURITY (F-06): Use req.ip (Express-derived, respects the configured
+ * `trust proxy` setting). Previously this hand-parsed X-Forwarded-For with
+ * no validation, letting any client spoof their published gateway IP.
+ *
+ * `req.ip` returns the leftmost untrusted value in X-Forwarded-For if the
+ * request came through a configured trusted hop, otherwise the socket
+ * address. With trust proxy off it's always the socket.
  */
 function getCallerIp(req) {
-    const forwarded = req.headers['x-forwarded-for'];
-    if (forwarded) {
-        // x-forwarded-for can be a comma-separated list; take the first (original client)
-        const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-        return first.split(',')[0].trim();
+    return req.ip ?? req.socket.remoteAddress ?? '0.0.0.0';
+}
+export function validateSignedRegistration(body, verifyImpl = verifyCanonical) {
+    const { payloadStr, signature } = (body || {});
+    if (typeof payloadStr !== 'string' || !payloadStr || typeof signature !== 'string' || !signature) {
+        return { ok: false, status: 400, error: 'Missing payloadStr or signature' };
     }
-    return req.socket.remoteAddress ?? '0.0.0.0';
+    let parsed;
+    try {
+        parsed = JSON.parse(payloadStr);
+    }
+    catch {
+        return { ok: false, status: 400, error: 'payloadStr is not valid JSON' };
+    }
+    const { pubkey, port, publicUrl } = parsed;
+    if (typeof pubkey !== 'string' || !pubkey) {
+        return { ok: false, status: 400, error: 'pubkey is required and must be a string' };
+    }
+    if (typeof port !== 'number' || port < 1 || port > 65535) {
+        return { ok: false, status: 400, error: 'port is required and must be a number (1-65535)' };
+    }
+    const verifyResult = verifyImpl({ payloadStr, signature }, pubkey);
+    if (!verifyResult.ok) {
+        return { ok: false, status: 401, error: `Signature verification failed: ${verifyResult.reason}` };
+    }
+    return {
+        ok: true,
+        pubkey,
+        port,
+        ...(typeof publicUrl === 'string' && publicUrl ? { publicUrl } : {})
+    };
 }
 // ─────────────────────────────────────────────
 // GET / — health check
@@ -61,21 +99,16 @@ app.get('/', (_req, res) => {
 });
 // ─────────────────────────────────────────────
 // POST /register — register or refresh a peer
+// SECURITY (F-02): requires a signed envelope; the signature proves the
+// caller holds the private key matching the announced pubkey.
 // ─────────────────────────────────────────────
 app.post('/register', (req, res) => {
-    const { pubkey, port, timestamp } = req.body;
-    if (typeof pubkey !== 'string' || !pubkey) {
-        res.status(400).json({ error: 'pubkey is required and must be a string' });
+    const validation = validateSignedRegistration(req.body);
+    if (!validation.ok) {
+        res.status(validation.status).json({ error: validation.error });
         return;
     }
-    if (typeof port !== 'number' || port < 1 || port > 65535) {
-        res.status(400).json({ error: 'port is required and must be a number (1-65535)' });
-        return;
-    }
-    if (typeof timestamp !== 'number') {
-        res.status(400).json({ error: 'timestamp is required and must be a number' });
-        return;
-    }
+    const { pubkey, port } = validation;
     const ip = getCallerIp(req);
     const now = Date.now();
     peers.set(pubkey, { pubkey, ip, port, lastSeen: now });
@@ -122,17 +155,15 @@ app.delete('/peer/:pubkey', (req, res) => {
 });
 // ─────────────────────────────────────────────
 // POST /invite — create a federation invite token
+// SECURITY (F-02): requires a signed envelope; same shape as /register.
 // ─────────────────────────────────────────────
 app.post('/invite', (req, res) => {
-    const { pubkey, port } = req.body;
-    if (typeof pubkey !== 'string' || !pubkey) {
-        res.status(400).json({ error: 'pubkey is required and must be a string' });
+    const validation = validateSignedRegistration(req.body);
+    if (!validation.ok) {
+        res.status(validation.status).json({ error: validation.error });
         return;
     }
-    if (typeof port !== 'number' || port < 1 || port > 65535) {
-        res.status(400).json({ error: 'port is required and must be a number (1-65535)' });
-        return;
-    }
+    const { pubkey, port } = validation;
     const ip = getCallerIp(req);
     const createdAt = Date.now();
     // Generate a unique token (retry on collision)
