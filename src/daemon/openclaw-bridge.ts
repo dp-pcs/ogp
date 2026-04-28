@@ -15,6 +15,7 @@ import { request as httpsRequest } from 'node:https';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { requireConfig } from '../shared/config.js';
+import { shouldRelaxTls } from '../shared/tls.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -198,13 +199,16 @@ async function postJson(params: {
       const reqFn = url.protocol === 'https:' ? httpsRequest : httpRequest;
 
       const ok = await new Promise<boolean>((resolve) => {
+        // SECURITY (F-03): relax cert verification only for loopback targets
+        // (the typical OpenClaw dev setup runs with a self-signed cert on
+        // localhost). For remote OpenClaw URLs, full TLS verification applies.
         const req = reqFn(
           {
             hostname: url.hostname,
             port: url.port || (url.protocol === 'https:' ? 443 : 80),
             path: url.pathname,
             method: 'POST',
-            rejectUnauthorized: false,
+            rejectUnauthorized: !shouldRelaxTls(url.hostname),
             headers: {
               Authorization: `Bearer ${params.token}`,
               'Content-Type': 'application/json',
