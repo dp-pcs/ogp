@@ -17,6 +17,14 @@ export interface ScopeGrant {
   enabled: boolean;
   rateLimit?: RateLimit;
   topics?: string[];                 // For agent-comms: allowed topic prefixes
+  /**
+   * B0032 v0.7.0 — Per-persona scope restriction.
+   * If present and non-empty, this grant only applies to traffic targeted at the
+   * listed persona ids (via `FederationMessage.toAgent`). Absent or empty means
+   * the grant applies to all personas (backward compatible).
+   * Enforcement lives in the Doorman (P6, not yet wired). Wire format only at P2.
+   */
+  personas?: string[];
   expiresAt?: string;                // ISO timestamp for optional expiration
 }
 

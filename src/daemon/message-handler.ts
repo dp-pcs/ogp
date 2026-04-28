@@ -51,7 +51,15 @@ function getWittyRejection(): string {
 export interface FederationMessage {
   intent: string;
   from: string;        // peer ID
-  to: string;          // our peer ID
+  to: string;          // our peer ID — the trust unit (keypair fingerprint)
+  /**
+   * B0032 v0.7.0 — Optional persona-targeting field. Routes the message to a
+   * specific addressable agent persona within the receiving gateway.
+   * Undefined / omitted / empty → route to primary persona (back-compat with
+   * pre-v0.7 peers). Mismatching id → P3 returns 404 unknown-agent.
+   * Routing logic lives in P3, not yet wired. Wire format only at P2.
+   */
+  toAgent?: string;
   nonce: string;       // unique message ID
   timestamp: string;
   payload: any;

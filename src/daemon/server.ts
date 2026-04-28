@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 
 const _require = createRequire(import.meta.url);
 const OGP_VERSION: string = _require('../../package.json').version;
-import { requireConfig, loadConfig, type OGPConfig, getConfigDir } from '../shared/config.js';
+import { requireConfig, loadConfig, type OGPConfig, getConfigDir, synthesizePersonas, type AgentPersona } from '../shared/config.js';
 import { getPublicKey, getPrivateKey } from './keypair.js';
 import {
   addPeer,
@@ -214,6 +214,70 @@ export function validateSignedApproval(
   return { ok: true, parsed };
 }
 
+/**
+ * B0032 v0.7.0 — `/.well-known/ogp` response shape.
+ * Exported so tests (and future framework integrations) can type against it.
+ */
+export interface WellKnownResponse {
+  version: string;
+  displayName: string;
+  email: string;
+  gatewayUrl: string;
+  publicKey: string;
+  capabilities: {
+    intents: string[];
+    features: string[];
+  };
+  endpoints: {
+    request: string;
+    approve: string;
+    message: string;
+    reply: string;
+  };
+  /** B0032 v0.7.0 — Multi-agent personas. Always populated (synthesized for legacy configs). */
+  agents?: AgentPersona[];
+  /** F-12 — Bidirectional health report. Only included when the requester has supplied a valid signed peer-id header. */
+  peerStatus?: Record<string, unknown>;
+}
+
+/**
+ * Build the `/.well-known/ogp` response body. Pure function, exported for tests
+ * and potential reuse from non-Express transports.
+ *
+ * v0.7.0 (B0032) additions:
+ *  - `multi-agent-personas` capability flag (always advertised)
+ *  - `agents[]` array (synthesized via `synthesizePersonas` for legacy configs;
+ *    populated verbatim when explicitly configured via `OGPConfig.agents`)
+ */
+export function buildWellKnownResponse(args: {
+  cfg: OGPConfig;
+  intentNames: string[];
+  publicKey: string;
+  peerStatus?: Record<string, unknown>;
+}): WellKnownResponse {
+  const { cfg, intentNames, publicKey, peerStatus } = args;
+
+  return {
+    version: OGP_VERSION,
+    displayName: cfg.displayName,
+    email: cfg.email,
+    gatewayUrl: cfg.gatewayUrl,
+    publicKey,
+    capabilities: {
+      intents: intentNames,
+      features: ['scope-negotiation', 'reply-callback', 'bidirectional-health', 'multi-agent-personas']
+    },
+    endpoints: {
+      request: `${cfg.gatewayUrl}/federation/request`,
+      approve: `${cfg.gatewayUrl}/federation/approve`,
+      message: `${cfg.gatewayUrl}/federation/message`,
+      reply: `${cfg.gatewayUrl}/federation/reply/:nonce`
+    },
+    agents: synthesizePersonas(cfg),
+    ...(peerStatus ? { peerStatus } : {})
+  };
+}
+
 interface ShutdownDeps {
   disconnectBridge: () => void;
   stopDoormanCleanup: () => void;
@@ -346,24 +410,12 @@ export function startServer(config?: OGPConfig, background = false): void {
       }
     }
 
-    res.json({
-      version: OGP_VERSION,
-      displayName: cfg.displayName,
-      email: cfg.email,
-      gatewayUrl: cfg.gatewayUrl,
+    res.json(buildWellKnownResponse({
+      cfg,
+      intentNames,
       publicKey: getPublicKey(),
-      capabilities: {
-        intents: intentNames,
-        features: ['scope-negotiation', 'reply-callback', 'bidirectional-health']
-      },
-      endpoints: {
-        request: `${cfg.gatewayUrl}/federation/request`,
-        approve: `${cfg.gatewayUrl}/federation/approve`,
-        message: `${cfg.gatewayUrl}/federation/message`,
-        reply: `${cfg.gatewayUrl}/federation/reply/:nonce`
-      },
-      ...(peerStatus ? { peerStatus } : {})
-    });
+      peerStatus
+    }));
   });
 
   // POST /federation/request - Incoming federation request

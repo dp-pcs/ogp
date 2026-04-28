@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 const _require = createRequire(import.meta.url);
 const OGP_VERSION = _require('../../package.json').version;
-import { requireConfig, loadConfig, getConfigDir } from '../shared/config.js';
+import { requireConfig, loadConfig, getConfigDir, synthesizePersonas } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
 import { addPeer, createPendingPeerRecord, derivePeerIdFromPublicKey, findBestPeerForApproval, getPeer, getPeerByUrl, listPeers, removePeer, replacePeersByIdentity, updatePeer } from './peers.js';
 import { listProjectsForPeer } from './projects.js';
@@ -95,6 +95,37 @@ export function validateSignedApproval(body, storedPublicKey, deps) {
         };
     }
     return { ok: true, parsed };
+}
+/**
+ * Build the `/.well-known/ogp` response body. Pure function, exported for tests
+ * and potential reuse from non-Express transports.
+ *
+ * v0.7.0 (B0032) additions:
+ *  - `multi-agent-personas` capability flag (always advertised)
+ *  - `agents[]` array (synthesized via `synthesizePersonas` for legacy configs;
+ *    populated verbatim when explicitly configured via `OGPConfig.agents`)
+ */
+export function buildWellKnownResponse(args) {
+    const { cfg, intentNames, publicKey, peerStatus } = args;
+    return {
+        version: OGP_VERSION,
+        displayName: cfg.displayName,
+        email: cfg.email,
+        gatewayUrl: cfg.gatewayUrl,
+        publicKey,
+        capabilities: {
+            intents: intentNames,
+            features: ['scope-negotiation', 'reply-callback', 'bidirectional-health', 'multi-agent-personas']
+        },
+        endpoints: {
+            request: `${cfg.gatewayUrl}/federation/request`,
+            approve: `${cfg.gatewayUrl}/federation/approve`,
+            message: `${cfg.gatewayUrl}/federation/message`,
+            reply: `${cfg.gatewayUrl}/federation/reply/:nonce`
+        },
+        agents: synthesizePersonas(cfg),
+        ...(peerStatus ? { peerStatus } : {})
+    };
 }
 export function createGracefulShutdownHandler(deps) {
     return async (signal) => {
@@ -196,24 +227,12 @@ export function startServer(config, background = false) {
                 }
             }
         }
-        res.json({
-            version: OGP_VERSION,
-            displayName: cfg.displayName,
-            email: cfg.email,
-            gatewayUrl: cfg.gatewayUrl,
+        res.json(buildWellKnownResponse({
+            cfg,
+            intentNames,
             publicKey: getPublicKey(),
-            capabilities: {
-                intents: intentNames,
-                features: ['scope-negotiation', 'reply-callback', 'bidirectional-health']
-            },
-            endpoints: {
-                request: `${cfg.gatewayUrl}/federation/request`,
-                approve: `${cfg.gatewayUrl}/federation/approve`,
-                message: `${cfg.gatewayUrl}/federation/message`,
-                reply: `${cfg.gatewayUrl}/federation/reply/:nonce`
-            },
-            ...(peerStatus ? { peerStatus } : {})
-        });
+            peerStatus
+        }));
     });
     // POST /federation/request - Incoming federation request
     app.post('/federation/request', async (req, res) => {
