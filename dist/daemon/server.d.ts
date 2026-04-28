@@ -1,4 +1,4 @@
-import { type OGPConfig } from '../shared/config.js';
+import { type OGPConfig, type AgentPersona } from '../shared/config.js';
 import type { ScopeBundle } from './scopes.js';
 /**
  * Validate an inbound /federation/approve body. Pure function, exported for tests.
@@ -86,6 +86,46 @@ export interface RequestValidationOk {
 export type RequestValidation = RequestValidationOk | ApprovalValidationErr;
 export declare function validateSignedRequest(body: any, deps: ApprovalValidationDeps): RequestValidation;
 export declare function validateSignedApproval(body: any, storedPublicKey: string, deps: ApprovalValidationDeps): ApprovalValidation;
+/**
+ * B0032 v0.7.0 — `/.well-known/ogp` response shape.
+ * Exported so tests (and future framework integrations) can type against it.
+ */
+export interface WellKnownResponse {
+    version: string;
+    displayName: string;
+    email: string;
+    gatewayUrl: string;
+    publicKey: string;
+    capabilities: {
+        intents: string[];
+        features: string[];
+    };
+    endpoints: {
+        request: string;
+        approve: string;
+        message: string;
+        reply: string;
+    };
+    /** B0032 v0.7.0 — Multi-agent personas. Always populated (synthesized for legacy configs). */
+    agents?: AgentPersona[];
+    /** F-12 — Bidirectional health report. Only included when the requester has supplied a valid signed peer-id header. */
+    peerStatus?: Record<string, unknown>;
+}
+/**
+ * Build the `/.well-known/ogp` response body. Pure function, exported for tests
+ * and potential reuse from non-Express transports.
+ *
+ * v0.7.0 (B0032) additions:
+ *  - `multi-agent-personas` capability flag (always advertised)
+ *  - `agents[]` array (synthesized via `synthesizePersonas` for legacy configs;
+ *    populated verbatim when explicitly configured via `OGPConfig.agents`)
+ */
+export declare function buildWellKnownResponse(args: {
+    cfg: OGPConfig;
+    intentNames: string[];
+    publicKey: string;
+    peerStatus?: Record<string, unknown>;
+}): WellKnownResponse;
 interface ShutdownDeps {
     disconnectBridge: () => void;
     stopDoormanCleanup: () => void;
