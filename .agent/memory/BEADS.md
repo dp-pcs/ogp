@@ -95,32 +95,49 @@ For real work the human gives you:
 
 **Migrated from**: Global bead `clawd-0gw.1` (2026-04-15)
 
-### B0032 - Multi-Agent Personas
+### B0032 - Multi-Agent Personas (v0.7.0)
 
-**Context**: Currently 1 daemon = 1 identity (keypair + agentName in config). If David wants multiple agents (Junior, ResearchBot, CodingAgent) federating with different peers, he'd need multiple daemons.
+**Status**: Design complete (revision 3, 2026-04-28). Ready for P1 implementation.
+**Design doc**: `docs/MULTI-AGENT-PERSONAS-DESIGN.md` (920+ lines)
+**Architecture context**: `docs/ARCHITECTURE.md`
 
-**Insight**: Federation identity (keypair) is human-level trust. Agent identity (agentName) is metadata on contributions. One daemon could serve multiple agent personas, all tied to the same human.
+**The capability set (5 linked features in v0.7.0):**
+1. Multi-persona advertisement — one federation card lists N agent personas under one keypair
+2. Per-persona inbound routing — `toAgent` field in message envelope routes to a specific persona
+3. Per-persona scope grants — 3D access control (peer × intent × persona)
+4. Framework auto-sync — `ogp config sync-agents` reads OpenClaw `agents/<name>/` to populate personas
+5. Internal peer registry endpoint — localhost-only `/internal/peers` so in-gateway agents can introspect their human's federation graph
 
-**Proposed UX**:
-```bash
-ogp project contribute ... --as-agent "Junior"
-ogp project contribute ... --as-agent "ResearchBot"
-ogp send ... --as-agent "CodingAgent"
-```
+**Decisions locked (8 open questions resolved in revision 3):**
+- `role` enum: `primary | specialist`
+- Optional `displayIcon` field on AgentPersona
+- `hookAgentId` defaults: primary → `'main'`, specialist → `id`
+- Hermes is the trivial single-persona case (no per-agent routing work needed)
+- Default persona-grant scope on federation approval = primary only (privacy-safer; preserves scripted flows)
+- CLI flag style: `--personas a,b,c` (comma-separated, matches `--intents`)
+- Internal endpoint discoverability: push via `~/.ogp-{framework}/internal-config.json`
+- Companion Substack article timing deferred until ship
 
-Or agent profiles in config:
-```yaml
-agents:
-  junior: { agentName: "Junior", organization: "Personal" }
-  research: { agentName: "ResearchBot", organization: "Academia" }
-```
+**10-phase implementation plan** in design doc with dependency graph and three parallel tracks. Estimated 3 weeks single-dev, ~10 working days dispatched in parallel.
 
-**Related**: This also enables Claude Desktop/Code federation without separate daemons - any AI session can use the same local daemon, just speaking as different agent personas.
+**Patent-claim deltas (5 new claim elements vs v0.6.x):**
+- Multi-persona advertisement under one keypair
+- `toAgent` routing field with signed envelope
+- Per-(peer × intent × persona) scope grants — third dimension of access control
+- Framework auto-sync — zero-config persona setup from underlying framework agent registries
+- Read-only internal peer registry endpoint for in-gateway introspection
+
+**Spin-off beads**: B0038 (agent-comms policy per-persona, deferred), B0039 (Hermes multi-internal-agent parity if Hermes evolves), B0040 (per-persona rate limits, v2/v0.8).
+
+**Migrated from**: Global bead, original concept from 2026-04-22 (observation 34691 in claude-mem). Substantially expanded after the multi-agent-routing question came up in the patent disclosure work on 2026-04-28.
 | B0030 | P1 | done | — | Review repo state and identify new, pending, and next actions | davidproctor | Reviewed git state and bead queue; HEAD=ae74cea on main, ready queue contains B0028 only, local pending changes in src/cli/federation.ts and src/daemon/server.ts with matching dist output, found docs/package mismatch for test:project-intents (docs/project-intent-testing.md:6,38,44,53 vs package.json:12-19), verified npm run build and npm test -- --run (14 files, 103 tests). |
 | B0031 | P1 | done | — | Implement enhanced peer identity system with human/agent separation and flexible tags | davidproctor | Implemented complete enhanced peer identity system with human/agent separation and flexible tagging across all 7 phases. Schema changes: src/shared/config.ts (added humanName, agentName, organization, tags to OGPConfig), src/daemon/peers.ts (added same fields to Peer interface, updated PendingPeerInput and createPendingPeerRecord). Setup wizard: src/cli/setup.ts (prompts for identity fields, auto-generates displayName from humanName+agentName). Federation protocol: src/daemon/server.ts (extracts identity from requests), src/cli/federation.ts (sends identity in requests, displays in list with --tag filter). Tag management: src/cli/config.ts (show-identity, set-identity, set-tags, add-tag, remove-tag), src/cli/federation.ts (federationTagPeer, federationUntagPeer). CLI integration: src/cli.ts (registered tag/untag commands, --tag filter on list). Completion: scripts/completion.bash and scripts/completion.zsh (all new commands). Help: src/shared/help.ts (updated config and federation help). Docs: README.md (comprehensive identity management section with examples). Commits: aa6f8ec (phases 1-4), a964aa5 (phases 5-7), e0b1733 (docs). All features tested via npm run build (clean), backward compatible with existing peers. |
-| B0032 | P2 | pending | — | Multi-agent personas: Allow one daemon to speak as multiple agents via --as-agent flag | — | — |
+| B0032 | P1 | in_progress | — | Multi-agent personas v0.7.0: multi-persona advertisement + per-persona scope grants + framework auto-sync + internal peer registry endpoint | davidproctor | Design doc revision 3 landed at docs/MULTI-AGENT-PERSONAS-DESIGN.md (2026-04-28); ARCHITECTURE.md added at docs/ARCHITECTURE.md. All 8 open questions decided (see Decisions table in design doc). Hermes confirmed as single-persona trivial case (no spike needed). Default persona-grant scope = primary-only. Spin-off beads: B0038 (agent-comms policy per-persona), B0039 (Hermes multi-internal-agent if it evolves), B0040 (per-persona rate limits, v2). Ready for P1 implementation per phased plan in design doc §Phased Implementation. |
 | B0033 | P0 | done | — | Security PR1: Signed handshake (F-01, F-04, F-05, F-12). Verify Ed25519 signature + 5min freshness on /federation/request, /federation/approve, /federation/reply/:nonce POST, and the X-OGP-Peer-ID branch of /.well-known/ogp. Hard cutover at 0.7.0. F-01 (approve hijack) closed by verifying against stored peer.publicKey and rejecting fromPublicKey replacement. Add signCanonical/verifyCanonical helpers to shared/signing.ts. See security_fix_plan.md PR1. | davidproctor | Merged as PR #14 (commit c36166c). Version bumped to 0.7.0-rc.1. 51 new unit tests (suite 125→175 green). End-to-end smoke validated: fresh Junior↔Apollo federation handshake completed with `in (reported): OK <1m` on both sides confirming F-12, and an agent-comms -w round-trip confirming F-05. Wire-format hard cutover: existing federations keep working (/federation/message was already signed); new federations require both sides on 0.7.0-rc.1+. |
 | B0034 | P0 | done | — | Security PR2: Rendezvous proof-of-possession + trust proxy (F-02, F-06). Require signed registration body on /register and /invite. Configure app.set('trust proxy', ...) and use req.ip instead of hand-parsing X-Forwarded-For. Vendored verify helper in packages/rendezvous/src/sign.ts. See security_fix_plan.md PR2. | davidproctor | Merged as PR #15. Code: signed envelope on /register + /invite, validateSignedRegistration helper extracted, vendored verify in packages/rendezvous/src/verify.ts (no main-package dep), trust-proxy=1 default with TRUST_PROXY_HOPS env override, req.ip replaces hand-rolled XFF parser. 12 new tests, suite 175→187. Both packages build clean. Production deployment to rendezvous.elelem.expert (ECS service ogp-rendezvous in openclaw-enterprise-dev-cluster, ECR repo ogp/rendezvous) verified to be infrastructurally isolated from clawporate.elelem.expert despite shared ALB+cluster — separate target groups, separate services, separate task-def families. |
 | B0035 | P1 | done | — | Security PR3: TLS verification scoping (F-03). Limit rejectUnauthorized:false to loopback hosts in notify.ts:612 and openclaw-bridge.ts:207. Add OGP_HERMES_INSECURE_TLS env override. See security_fix_plan.md PR3. | davidproctor | Merged as PR #16 (commit 30803bd). New shared/tls.ts shouldRelaxTls helper applied to both call sites. 11 unit tests in test/tls-policy.test.ts cover loopback/remote/env-override/case-insensitivity. Suite 187→198 green. Daemon-only change, no infrastructure or wire-format break. |
 | B0036 | P1 | pending | — | Security PR4: Express baseline hardening (F-08, F-09). Add helmet, app.disable('x-powered-by'), express.json({limit:'64kb'}), express-rate-limit (global + tighter on /federation/request), explicit trust proxy config, terminal 404 + error handler. See security_fix_plan.md PR4. | — | — |
 | B0037 | P2 | pending | — | Security PR5: Cleanup (F-10, F-11). Prefix unverified peer fields with [UNVERIFIED] in pre-approval notifications (server.ts:248-293). Replace bare timeout in executeIntentHandler with AbortController + SIGKILL escalation (message-handler.ts:479-551). See security_fix_plan.md PR5. | — | — |
+| B0038 | P3 | pending | B0032 | Multi-agent personas follow-up: per-persona agent-comms policy overrides (today policy is global default; could be per-persona to support different response levels per agent). | — | — |
+| B0039 | P3 | pending | B0032 | Multi-agent personas follow-up: Hermes per-internal-agent routing parity if Hermes evolves to host multiple internal agents. Currently Hermes is the trivial single-persona case (one runtime = one persona) and v0.7 ships with that simplification. Spike if Hermes architecture changes. | — | — |
+| B0040 | P3 | pending | B0032 | Multi-agent personas follow-up (v0.8/v2): per-persona rate limits. v0.7 keeps rate limits keyed on {peerId}:{intent} to prevent multiplication-by-persona-count abuse. Per-persona rate buckets are a separate question if real-world usage shows the peer-level bucket is too coarse. | — | — |
