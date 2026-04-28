@@ -103,6 +103,130 @@ export interface DelegatedAuthorityConfig {
 }
 
 /**
+ * B0032 v0.7.0 — Multi-agent personas
+ *
+ * A daemon may host multiple addressable agent personas under one Ed25519
+ * keypair. Personas are routing metadata, not separate cryptographic
+ * identities. See docs/MULTI-AGENT-PERSONAS-DESIGN.md for the full design.
+ */
+export type AgentPersonaRole = 'primary' | 'specialist';
+
+export interface AgentPersona {
+  /** Stable persona identifier. Lowercase, alphanumeric + dash/underscore. Used as routing key. */
+  id: string;
+  /** Human-readable name. May contain spaces, capitals. */
+  displayName: string;
+  /**
+   * `primary` — the default routing target when an inbound message has no `toAgent` field.
+   * Exactly one persona MUST be primary. Other personas are `specialist`.
+   */
+  role: AgentPersonaRole;
+  /** Optional emoji or URL for chat UIs. Pure presentation; not enforced. */
+  displayIcon?: string;
+  /** Optional free-text description surfaced by `ogp federation peers --show-agents`. */
+  description?: string;
+  /** Optional capability hints for discoverability. Not enforced. */
+  skills?: string[];
+  /**
+   * Override the framework `agentId` for this persona.
+   * Defaults: primary → `'main'` (back-compat with legacy `agentId: 'main'` hook calls),
+   * specialist → `id`.
+   */
+  hookAgentId?: string;
+}
+
+export type ValidationResult =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+const PERSONA_ID_PATTERN = /^[a-z0-9_-]+$/;
+
+/**
+ * Sanitize a string into a valid persona id.
+ * Lowercases, replaces non-alphanumeric runs with single dashes, trims dashes.
+ * Returns `null` if no valid characters remain.
+ */
+function sanitizePersonaId(input: string): string | null {
+  const cleaned = input
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+/**
+ * Synthesize the persona list for a config.
+ *
+ * If `config.agents` is defined and non-empty, returns it as-is.
+ *
+ * Otherwise synthesizes a single primary persona from legacy fields:
+ * - `agentName` provides the displayName and (sanitized) id
+ * - falls back to `displayName` if `agentName` is missing
+ * - final fallback is id `'main'` so we never produce an empty id
+ *
+ * The synthesized primary always defaults `hookAgentId` to `'main'` to preserve
+ * compatibility with pre-v0.7 daemons that hardcoded `agentId: 'main'` in
+ * OpenClaw hook calls.
+ */
+export function synthesizePersonas(config: OGPConfig): AgentPersona[] {
+  if (config.agents && config.agents.length > 0) {
+    return config.agents;
+  }
+
+  const sourceName = config.agentName?.trim() || config.displayName?.trim() || '';
+  const synthesizedId = sanitizePersonaId(sourceName) ?? 'main';
+  const synthesizedDisplayName = sourceName || 'Agent';
+
+  return [
+    {
+      id: synthesizedId,
+      displayName: synthesizedDisplayName,
+      role: 'primary',
+      hookAgentId: 'main'
+    }
+  ];
+}
+
+/**
+ * Validate a persona array against the v0.7 invariants:
+ * 1. Must have at least one persona
+ * 2. Exactly one persona has role: 'primary'
+ * 3. All persona ids are unique
+ * 4. All persona ids match the format /^[a-z0-9_-]+$/
+ *
+ * Returns `{ ok: true }` if valid, `{ ok: false, reason: <human-readable> }` otherwise.
+ */
+export function validatePersonas(personas: AgentPersona[]): ValidationResult {
+  if (personas.length === 0) {
+    return { ok: false, reason: 'persona array is empty (require at least one primary persona)' };
+  }
+
+  const primaryCount = personas.filter(p => p.role === 'primary').length;
+  if (primaryCount === 0) {
+    return { ok: false, reason: 'no primary persona found (exactly one persona must have role: "primary")' };
+  }
+  if (primaryCount > 1) {
+    return { ok: false, reason: `multiple primary personas found (${primaryCount}); exactly one persona must have role: "primary"` };
+  }
+
+  const ids = new Set<string>();
+  for (const persona of personas) {
+    if (!PERSONA_ID_PATTERN.test(persona.id)) {
+      return {
+        ok: false,
+        reason: `invalid persona id format '${persona.id}' (must match /^[a-z0-9_-]+$/)`
+      };
+    }
+    if (ids.has(persona.id)) {
+      return { ok: false, reason: `duplicate persona id '${persona.id}' (ids must be unique)` };
+    }
+    ids.add(persona.id);
+  }
+
+  return { ok: true };
+}
+
+/**
  * Health check configuration for peer heartbeat monitoring
  */
 export interface HealthCheckConfig {
@@ -128,9 +252,13 @@ export interface OGPConfig {
   // Identity fields
   displayName: string;        // Legacy: kept for backward compatibility
   humanName?: string;         // Human operator name (e.g., "David Proctor")
-  agentName?: string;         // Agent name (e.g., "Junior", "Apollo")
+  agentName?: string;         // Legacy: synthesized into one primary persona when `agents` is unset
   organization?: string;      // Organization (e.g., "Trilogy", "AICOE")
   tags?: string[];           // Flexible tags (e.g., ["work", "production", "client-trilogy"])
+  // B0032 v0.7.0: Multi-agent personas. When set and non-empty, replaces legacy
+  // single-agent identity with N addressable personas under one keypair.
+  // Use `synthesizePersonas(config)` for the runtime fallback that handles both shapes.
+  agents?: AgentPersona[];
   email: string;
   stateDir: string;
   // Agent-comms configuration (optional)
