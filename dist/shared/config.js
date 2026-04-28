@@ -1,6 +1,84 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+const PERSONA_ID_PATTERN = /^[a-z0-9_-]+$/;
+/**
+ * Sanitize a string into a valid persona id.
+ * Lowercases, replaces non-alphanumeric runs with single dashes, trims dashes.
+ * Returns `null` if no valid characters remain.
+ */
+function sanitizePersonaId(input) {
+    const cleaned = input
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return cleaned.length > 0 ? cleaned : null;
+}
+/**
+ * Synthesize the persona list for a config.
+ *
+ * If `config.agents` is defined and non-empty, returns it as-is.
+ *
+ * Otherwise synthesizes a single primary persona from legacy fields:
+ * - `agentName` provides the displayName and (sanitized) id
+ * - falls back to `displayName` if `agentName` is missing
+ * - final fallback is id `'main'` so we never produce an empty id
+ *
+ * The synthesized primary always defaults `hookAgentId` to `'main'` to preserve
+ * compatibility with pre-v0.7 daemons that hardcoded `agentId: 'main'` in
+ * OpenClaw hook calls.
+ */
+export function synthesizePersonas(config) {
+    if (config.agents && config.agents.length > 0) {
+        return config.agents;
+    }
+    const sourceName = config.agentName?.trim() || config.displayName?.trim() || '';
+    const synthesizedId = sanitizePersonaId(sourceName) ?? 'main';
+    const synthesizedDisplayName = sourceName || 'Agent';
+    return [
+        {
+            id: synthesizedId,
+            displayName: synthesizedDisplayName,
+            role: 'primary',
+            hookAgentId: 'main'
+        }
+    ];
+}
+/**
+ * Validate a persona array against the v0.7 invariants:
+ * 1. Must have at least one persona
+ * 2. Exactly one persona has role: 'primary'
+ * 3. All persona ids are unique
+ * 4. All persona ids match the format /^[a-z0-9_-]+$/
+ *
+ * Returns `{ ok: true }` if valid, `{ ok: false, reason: <human-readable> }` otherwise.
+ */
+export function validatePersonas(personas) {
+    if (personas.length === 0) {
+        return { ok: false, reason: 'persona array is empty (require at least one primary persona)' };
+    }
+    const primaryCount = personas.filter(p => p.role === 'primary').length;
+    if (primaryCount === 0) {
+        return { ok: false, reason: 'no primary persona found (exactly one persona must have role: "primary")' };
+    }
+    if (primaryCount > 1) {
+        return { ok: false, reason: `multiple primary personas found (${primaryCount}); exactly one persona must have role: "primary"` };
+    }
+    const ids = new Set();
+    for (const persona of personas) {
+        if (!PERSONA_ID_PATTERN.test(persona.id)) {
+            return {
+                ok: false,
+                reason: `invalid persona id format '${persona.id}' (must match /^[a-z0-9_-]+$/)`
+            };
+        }
+        if (ids.has(persona.id)) {
+            return { ok: false, reason: `duplicate persona id '${persona.id}' (ids must be unique)` };
+        }
+        ids.add(persona.id);
+    }
+    return { ok: true };
+}
 /**
  * Get the config directory (computed dynamically based on OGP_HOME)
  */

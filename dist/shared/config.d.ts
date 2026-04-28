@@ -70,6 +70,68 @@ export interface DelegatedAuthorityConfig {
     peers?: Record<string, DelegatedAuthorityPeerOverride>;
 }
 /**
+ * B0032 v0.7.0 — Multi-agent personas
+ *
+ * A daemon may host multiple addressable agent personas under one Ed25519
+ * keypair. Personas are routing metadata, not separate cryptographic
+ * identities. See docs/MULTI-AGENT-PERSONAS-DESIGN.md for the full design.
+ */
+export type AgentPersonaRole = 'primary' | 'specialist';
+export interface AgentPersona {
+    /** Stable persona identifier. Lowercase, alphanumeric + dash/underscore. Used as routing key. */
+    id: string;
+    /** Human-readable name. May contain spaces, capitals. */
+    displayName: string;
+    /**
+     * `primary` — the default routing target when an inbound message has no `toAgent` field.
+     * Exactly one persona MUST be primary. Other personas are `specialist`.
+     */
+    role: AgentPersonaRole;
+    /** Optional emoji or URL for chat UIs. Pure presentation; not enforced. */
+    displayIcon?: string;
+    /** Optional free-text description surfaced by `ogp federation peers --show-agents`. */
+    description?: string;
+    /** Optional capability hints for discoverability. Not enforced. */
+    skills?: string[];
+    /**
+     * Override the framework `agentId` for this persona.
+     * Defaults: primary → `'main'` (back-compat with legacy `agentId: 'main'` hook calls),
+     * specialist → `id`.
+     */
+    hookAgentId?: string;
+}
+export type ValidationResult = {
+    ok: true;
+} | {
+    ok: false;
+    reason: string;
+};
+/**
+ * Synthesize the persona list for a config.
+ *
+ * If `config.agents` is defined and non-empty, returns it as-is.
+ *
+ * Otherwise synthesizes a single primary persona from legacy fields:
+ * - `agentName` provides the displayName and (sanitized) id
+ * - falls back to `displayName` if `agentName` is missing
+ * - final fallback is id `'main'` so we never produce an empty id
+ *
+ * The synthesized primary always defaults `hookAgentId` to `'main'` to preserve
+ * compatibility with pre-v0.7 daemons that hardcoded `agentId: 'main'` in
+ * OpenClaw hook calls.
+ */
+export declare function synthesizePersonas(config: OGPConfig): AgentPersona[];
+/**
+ * Validate a persona array against the v0.7 invariants:
+ * 1. Must have at least one persona
+ * 2. Exactly one persona has role: 'primary'
+ * 3. All persona ids are unique
+ * 4. All persona ids match the format /^[a-z0-9_-]+$/
+ *
+ * Returns `{ ok: true }` if valid, `{ ok: false, reason: <human-readable> }` otherwise.
+ */
+export declare function validatePersonas(personas: AgentPersona[]): ValidationResult;
+/**
  * Health check configuration for peer heartbeat monitoring
  */
 export interface HealthCheckConfig {
@@ -96,6 +158,7 @@ export interface OGPConfig {
     agentName?: string;
     organization?: string;
     tags?: string[];
+    agents?: AgentPersona[];
     email: string;
     stateDir: string;
     agentComms?: AgentCommsConfig;
