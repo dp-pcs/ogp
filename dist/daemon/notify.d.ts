@@ -33,6 +33,12 @@ export interface NotificationPayload {
      * Conversation ID for threading (for Hermes integration)
      */
     conversationId?: string;
+    /**
+     * B0032 v0.7.0 — Persona-specific OpenClaw `agentId` for the hook payload.
+     * Set by the message handler after persona resolution. Falls through to
+     * legacy `config.agentId || 'main'` when omitted.
+     */
+    hookAgentId?: string;
 }
 export interface EffectiveFederatedHandlingPolicy {
     messageClass: FederatedMessageClass;

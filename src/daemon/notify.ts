@@ -45,6 +45,12 @@ export interface NotificationPayload {
    * Conversation ID for threading (for Hermes integration)
    */
   conversationId?: string;
+  /**
+   * B0032 v0.7.0 — Persona-specific OpenClaw `agentId` for the hook payload.
+   * Set by the message handler after persona resolution. Falls through to
+   * legacy `config.agentId || 'main'` when omitted.
+   */
+  hookAgentId?: string;
 }
 
 /**
@@ -486,7 +492,9 @@ ${payload.text}${
       const hookDelivered = await dispatchAgentHook(taskText, peerName, {
         deliver: deliverToHuman,
         target: deliveryTarget,
-        sessionKey: deliverySessionKey
+        sessionKey: deliverySessionKey,
+        // B0032 v0.7.0 — propagate per-persona hookAgentId from handler
+        agentId: payload.hookAgentId
       });
       if (hookDelivered) {
         if (!deliverToHuman) {

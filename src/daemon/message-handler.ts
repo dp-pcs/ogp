@@ -17,7 +17,13 @@ import {
   createProject,
   addProject
 } from './projects.js';
-import { loadConfig } from '../shared/config.js';
+import {
+  loadConfig,
+  requireConfig,
+  synthesizePersonas,
+  resolveTargetPersona,
+  effectiveHookAgentId
+} from '../shared/config.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 
@@ -150,14 +156,32 @@ export async function handleMessage(
     };
   }
 
+  // 4.5. (B0032 P3) Resolve target persona for multi-agent routing.
+  // Pre-v0.7 messages (no toAgent) route to primary; explicit toAgent must
+  // match a configured persona, otherwise reject with 404 unknown-agent.
+  const cfg = requireConfig();
+  const personas = synthesizePersonas(cfg);
+  const targetPersona = resolveTargetPersona(message.toAgent, personas);
+  if (!targetPersona) {
+    const requested = message.toAgent ?? '<unset>';
+    console.log(`[OGP] Unknown agent persona '${requested}' from peer ${peer.displayName} (${peer.id})`);
+    return {
+      success: false,
+      nonce: message.nonce,
+      error: `Unknown agent: '${requested}' is not a configured persona on this gateway`,
+      statusCode: 404
+    };
+  }
+  const hookAgentId = effectiveHookAgentId(targetPersona);
+
   // 5. Handle agent-comms specially (includes replyTo support)
   if (message.intent === 'agent-comms') {
-    return handleAgentComms(message, peer.displayName);
+    return handleAgentComms(message, peer.displayName, hookAgentId);
   }
 
   // 5.1. Handle project intents specially
   if (message.intent.startsWith('project.')) {
-    return handleProjectIntent(message, peer.displayName);
+    return handleProjectIntent(message, peer.displayName, hookAgentId);
   }
 
   // 6. Execute intent handler if one is registered
@@ -174,10 +198,11 @@ export async function handleMessage(
     }
   }
 
-  // 7. Standard intent handling: Notify OpenClaw
+  // 7. Standard intent handling: Notify OpenClaw (B0032 P3: include resolved hookAgentId)
   const notificationText = formatNotification(message, peer.displayName);
   await notifyOpenClaw({
     text: notificationText,
+    hookAgentId,
     metadata: {
       ogp: {
         from: message.from,
@@ -185,7 +210,9 @@ export async function handleMessage(
         nonce: message.nonce,
         payload: message.payload,
         replyTo: message.replyTo,
-        conversationId: message.conversationId
+        conversationId: message.conversationId,
+        toAgent: message.toAgent,
+        targetPersonaId: targetPersona.id
       }
     }
   });
@@ -207,7 +234,8 @@ export async function handleMessage(
 async function handleFederationResyncResponse(
   message: FederationMessage,
   displayName: string,
-  messageText: string
+  messageText: string,
+  hookAgentId: string  // B0032 P3
 ): Promise<MessageResponse> {
   const { getPeer, updatePeer } = await import('./peers.js');
   const { joinProject } = await import('./projects.js');
@@ -271,6 +299,7 @@ async function handleFederationResyncResponse(
 
     await notifyOpenClaw({
       text: `✓ Restored previous federation config for ${displayName}`,
+      hookAgentId,
       metadata: {
         ogp: {
           from: message.from,
@@ -297,6 +326,7 @@ async function handleFederationResyncResponse(
 
     await notifyOpenClaw({
       text: `${displayName} chose to start with fresh federation settings (previous config discarded)`,
+      hookAgentId,
       metadata: {
         ogp: {
           from: message.from,
@@ -319,6 +349,7 @@ async function handleFederationResyncResponse(
     // Unrecognized response - keep snapshot and ask again
     await notifyOpenClaw({
       text: `${displayName} sent unclear response to resync offer: "${messageText}"`,
+      hookAgentId,
       metadata: {
         ogp: {
           from: message.from,
@@ -344,7 +375,8 @@ async function handleFederationResyncResponse(
  */
 async function handleAgentComms(
   message: FederationMessage,
-  displayName: string
+  displayName: string,
+  hookAgentId: string  // B0032 P3: persona-resolved OpenClaw agentId
 ): Promise<MessageResponse> {
   const payload = message.payload || {};
   const topic = payload.topic || 'general';
@@ -353,7 +385,7 @@ async function handleAgentComms(
 
   // Handle federation resync responses specially
   if (topic === 'federation-resync') {
-    return handleFederationResyncResponse(message, displayName, messageText);
+    return handleFederationResyncResponse(message, displayName, messageText, hookAgentId);
   }
 
   // Get effective response policy for this peer and topic
@@ -393,6 +425,7 @@ async function handleAgentComms(
     const previewClause = preview ? ` They said: "${preview}"` : '';
     await notifyOpenClaw({
       text: `Hey — ${displayName} just tried to send you a message on topic "${topic}" but I blocked it because that topic isn't on your allow-list.${previewClause} If you want to let them through on "${topic}", just say the word and I'll enable it.`,
+      hookAgentId,
       metadata: {
         ogp: {
           from: message.from,
@@ -425,6 +458,7 @@ async function handleAgentComms(
 
   await notifyOpenClaw({
     text: notificationText,
+    hookAgentId,
     peerId: message.from,
     peerDisplayName: displayName,
     intent: 'agent-comms',
@@ -570,7 +604,8 @@ async function executeIntentHandler(
  */
 async function handleProjectIntent(
   message: FederationMessage,
-  displayName: string
+  displayName: string,
+  hookAgentId: string  // B0032 P3: persona-resolved OpenClaw agentId
 ): Promise<MessageResponse> {
   const config = loadConfig();
   if (!config) {
@@ -587,16 +622,16 @@ async function handleProjectIntent(
   try {
     switch (message.intent) {
       case 'project.join':
-        return await handleProjectJoin(message, displayName, payload);
+        return await handleProjectJoin(message, displayName, payload, hookAgentId);
 
       case 'project.contribute':
-        return await handleProjectContribute(message, displayName, payload);
+        return await handleProjectContribute(message, displayName, payload, hookAgentId);
 
       case 'project.query':
-        return await handleProjectQuery(message, displayName, payload);
+        return await handleProjectQuery(message, displayName, payload, hookAgentId);
 
       case 'project.status':
-        return await handleProjectStatus(message, displayName, payload);
+        return await handleProjectStatus(message, displayName, payload, hookAgentId);
 
       default:
         return {
@@ -623,7 +658,8 @@ async function handleProjectIntent(
 async function handleProjectJoin(
   message: FederationMessage,
   displayName: string,
-  payload: any
+  payload: any,
+  hookAgentId: string  // B0032 P3
 ): Promise<MessageResponse> {
   const { projectId, projectName, projectDescription } = payload;
 
@@ -656,6 +692,7 @@ async function handleProjectJoin(
     const notificationText = `[OGP Project] ${displayName} joined project '${projectName}' (${projectId})`;
     await notifyOpenClaw({
       text: notificationText,
+      hookAgentId,
       metadata: {
         ogp: {
           from: message.from,
@@ -694,7 +731,8 @@ async function handleProjectJoin(
 async function handleProjectContribute(
   message: FederationMessage,
   displayName: string,
-  payload: any
+  payload: any,
+  hookAgentId: string  // B0032 P3
 ): Promise<MessageResponse> {
   const { projectId, summary, metadata, authorIdentity } = payload;
   const entryType = payload.entryType || payload.topic;
@@ -761,6 +799,7 @@ async function handleProjectContribute(
     const notificationText = `[OGP Project] ${displayName} contributed to '${project.name}' entry type '${entryType}': ${summary}`;
     await notifyOpenClaw({
       text: notificationText,
+      hookAgentId,
       metadata: {
         ogp: {
           from: message.from,
@@ -804,7 +843,8 @@ async function handleProjectContribute(
 async function handleProjectQuery(
   message: FederationMessage,
   displayName: string,
-  payload: any
+  payload: any,
+  hookAgentId: string  // B0032 P3
 ): Promise<MessageResponse> {
   const { projectId, authorId, limit = 20 } = payload;
   const entryType = payload.entryType || payload.topic;
@@ -864,6 +904,7 @@ async function handleProjectQuery(
   const notificationText = `[OGP Project] ${displayName} queried project '${project.name}' for ${queryDescription} contributions (${contributions.length} found)`;
   await notifyOpenClaw({
     text: notificationText,
+    hookAgentId,
     metadata: {
       ogp: {
         from: message.from,
@@ -903,7 +944,8 @@ async function handleProjectQuery(
 async function handleProjectStatus(
   message: FederationMessage,
   displayName: string,
-  payload: any
+  payload: any,
+  hookAgentId: string  // B0032 P3
 ): Promise<MessageResponse> {
   const { projectId } = payload;
 
@@ -940,6 +982,7 @@ async function handleProjectStatus(
   const notificationText = `[OGP Project] ${displayName} requested status for project '${project.name}' (${statusData.topics.length} topics)`;
   await notifyOpenClaw({
     text: notificationText,
+    hookAgentId,
     metadata: {
       ogp: {
         from: message.from,

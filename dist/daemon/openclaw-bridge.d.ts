@@ -14,6 +14,12 @@ type HookDispatchOptions = {
     deliver?: boolean;
     target?: DeliveryTarget;
     sessionKey?: string;
+    /**
+     * B0032 v0.7.0 — Override the OpenClaw `agentId` in the hook payload.
+     * When set (non-empty), takes precedence over `config.agentId`. When omitted,
+     * falls through to the legacy `config.agentId || 'main'` behavior.
+     */
+    agentId?: string;
 };
 /**
  * Connect bridge (no-op for request-based implementation)

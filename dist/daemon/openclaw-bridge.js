@@ -216,7 +216,11 @@ export async function dispatchAgentHook(message, from, options) {
         body: {
             message,
             name: 'OGP Federation',
-            agentId: config.agentId || 'main',
+            // B0032 v0.7.0: explicit per-persona agentId override takes precedence.
+            // Falls through to legacy config.agentId || 'main' for back-compat.
+            agentId: (options?.agentId && options.agentId.length > 0)
+                ? options.agentId
+                : (config.agentId || 'main'),
             wakeMode: 'now',
             deliver: options?.deliver ?? true,
             ...(requestedSessionKey ? { sessionKey: requestedSessionKey } : {}),
