@@ -40,12 +40,29 @@ vi.mock('../src/daemon/peers.js', () => ({
   updatePeer: vi.fn()
 }));
 
-vi.mock('../src/shared/config.js', () => ({
-  getConfigDir: vi.fn(() => '/tmp/ogp-test'),
-  ensureConfigDir: vi.fn(),
-  loadConfig: vi.fn(() => null),
-  saveConfig: vi.fn()
-}));
+vi.mock('../src/shared/config.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/shared/config.js')>('../src/shared/config.js');
+  return {
+    ...actual,
+    getConfigDir: vi.fn(() => '/tmp/ogp-test'),
+    ensureConfigDir: vi.fn(),
+    loadConfig: vi.fn(() => null),
+    saveConfig: vi.fn(),
+    // B0032 P3: handleMessage now calls requireConfig() for persona resolution.
+    // Provide a minimal config so the call succeeds and synthesizePersonas falls
+    // back to a single primary persona for back-compat.
+    requireConfig: vi.fn(() => ({
+      daemonPort: 18790,
+      openclawUrl: '',
+      openclawToken: '',
+      gatewayUrl: 'https://test.example.com',
+      displayName: 'Test',
+      email: 'test@example.com',
+      stateDir: '/tmp/ogp-test',
+      agentName: 'Junior'
+    }))
+  };
+});
 
 vi.mock('../src/shared/signing.js', () => ({
   verifyObject: vi.fn(() => true),

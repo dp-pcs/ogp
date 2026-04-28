@@ -28,6 +28,12 @@ type HookDispatchOptions = {
   deliver?: boolean;
   target?: DeliveryTarget;
   sessionKey?: string;
+  /**
+   * B0032 v0.7.0 — Override the OpenClaw `agentId` in the hook payload.
+   * When set (non-empty), takes precedence over `config.agentId`. When omitted,
+   * falls through to the legacy `config.agentId || 'main'` behavior.
+   */
+  agentId?: string;
 };
 
 interface OpenClawHooksConfigSnapshot {
@@ -293,7 +299,11 @@ export async function dispatchAgentHook(
     body: {
       message,
       name: 'OGP Federation',
-      agentId: config.agentId || 'main',
+      // B0032 v0.7.0: explicit per-persona agentId override takes precedence.
+      // Falls through to legacy config.agentId || 'main' for back-compat.
+      agentId: (options?.agentId && options.agentId.length > 0)
+        ? options.agentId
+        : (config.agentId || 'main'),
       wakeMode: 'now',
       deliver: options?.deliver ?? true,
       ...(requestedSessionKey ? { sessionKey: requestedSessionKey } : {}),

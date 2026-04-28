@@ -327,7 +327,9 @@ ${payload.text}${handlingGuidance ? `\n\n[OGP Handling Policy]\n${handlingGuidan
             const hookDelivered = await dispatchAgentHook(taskText, peerName, {
                 deliver: deliverToHuman,
                 target: deliveryTarget,
-                sessionKey: deliverySessionKey
+                sessionKey: deliverySessionKey,
+                // B0032 v0.7.0 — propagate per-persona hookAgentId from handler
+                agentId: payload.hookAgentId
             });
             if (hookDelivered) {
                 if (!deliverToHuman) {

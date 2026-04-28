@@ -122,6 +122,29 @@ export type ValidationResult = {
  */
 export declare function synthesizePersonas(config: OGPConfig): AgentPersona[];
 /**
+ * Resolve which persona an inbound message is targeting.
+ *
+ * - Empty / undefined / null `toAgent` → return the first primary persona.
+ * - Exact id match → return that persona.
+ * - No match → return null (caller should reject with 404 unknown-agent).
+ * - Empty personas array → return null (no primary to fall back to).
+ *
+ * Defensive: returns the first primary if multiple exist (validatePersonas should
+ * have caught that, but this function never throws).
+ */
+export declare function resolveTargetPersona(toAgent: string | null | undefined, personas: AgentPersona[]): AgentPersona | null;
+/**
+ * Compute the effective `hookAgentId` for a persona — the value that gets
+ * passed as `body.agentId` in the POST to OpenClaw's `/hooks/agent`.
+ *
+ * Defaulting (decision #3 in the design doc):
+ * - Explicit `persona.hookAgentId` (non-empty) → that value
+ * - Primary persona without explicit override → 'main' (back-compat with
+ *   pre-v0.7 daemons that hardcoded `agentId: 'main'`)
+ * - Specialist persona without explicit override → `persona.id`
+ */
+export declare function effectiveHookAgentId(persona: AgentPersona): string;
+/**
  * Validate a persona array against the v0.7 invariants:
  * 1. Must have at least one persona
  * 2. Exactly one persona has role: 'primary'
