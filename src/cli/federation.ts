@@ -20,6 +20,7 @@ import { loadIntents } from '../daemon/intent-registry.js';
 import { loadMetaConfig } from '../shared/meta-config.js';
 import { logActivity } from '../daemon/agent-comms.js';
 import { deliverLocalSessionText } from '../daemon/notify.js';
+import { validateTargetAgent } from './agent-targeting.js';
 
 /**
  * Expand tilde in paths
@@ -962,7 +963,8 @@ export async function federationSend(
   peerId: string,
   intent: string,
   payloadJson: string,
-  timeoutMs?: number
+  timeoutMs?: number,
+  toAgent?: string
 ): Promise<any | null> {
   const config = requireConfig();
 
@@ -986,6 +988,18 @@ export async function federationSend(
     return null;
   }
 
+  // B0032 P4: capability check before honoring --to-agent.
+  if (toAgent) {
+    const targeting = await validateTargetAgent(
+      { id: peer.id, gatewayUrl: peer.gatewayUrl, displayName: peer.displayName },
+      toAgent
+    );
+    if (!targeting.ok) {
+      console.error(targeting.reason);
+      return null;
+    }
+  }
+
   const payload = JSON.parse(payloadJson);
 
   const keypair = loadOrGenerateKeyPair();
@@ -996,6 +1010,7 @@ export async function federationSend(
     intent,
     from: ourId,
     to: peerId,
+    ...(toAgent ? { toAgent } : {}),
     nonce: crypto.randomUUID(),
     timestamp: new Date().toISOString(),
     payload
@@ -1341,6 +1356,7 @@ export async function federationSendAgentComms(
     conversationId?: string;
     waitForReply?: boolean;
     replyTimeout?: number;
+    toAgent?: string;
   } = {}
 ): Promise<void> {
   const config = requireConfig();
@@ -1365,6 +1381,18 @@ export async function federationSendAgentComms(
     return;
   }
 
+  // B0032 P4: capability check before honoring --to-agent.
+  if (options.toAgent) {
+    const targeting = await validateTargetAgent(
+      { id: peer.id, gatewayUrl: peer.gatewayUrl, displayName: peer.displayName },
+      options.toAgent
+    );
+    if (!targeting.ok) {
+      console.error(targeting.reason);
+      return;
+    }
+  }
+
   const keypair = loadOrGenerateKeyPair();
   // Use 32-char public key prefix as our ID (avoids Ed25519 DER header collision with 16-char)
   const ourId = keypair.publicKey.substring(0, 32);
@@ -1380,6 +1408,7 @@ export async function federationSendAgentComms(
     intent: 'agent-comms',
     from: ourId,
     to: peerId,
+    ...(options.toAgent ? { toAgent: options.toAgent } : {}),
     nonce,
     timestamp: new Date().toISOString(),
     replyTo,

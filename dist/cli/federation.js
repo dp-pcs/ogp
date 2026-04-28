@@ -11,6 +11,7 @@ import { loadIntents } from '../daemon/intent-registry.js';
 import { loadMetaConfig } from '../shared/meta-config.js';
 import { logActivity } from '../daemon/agent-comms.js';
 import { deliverLocalSessionText } from '../daemon/notify.js';
+import { validateTargetAgent } from './agent-targeting.js';
 /**
  * Expand tilde in paths
  */
@@ -830,7 +831,7 @@ export async function federationRemove(peerId) {
     removePeer(peerId);
     console.log(`✓ Removed peer: ${peerId} (${peer.displayName})`);
 }
-export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
+export async function federationSend(peerId, intent, payloadJson, timeoutMs, toAgent) {
     const config = requireConfig();
     // Resolve peer identifier (alias, ID, or public key)
     const resolvedId = resolvePeerId(peerId);
@@ -848,6 +849,14 @@ export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
         console.error(`Peer ${peerId} is not approved`);
         return null;
     }
+    // B0032 P4: capability check before honoring --to-agent.
+    if (toAgent) {
+        const targeting = await validateTargetAgent({ id: peer.id, gatewayUrl: peer.gatewayUrl, displayName: peer.displayName }, toAgent);
+        if (!targeting.ok) {
+            console.error(targeting.reason);
+            return null;
+        }
+    }
     const payload = JSON.parse(payloadJson);
     const keypair = loadOrGenerateKeyPair();
     // BUILD-111: Use public key prefix as our ID (not hostname:port)
@@ -856,6 +865,7 @@ export async function federationSend(peerId, intent, payloadJson, timeoutMs) {
         intent,
         from: ourId,
         to: peerId,
+        ...(toAgent ? { toAgent } : {}),
         nonce: crypto.randomUUID(),
         timestamp: new Date().toISOString(),
         payload
@@ -1170,6 +1180,14 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
         console.error(`Peer ${peerId} is not approved`);
         return;
     }
+    // B0032 P4: capability check before honoring --to-agent.
+    if (options.toAgent) {
+        const targeting = await validateTargetAgent({ id: peer.id, gatewayUrl: peer.gatewayUrl, displayName: peer.displayName }, options.toAgent);
+        if (!targeting.ok) {
+            console.error(targeting.reason);
+            return;
+        }
+    }
     const keypair = loadOrGenerateKeyPair();
     // Use 32-char public key prefix as our ID (avoids Ed25519 DER header collision with 16-char)
     const ourId = keypair.publicKey.substring(0, 32);
@@ -1183,6 +1201,7 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
         intent: 'agent-comms',
         from: ourId,
         to: peerId,
+        ...(options.toAgent ? { toAgent: options.toAgent } : {}),
         nonce,
         timestamp: new Date().toISOString(),
         replyTo,

@@ -609,8 +609,9 @@ federation
     .argument('<peer-id>', 'Peer ID')
     .argument('<intent>', 'Intent name')
     .argument('<payload>', 'Payload as JSON string')
-    .action(async (peerId, intent, payload) => {
-    await federationSend(peerId, intent, payload);
+    .option('--to-agent <persona>', 'Target a specific persona on the peer (requires multi-agent-personas capability)')
+    .action(async (peerId, intent, payload, options) => {
+    await federationSend(peerId, intent, payload, undefined, options.toAgent);
 });
 federation
     .command('scopes')
@@ -644,12 +645,14 @@ federation
     .option('-c, --conversation <id>', 'Conversation ID for threading')
     .option('-w, --wait', 'Wait for reply')
     .option('-t, --timeout <ms>', 'Reply timeout in milliseconds', '30000')
+    .option('--to-agent <persona>', 'Target a specific persona on the peer (requires multi-agent-personas capability)')
     .action(async (peerId, topic, message, options) => {
     await federationSendAgentComms(peerId, topic, message, {
         priority: options.priority,
         conversationId: options.conversation,
         waitForReply: options.wait,
-        replyTimeout: parseInt(options.timeout, 10)
+        replyTimeout: parseInt(options.timeout, 10),
+        toAgent: options.toAgent
     });
 });
 program
@@ -876,8 +879,13 @@ project
     .argument('<summary>', 'Summary of the contribution')
     .option('--metadata <json>', 'Additional structured data as JSON')
     .option('--local-only', 'Skip auto-push to federated peers')
+    .option('--to-agent <persona>', 'Target a specific persona on each peer auto-push target (requires multi-agent-personas capability)')
     .action(async (projectId, entryType, summary, options) => {
-    await projectContribute(projectId, entryType, summary, { ...options, localOnly: options.localOnly });
+    await projectContribute(projectId, entryType, summary, {
+        ...options,
+        localOnly: options.localOnly,
+        toAgent: options.toAgent
+    });
 });
 project
     .command('query')
@@ -922,6 +930,7 @@ project
     .argument('<type>', 'Entry type (e.g., decision, task, note)')
     .argument('<summary>', 'Contribution summary')
     .option('--metadata <json>', 'Additional structured data as JSON')
+    .option('--to-agent <persona>', 'Target a specific persona on the peer (requires multi-agent-personas capability)')
     .action(async (peerId, projectId, entryType, summary, options) => {
     await projectSendContribution(peerId, projectId, entryType, summary, options);
 });
