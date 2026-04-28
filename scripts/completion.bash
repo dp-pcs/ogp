@@ -43,6 +43,16 @@ _ogp_completion() {
       return 0
     fi
 
+    # --to-agent (B0032 v0.7.0): targets a specific persona on the peer.
+    # Available on: federation send, federation agent
+    if [[ "$subcmd" == "send" || "$subcmd" == "agent" ]]; then
+      if [[ "$cur" == --* ]]; then
+        opts="--to-agent"
+        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        return 0
+      fi
+    fi
+
     # For federation commands that need peer-id, we could add dynamic peer completion here
     # TODO: ogp federation list --quiet to get peer IDs/aliases
     return 0
@@ -109,6 +119,20 @@ _ogp_completion() {
       opts="create join list remove contribute query status request-join send-contribution query-peer status-peer delete"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
+    fi
+
+    # --to-agent (B0032 v0.7.0): targets a specific persona on the peer.
+    # Available on: project contribute (auto-push), project send-contribution
+    if [[ "$subcmd" == "contribute" || "$subcmd" == "send-contribution" ]]; then
+      if [[ "$cur" == --* ]]; then
+        if [ "$subcmd" = "contribute" ]; then
+          opts="--metadata --local-only --to-agent"
+        else
+          opts="--metadata --to-agent"
+        fi
+        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        return 0
+      fi
     fi
     return 0
   fi

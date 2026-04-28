@@ -127,7 +127,8 @@ _ogp_federation() {
           _arguments \
             '1:peer-id:' \
             '2:intent:' \
-            '3:payload:'
+            '3:payload:' \
+            '--to-agent[Target a specific persona on the peer]:persona:'
           ;;
         grant)
           _arguments \
@@ -144,7 +145,8 @@ _ogp_federation() {
             '(-p --priority)'{-p,--priority}'[Priority level]:priority:(low normal high)' \
             '(-c --conversation)'{-c,--conversation}'[Conversation ID]:conversation-id:' \
             '(-w --wait)'{-w,--wait}'[Wait for reply]' \
-            '(-t --timeout)'{-t,--timeout}'[Reply timeout in milliseconds]:timeout:'
+            '(-t --timeout)'{-t,--timeout}'[Reply timeout in milliseconds]:timeout:' \
+            '--to-agent[Target a specific persona on the peer]:persona:'
           ;;
       esac
       ;;
@@ -340,7 +342,8 @@ _ogp_project() {
             '2:type:' \
             '3:summary:' \
             '--metadata[Additional structured data as JSON]:metadata:' \
-            '--local-only[Skip auto-push to federated peers]'
+            '--local-only[Skip auto-push to federated peers]' \
+            '--to-agent[Target a persona on each peer auto-push target]:persona:'
           ;;
         query)
           _arguments \
@@ -364,7 +367,8 @@ _ogp_project() {
             '2:project-id:' \
             '3:type:' \
             '4:summary:' \
-            '--metadata[Additional structured data as JSON]:metadata:'
+            '--metadata[Additional structured data as JSON]:metadata:' \
+            '--to-agent[Target a specific persona on the peer]:persona:'
           ;;
         query-peer)
           _arguments \

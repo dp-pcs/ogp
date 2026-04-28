@@ -97,7 +97,8 @@ describe('projectContribute membership-scoped sync', () => {
       'member-peer',
       'project.contribute',
       expect.stringContaining('"entryType":"progress"'),
-      5000
+      5000,
+      undefined
     );
     expect(mocks.federationSend).not.toHaveBeenCalledWith(
       'non-member-peer',

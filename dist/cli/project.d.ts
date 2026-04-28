@@ -5,6 +5,7 @@ interface ProjectJoinOptions {
 interface ProjectContributeOptions {
     metadata?: string;
     localOnly?: boolean;
+    toAgent?: string;
 }
 interface ProjectQueryOptions {
     entryType?: string;

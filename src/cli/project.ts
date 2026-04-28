@@ -79,6 +79,7 @@ interface ProjectJoinOptions {
 interface ProjectContributeOptions {
   metadata?: string; // JSON string
   localOnly?: boolean; // skip auto-push to peers
+  toAgent?: string; // B0032 P4: target persona on peer (requires multi-agent-personas capability)
 }
 
 interface ProjectQueryOptions {
@@ -318,7 +319,10 @@ export async function projectContribute(
       let pushed = 0;
       for (const peer of peers) {
         try {
-          await federationSend(peer.id, 'project.contribute', payload, 5000);
+          // B0032 P4: --to-agent applies uniformly to all auto-push targets.
+          // If a peer doesn't support multi-agent-personas, federationSend logs
+          // and skips that peer (returns null) without aborting the whole loop.
+          await federationSend(peer.id, 'project.contribute', payload, 5000, options.toAgent);
           pushed++;
         } catch {
           // Peer unreachable — skip silently, contribution saved locally
@@ -589,7 +593,17 @@ export async function projectSendContribution(
   console.log(`Sending contribution to project '${projectId}' [${entryType}] to peer '${peerId}'...`);
 
   try {
-    await federationSend(peerId, 'project.contribute', JSON.stringify(payload));
+    const result = await federationSend(
+      peerId,
+      'project.contribute',
+      JSON.stringify(payload),
+      undefined,
+      options.toAgent
+    );
+    if (result === null) {
+      // federationSend logged the failure (peer unknown, capability missing, etc.)
+      process.exit(1);
+    }
     console.log(`✓ Contribution sent to peer '${peerId}'`);
   } catch (err) {
     console.error('Error sending contribution:', err);
