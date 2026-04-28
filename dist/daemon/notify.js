@@ -2,6 +2,7 @@ import { requireConfig } from '../shared/config.js';
 import crypto from 'node:crypto';
 import { dispatchAgentHook, injectMessage } from './openclaw-bridge.js';
 import { sendReply } from './reply-handler.js';
+import { shouldRelaxTls } from '../shared/tls.js';
 /**
  * Resolve the notification target for a given agent.
  * Priority:
@@ -425,12 +426,16 @@ class HermesBackend {
                             const url = new URL(webhookUrl);
                             const isHttps = url.protocol === 'https:';
                             const reqFn = isHttps ? httpsRequest : httpRequest;
+                            // SECURITY (F-03): TLS verification is relaxed only for loopback
+                            // (typical local Hermes dev setup). Remote Hermes URLs get full
+                            // certificate verification. Operators who deliberately point at
+                            // a remote self-signed Hermes can opt in via OGP_HERMES_INSECURE_TLS=1.
                             const req = reqFn({
                                 hostname: url.hostname,
                                 port: url.port || (isHttps ? 443 : 80),
                                 path: url.pathname,
                                 method: 'POST',
-                                rejectUnauthorized: false,
+                                rejectUnauthorized: !shouldRelaxTls(url.hostname, 'OGP_HERMES_INSECURE_TLS'),
                                 headers: {
                                     'Content-Type': 'application/json',
                                     'X-Hub-Signature-256': `sha256=${signature}`,
