@@ -287,8 +287,23 @@ export function addPeer(peer: Peer): boolean {
     return savePeers(peers);
   }
 
+  const preserveSource = matches
+    .filter((candidate) => candidate.publicKey && peer.publicKey && candidate.publicKey === peer.publicKey)
+    .sort((a, b) => {
+      const aScore =
+        (a.status === 'approved' ? 4 : 0) +
+        (a.receivedScopes ? 2 : 0) +
+        (a.grantedScopes ? 1 : 0);
+      const bScore =
+        (b.status === 'approved' ? 4 : 0) +
+        (b.receivedScopes ? 2 : 0) +
+        (b.grantedScopes ? 1 : 0);
+      return bScore - aScore;
+    })[0];
+
   const preservedAlias = peer.alias ?? matches.find((candidate) => candidate.alias)?.alias;
-  const replacement = preservedAlias ? { ...peer, alias: preservedAlias } : peer;
+  const mergedPeer = preserveSource ? { ...preserveSource, ...peer } : peer;
+  const replacement = preservedAlias ? { ...mergedPeer, alias: preservedAlias } : mergedPeer;
   const filtered = peers.filter(
     (existingPeer) => !matches.some((candidate) => candidate.id === existingPeer.id)
   );
@@ -352,8 +367,32 @@ export function findBestPeerForApproval(identity: PeerIdentityLookup): Peer | nu
 
 export function replacePeersByIdentity(identity: PeerIdentityLookup, replacement: Peer): boolean {
   const peers = loadPeers();
+  const matches = peers.filter((peer) => matchesPeerIdentity(peer, identity));
   const filtered = peers.filter((peer) => !matchesPeerIdentity(peer, identity));
-  filtered.push(replacement);
+
+  // Preserve richer relationship state when collapsing duplicate records for the
+  // same cryptographic identity. This avoids wiping fields like receivedScopes,
+  // grantedScopes, alias, responsePolicy, and health history if a later
+  // pending/approval record is thinner than the previously-approved record.
+  //
+  // Only preserve from matches with the exact same publicKey. If the key
+  // changed, that is a different trust identity and should not inherit the
+  // prior relationship state automatically.
+  const preserveSource = matches
+    .filter((peer) => peer.publicKey && replacement.publicKey && peer.publicKey === replacement.publicKey)
+    .sort((a, b) => {
+      const aScore =
+        (a.status === 'approved' ? 4 : 0) +
+        (a.receivedScopes ? 2 : 0) +
+        (a.grantedScopes ? 1 : 0);
+      const bScore =
+        (b.status === 'approved' ? 4 : 0) +
+        (b.receivedScopes ? 2 : 0) +
+        (b.grantedScopes ? 1 : 0);
+      return bScore - aScore;
+    })[0];
+
+  filtered.push(preserveSource ? { ...preserveSource, ...replacement } : replacement);
   return savePeers(filtered);
 }
 
