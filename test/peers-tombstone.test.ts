@@ -203,4 +203,71 @@ describe('peer tombstone persistence', () => {
       gatewayUrl: 'https://junior.example.com'
     });
   });
+
+  it('preserves richer scope state from an approved duplicate with the same public key', () => {
+    const publicKey = 'd'.repeat(64);
+    const canonicalId = derivePeerIdFromPublicKey(publicKey);
+    const shortId = publicKey.substring(0, 16);
+
+    addPeer({
+      id: canonicalId,
+      displayName: 'OGP Aleph',
+      email: 'stephen@example.com',
+      gatewayUrl: 'https://ogp-aleph.aicoe.fit',
+      publicKey,
+      status: 'approved',
+      requestedAt: '2026-05-01T00:00:00.000Z',
+      approvedAt: '2026-05-01T00:00:00.000Z',
+      alias: 'Stephen',
+      receivedScopes: {
+        version: '0.2.0',
+        grantedAt: '2026-05-01T00:00:00.000Z',
+        scopes: [{ intent: 'agent-comms', enabled: true }]
+      },
+      grantedScopes: {
+        version: '0.2.0',
+        grantedAt: '2026-05-01T00:00:00.000Z',
+        scopes: [{ intent: 'message', enabled: true }]
+      }
+    } as Peer);
+
+    addPeer(createPendingPeerRecord({
+      id: shortId,
+      displayName: 'OGP Aleph',
+      email: 'stephen@example.com',
+      gatewayUrl: 'https://ogp-aleph.aicoe.fit',
+      publicKey,
+      agentId: 'main',
+      requestedAt: '2026-05-01T01:00:00.000Z'
+    }));
+
+    const matched = findBestPeerForApproval({
+      peerId: canonicalId,
+      gatewayUrl: 'https://ogp-aleph.aicoe.fit',
+      publicKey
+    });
+
+    expect(replacePeersByIdentity(
+      {
+        peerId: matched?.id,
+        gatewayUrl: 'https://ogp-aleph.aicoe.fit',
+        publicKey
+      },
+      {
+        ...matched!,
+        id: canonicalId,
+        status: 'approved',
+        approvedAt: '2026-05-01T01:05:00.000Z'
+      }
+    )).toBe(true);
+
+    const peer = listPeers()[0];
+    expect(peer).toMatchObject({
+      id: canonicalId,
+      status: 'approved',
+      alias: 'Stephen'
+    });
+    expect(peer.receivedScopes?.scopes.map(s => s.intent)).toEqual(['agent-comms']);
+    expect(peer.grantedScopes?.scopes.map(s => s.intent)).toEqual(['message']);
+  });
 });
