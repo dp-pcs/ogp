@@ -1,8 +1,8 @@
 ---
 skill_name: ogp-expose
-version: 0.6.0
-description: Expose OGP via a public HTTPS endpoint, usually a stable Cloudflare hostname or named tunnel. Use when the user wants to verify or fix gateway reachability, align `gatewayUrl` with the real public endpoint, or set up temporary cloudflared/ngrok exposure for testing.
-trigger: Use when the user wants to expose their OGP daemon to the internet, get a public URL for federation, or set up a tunnel for peer discovery.
+version: 0.7.0
+description: Expose OGP via a public HTTPS endpoint, usually a stable Cloudflare hostname or named tunnel. Use when the user wants to list running tunnels, verify or fix gateway reachability, align `gatewayUrl` with the real public endpoint, or set up temporary cloudflared/ngrok exposure for testing.
+trigger: Use when the user wants to see what tunnels are running, expose their OGP daemon to the internet, get a public URL for federation, or set up a tunnel for peer discovery.
 requires:
   bins:
     - ogp
@@ -24,7 +24,7 @@ requires:
 
 **Tunnels are optional — and often more private than alternatives.**
 
-`ogp expose` can create a temporary public URL for your OGP daemon. This is one approach, not the only approach. You can expose your gateway however you prefer:
+`ogp tunnel start` can create a temporary public URL for your OGP daemon. This is one approach, not the only approach. You can expose your gateway however you prefer:
 
 - **Named Cloudflare tunnel / stable HTTPS hostname** (preferred) — long-lived canonical URL for federation
 - **Cloudflared/ngrok temporary tunnel** — useful for ad hoc testing
@@ -33,6 +33,27 @@ requires:
 - **Any publicly reachable URL** — update `gatewayUrl` in `~/.ogp/config.json` manually
 
 The tunnel approach is provided as a zero-config convenience. It installs no persistent services unless you explicitly run `ogp install` (which creates a LaunchAgent/systemd service and asks for confirmation first).
+
+## Start Here: `ogp tunnel`
+
+`ogp tunnel` is the canonical command for inspecting and managing tunnels. Prefer it over the older `ogp expose`/`ogp expose-stop` (which still work but are now hidden deprecated aliases that forward to `ogp tunnel`).
+
+```bash
+ogp tunnel list              # show cloudflared + ngrok tunnels, organized
+ogp tunnel list cloudflared  # one tool only
+ogp tunnel list ngrok
+ogp tunnel start cloudflared # start a quick tunnel (idempotent — no-op if one is already up)
+ogp tunnel start ngrok -b    # ngrok, in the background
+ogp tunnel stop              # stop the ogp-managed tunnel
+```
+
+**Before doing anything else, run `ogp tunnel list`.** It wraps each tool's native source of truth — `cloudflared tunnel list` for named Cloudflare tunnels (with live/idle status), and the ngrok local agent API (`127.0.0.1:4040`) for ngrok tunnels running on this machine — and then reconciles what it finds against your config `gatewayUrl`:
+
+- `✓` the `gatewayUrl` host is served by a live tunnel — you're good.
+- `✗` a tunnel is live but serves a different host than `gatewayUrl` — fix the mismatch.
+- `⚠` `gatewayUrl` is set but no live tunnel serves it — the tunnel is down or stale.
+
+This turns "is my gateway reachable?" into a single command. Known limitation: a cloudflared **quick** tunnel (`*.trycloudflare.com`) exposes no local agent API, so its URL won't appear in `tunnel list` after `tunnel start cloudflared` — use a named tunnel (Branch 1) for a reconcilable, durable URL.
 
 ## Prerequisites
 
@@ -131,7 +152,7 @@ Checklist:
 Use this command path:
 
 ```bash
-ogp --for openclaw expose --method ngrok
+ogp --for openclaw tunnel start ngrok
 ```
 
 ## Branch 3: Temporary Cloudflare Quick Tunnel
@@ -149,7 +170,7 @@ Checklist:
 Use this command path:
 
 ```bash
-ogp --for openclaw expose
+ogp --for openclaw tunnel start cloudflared
 ```
 
 ## Verification Flow
@@ -157,6 +178,7 @@ ogp --for openclaw expose
 Always end with this verification sequence:
 
 ```bash
+ogp tunnel list   # confirm a live tunnel exists and its host reconciles (✓) with gatewayUrl
 curl -s http://127.0.0.1:<daemon-port>/.well-known/ogp
 curl -s https://your-public-hostname/.well-known/ogp
 ```
@@ -230,16 +252,24 @@ ngrok config add-authtoken <your-token>
 
 ## Command Reference
 
+### List running tunnels
+
+```bash
+ogp tunnel list              # both tools, organized, with gatewayUrl reconcile
+ogp tunnel list cloudflared
+ogp tunnel list ngrok
+```
+
 ### Temporary Cloudflare Quick Tunnel
 
 ```bash
-ogp --for openclaw expose
+ogp --for openclaw tunnel start cloudflared
 ```
 
 This will:
 1. Start a cloudflared tunnel on the daemon port
 2. Display a public URL (e.g., `https://abc-def-123.trycloudflare.com`)
-3. Keep the tunnel running until you stop it (Ctrl+C)
+3. Keep the tunnel running until you stop it (Ctrl+C, or `ogp tunnel stop` if backgrounded with `-b`)
 
 **Update your config:**
 ```bash
@@ -250,7 +280,7 @@ This will:
 ### ngrok Tunnel
 
 ```bash
-ogp --for openclaw expose --method ngrok
+ogp --for openclaw tunnel start ngrok
 ```
 
 This will:
@@ -281,7 +311,7 @@ This will:
 
 3. **In a new terminal, expose the daemon:**
    ```bash
-   ogp --for openclaw expose
+   ogp --for openclaw tunnel start cloudflared
    ```
 
 4. **Copy the public URL** shown by cloudflared/ngrok
