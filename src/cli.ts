@@ -29,6 +29,7 @@ import {
   federationUpdateIdentity
 } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
+import { tunnelCommand } from './cli/tunnel.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { installCompletion } from './cli/completion.js';
 import {
@@ -779,9 +780,11 @@ federation
     });
   });
 
+program.addCommand(tunnelCommand);
+
 program
-  .command('expose')
-  .description('Expose daemon via tunnel (cloudflared or ngrok)')
+  .command('expose', { hidden: true })
+  .description('[deprecated] Use "ogp tunnel start"')
   .option('-m, --method <method>', 'Tunnel method (cloudflared|ngrok)', 'cloudflared')
   .option('-b, --background', 'Run in background')
   .action(async (options) => {
@@ -789,8 +792,8 @@ program
   });
 
 program
-  .command('expose-stop')
-  .description('Stop background tunnel')
+  .command('expose-stop', { hidden: true })
+  .description('[deprecated] Use "ogp tunnel stop"')
   .action(() => {
     stopExpose();
   });
