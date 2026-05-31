@@ -10,6 +10,7 @@ import { requireConfig, loadConfig } from './shared/config.js';
 import { loadMetaConfig } from './shared/meta-config.js';
 import { federationList, federationStatus, federationRequest, federationApprove, federationReject, federationRemove, federationSend, federationShowScopes, federationUpdateGrants, federationSendAgentComms, federationConnect, federationInvite, federationAccept, federationSetAlias, federationTagPeer, federationUntagPeer, federationUpdateIdentity } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
+import { tunnelCommand } from './cli/tunnel.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { installCompletion } from './cli/completion.js';
 import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, showActivity, clearActivity, setDefault, setLogging, setTopic, setPeerDefault } from './cli/agent-comms.js';
@@ -655,17 +656,18 @@ federation
         toAgent: options.toAgent
     });
 });
+program.addCommand(tunnelCommand);
 program
-    .command('expose')
-    .description('Expose daemon via tunnel (cloudflared or ngrok)')
+    .command('expose', { hidden: true })
+    .description('[deprecated] Use "ogp tunnel start"')
     .option('-m, --method <method>', 'Tunnel method (cloudflared|ngrok)', 'cloudflared')
     .option('-b, --background', 'Run in background')
     .action(async (options) => {
     await expose(options.method, options.background);
 });
 program
-    .command('expose-stop')
-    .description('Stop background tunnel')
+    .command('expose-stop', { hidden: true })
+    .description('[deprecated] Use "ogp tunnel stop"')
     .action(() => {
     stopExpose();
 });
