@@ -33,3 +33,6 @@ CURRENT_WORK.md
 # (the published security_best_practices_report.md is intentionally tracked;
 # the implementation plan stays local until the fixes ship — see B0033-B0037)
 security_fix_plan.md
+
+# Superpowers brainstorm scratch (visual companion mockups)
+.superpowers/
