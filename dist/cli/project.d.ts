@@ -14,7 +14,31 @@ interface ProjectQueryOptions {
     limit?: number;
     search?: string;
     timeout?: number;
+    json?: boolean;
 }
+/**
+ * bd-2n3: structured shape for `ogp project query-peer --json`.
+ *
+ * Consumers (e.g. bd-53c's idempotent union-merge) dedupe by the stable
+ * contribution `id`, so it MUST be on the wire. Timestamps are emitted as
+ * ISO 8601 — the human display used a localized `toLocaleString()` which is
+ * lossy and locale-dependent.
+ */
+export interface PeerQueryContributionJson {
+    id: string;
+    projectId: string;
+    authorId: string;
+    entryType?: string;
+    topic?: string;
+    summary: string;
+    timestamp: string;
+    metadata?: Record<string, any>;
+}
+/**
+ * Pure projection of peer-query response contributions into the structured
+ * wire shape. Exported for tests (bd-2n3) and reuse by the `--json` path.
+ */
+export declare function buildPeerQueryJson(projectId: string, contributions: any[]): PeerQueryContributionJson[];
 /**
  * Create a new project locally
  */
