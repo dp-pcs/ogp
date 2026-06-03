@@ -181,7 +181,12 @@ function showHealthCheckConfig() {
     console.log(`Check interval:           ${active.intervalMs / 1000}s (${active.intervalMs}ms)`);
     console.log(`Check timeout:            ${active.timeoutMs / 1000}s (${active.timeoutMs}ms)`);
     console.log(`Max consecutive failures: ${active.maxConsecutiveFailures}`);
-    console.log(`Heartbeat status:         ${active.isRunning ? 'Running' : 'Stopped'}`);
+    // NOTE: this is a configuration view running in a short-lived CLI process, where the
+    // heartbeat timer is never started, so active.isRunning would always read 'Stopped'
+    // even while the daemon's heartbeat is actively running (bd-d1l). Do not present a
+    // misleading live run-state here; point operators at `ogp status` for the
+    // authoritative daemon heartbeat state.
+    console.log(`Heartbeat status:         (run "ogp status" for live daemon heartbeat state)`);
     console.log('');
     // Show config file values if different from active
     const configValues = config.healthCheck || {};

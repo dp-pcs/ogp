@@ -522,7 +522,14 @@ program
     console.log(`  Check interval: ${heartbeatConfig.intervalMs / 1000}s`);
     console.log(`  Check timeout: ${heartbeatConfig.timeoutMs / 1000}s`);
     console.log(`  Max consecutive failures: ${heartbeatConfig.maxConsecutiveFailures}`);
-    console.log(`  Heartbeat status: ${heartbeatConfig.isRunning ? 'Running' : 'Stopped'}`);
+    // The heartbeat loop runs inside the long-lived daemon process and is started
+    // unconditionally at daemon boot (see startHeartbeat()). This `ogp status` command
+    // runs in a *separate*, short-lived CLI process where the heartbeat timer is always
+    // null, so heartbeatConfig.isRunning here reflects the CLI process, not the daemon —
+    // it would always read 'Stopped' even while the daemon's heartbeat is actively
+    // checking peers (bd-d1l). The authoritative cross-process signal is whether the
+    // daemon itself is running.
+    console.log(`  Heartbeat status: ${status.running ? 'Running' : 'Stopped'}`);
   });
 
 /**
