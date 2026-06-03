@@ -14,6 +14,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import JSON5 from 'json5';
 import { requireConfig } from '../shared/config.js';
 import { shouldRelaxTls } from '../shared/tls.js';
 
@@ -41,6 +42,14 @@ interface OpenClawHooksConfigSnapshot {
   allowRequestSessionKey: boolean;
   allowedSessionKeyPrefixes?: string[];
 }
+
+type OpenClawConfigFile = {
+  hooks?: {
+    token?: string;
+    allowRequestSessionKey?: boolean;
+    allowedSessionKeyPrefixes?: string[];
+  };
+};
 
 function extractJsonObject(output: string): Record<string, any> | null {
   const start = output.indexOf('{');
@@ -104,6 +113,33 @@ function resolveOpenClawConfigPath(): string {
   return process.env.OPENCLAW_CONFIG_PATH || path.join(os.homedir(), '.openclaw', 'openclaw.json');
 }
 
+export function parseOpenClawHooksConfigText(configText: string): OpenClawHooksConfigSnapshot | undefined {
+  let raw: OpenClawConfigFile;
+
+  try {
+    raw = JSON.parse(configText) as OpenClawConfigFile;
+  } catch {
+    try {
+      raw = JSON5.parse(configText) as OpenClawConfigFile;
+    } catch {
+      return undefined;
+    }
+  }
+
+  const token = raw.hooks?.token?.trim();
+  const allowedSessionKeyPrefixes = Array.isArray(raw.hooks?.allowedSessionKeyPrefixes)
+    ? raw.hooks.allowedSessionKeyPrefixes
+        .map(prefix => typeof prefix === 'string' ? prefix.trim() : '')
+        .filter(Boolean)
+    : undefined;
+
+  return {
+    token: token || undefined,
+    allowRequestSessionKey: raw.hooks?.allowRequestSessionKey === true,
+    allowedSessionKeyPrefixes: allowedSessionKeyPrefixes?.length ? allowedSessionKeyPrefixes : undefined
+  };
+}
+
 function loadHooksConfigFromOpenClawConfig(): OpenClawHooksConfigSnapshot | undefined {
   try {
     const configPath = resolveOpenClawConfigPath();
@@ -111,25 +147,7 @@ function loadHooksConfigFromOpenClawConfig(): OpenClawHooksConfigSnapshot | unde
       return undefined;
     }
 
-    const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as {
-      hooks?: {
-        token?: string;
-        allowRequestSessionKey?: boolean;
-        allowedSessionKeyPrefixes?: string[];
-      };
-    };
-    const token = raw.hooks?.token?.trim();
-    const allowedSessionKeyPrefixes = Array.isArray(raw.hooks?.allowedSessionKeyPrefixes)
-      ? raw.hooks.allowedSessionKeyPrefixes
-          .map(prefix => typeof prefix === 'string' ? prefix.trim() : '')
-          .filter(Boolean)
-      : undefined;
-
-    return {
-      token: token || undefined,
-      allowRequestSessionKey: raw.hooks?.allowRequestSessionKey === true,
-      allowedSessionKeyPrefixes: allowedSessionKeyPrefixes?.length ? allowedSessionKeyPrefixes : undefined
-    };
+    return parseOpenClawHooksConfigText(fs.readFileSync(configPath, 'utf-8'));
   } catch {
     return undefined;
   }
