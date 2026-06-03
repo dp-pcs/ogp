@@ -89,6 +89,61 @@ interface ProjectQueryOptions {
   limit?: number;
   search?: string;
   timeout?: number;
+  json?: boolean;
+}
+
+/**
+ * bd-2n3: structured shape for `ogp project query-peer --json`.
+ *
+ * Consumers (e.g. bd-53c's idempotent union-merge) dedupe by the stable
+ * contribution `id`, so it MUST be on the wire. Timestamps are emitted as
+ * ISO 8601 — the human display used a localized `toLocaleString()` which is
+ * lossy and locale-dependent.
+ */
+export interface PeerQueryContributionJson {
+  id: string;
+  projectId: string;
+  authorId: string;
+  entryType?: string;
+  topic?: string;
+  summary: string;
+  timestamp: string; // ISO 8601
+  metadata?: Record<string, any>;
+}
+
+/** Normalize any parseable timestamp to ISO 8601; pass through if unparseable. */
+function toIsoTimestamp(value: unknown): string {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return String(value ?? '');
+  }
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toISOString();
+}
+
+/**
+ * Pure projection of peer-query response contributions into the structured
+ * wire shape. Exported for tests (bd-2n3) and reuse by the `--json` path.
+ */
+export function buildPeerQueryJson(
+  projectId: string,
+  contributions: any[]
+): PeerQueryContributionJson[] {
+  return (contributions ?? []).map((c) => {
+    const entryType = c.entryType ?? c.topic;
+    const out: PeerQueryContributionJson = {
+      id: c.id,
+      projectId,
+      authorId: c.authorId,
+      entryType,
+      topic: entryType,
+      summary: c.summary,
+      timestamp: toIsoTimestamp(c.timestamp),
+    };
+    if (c.metadata !== undefined) {
+      out.metadata = c.metadata;
+    }
+    return out;
+  });
 }
 
 /**
@@ -355,15 +410,15 @@ export async function projectQuery(
   if (options.search) {
     // Search by text
     contributions = searchContributions(projectId, options.search, limit);
-    console.log(`Search results for "${options.search}" in project '${project.name}':`);
+    if (!options.json) console.log(`Search results for "${options.search}" in project '${project.name}':`);
   } else if (entryType) {
     // Query by entry type
     contributions = getTopicContributions(projectId, entryType, limit);
-    console.log(`Contributions [${entryType}] in project '${project.name}':`);
+    if (!options.json) console.log(`Contributions [${entryType}] in project '${project.name}':`);
   } else if (options.author) {
     // Query by author
     contributions = getAuthorContributions(projectId, options.author, limit);
-    console.log(`Contributions by '${options.author}' in project '${project.name}':`);
+    if (!options.json) console.log(`Contributions by '${options.author}' in project '${project.name}':`);
   } else {
     // Get all recent contributions - handle both data formats
     contributions = [];
@@ -383,7 +438,15 @@ export async function projectQuery(
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
     contributions = contributions.slice(0, limit);
-    console.log(`Recent contributions in project '${project.name}':`);
+    if (!options.json) {
+      console.log(`Recent contributions in project '${project.name}':`);
+    }
+  }
+
+  // bd-2n3: machine-readable output mirrors query-peer for consistent consumers.
+  if (options.json) {
+    console.log(JSON.stringify(buildPeerQueryJson(projectId, contributions ?? []), null, 2));
+    return;
   }
 
   if (contributions.length === 0) {
@@ -645,7 +708,9 @@ export async function projectQueryPeer(
   if (options.author) payload.authorId = options.author;
   if (options.limit) payload.limit = options.limit;
 
-  console.log(`Querying project '${projectId}' from peer '${peerId}'...`);
+  if (!options.json) {
+    console.log(`Querying project '${projectId}' from peer '${peerId}'...`);
+  }
 
   try {
     const response = await federationSend(peerId, 'project.query', JSON.stringify(payload), options.timeout);
@@ -663,12 +728,21 @@ export async function projectQueryPeer(
     // Format and display the response
     const { projectName, contributions } = response.response;
 
+    // bd-2n3: machine-readable output. Emit the structured contributions
+    // (with stable id + ISO timestamps) so consumers can union-merge by id.
+    if (options.json) {
+      console.log(JSON.stringify(buildPeerQueryJson(projectId, contributions ?? []), null, 2));
+      return;
+    }
+
     if (contributions && contributions.length > 0) {
       console.log(`\n✓ Found ${contributions.length} contributions in project '${projectName}':\n`);
 
       contributions.forEach((contribution: any, index: number) => {
         const timestamp = new Date(contribution.timestamp).toLocaleString();
         console.log(`${index + 1}. [${getContributionEntryType(contribution)}] by ${formatAuthorDisplay(contribution)} (${timestamp})`);
+        // bd-2n3: surface the stable contribution id in human output too.
+        console.log(`   id: ${contribution.id}`);
         console.log(`   ${contribution.summary}`);
         if (contribution.metadata) {
           console.log(`   Metadata: ${JSON.stringify(contribution.metadata, null, 2)}`);

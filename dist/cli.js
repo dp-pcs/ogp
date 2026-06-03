@@ -898,11 +898,13 @@ project
     .option('--author <id>', 'Filter by author')
     .option('--search <text>', 'Search by text content')
     .option('--limit <n>', 'Maximum results to return', '20')
+    .option('--json', 'Output machine-readable JSON (includes contribution ids + ISO timestamps)')
     .action(async (projectId, options) => {
     const queryOptions = {
         ...options,
         entryType: options.type || options.topic, // --type takes precedence; --topic remains a legacy alias
-        limit: parseInt(options.limit, 10)
+        limit: parseInt(options.limit, 10),
+        json: options.json ?? false
     };
     await projectQuery(projectId, queryOptions);
 });
@@ -946,12 +948,14 @@ project
     .option('--author <id>', 'Filter by author')
     .option('--limit <n>', 'Maximum results to return', '20')
     .option('--timeout <ms>', 'Response timeout in milliseconds', '10000')
+    .option('--json', 'Output machine-readable JSON (includes contribution ids + ISO timestamps)')
     .action(async (peerId, projectId, options) => {
     const queryOptions = {
         ...options,
         entryType: options.type || options.topic, // --type takes precedence; --topic remains a legacy alias
         limit: parseInt(options.limit, 10),
-        timeout: parseInt(options.timeout, 10)
+        timeout: parseInt(options.timeout, 10),
+        json: options.json ?? false
     };
     await projectQueryPeer(peerId, projectId, queryOptions);
 });
