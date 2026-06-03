@@ -23,7 +23,11 @@ async function getOgpBinaryPath(): Promise<string> {
   }
 }
 
-function generatePlist(ogpPath: string): string {
+function getNodeBinaryPath(): string {
+  return process.execPath;
+}
+
+export function generatePlist(nodePath: string, ogpPath: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -32,6 +36,7 @@ function generatePlist(ogpPath: string): string {
   <string>${LAUNCH_AGENT_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
+    <string>${nodePath}</string>
     <string>${ogpPath}</string>
     <string>start</string>
     <string>--background</string>
@@ -63,10 +68,12 @@ export async function installLaunchAgent(): Promise<void> {
 
     // Get the ogp binary path
     const ogpPath = await getOgpBinaryPath();
+    const nodePath = getNodeBinaryPath();
     console.log(`Found ogp binary at: ${ogpPath}`);
+    console.log(`Found node binary at: ${nodePath}`);
 
     // Generate and write the plist
-    const plistContent = generatePlist(ogpPath);
+    const plistContent = generatePlist(nodePath, ogpPath);
     fs.writeFileSync(LAUNCH_AGENT_PLIST, plistContent, 'utf-8');
     console.log(`Created LaunchAgent plist at: ${LAUNCH_AGENT_PLIST}`);
 
