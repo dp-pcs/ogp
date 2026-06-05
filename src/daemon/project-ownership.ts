@@ -66,7 +66,7 @@ export function verifySignedCreation(c: ProjectCreation | undefined | null): { o
   if (!vr.ok) return { ok: false, reason: vr.reason ?? 'bad-signature' };
   try {
     const parsed = JSON.parse(c.payloadStr);
-    if (parsed.creatorKey !== c.creatorKey || parsed.projectId !== c.projectId || parsed.provenance !== c.provenance) {
+    if (parsed.creatorKey !== c.creatorKey || parsed.projectId !== c.projectId || parsed.provenance !== c.provenance || parsed.timestamp !== c.createdAt) {
       return { ok: false, reason: 'field-mismatch' };
     }
   } catch { return { ok: false, reason: 'bad-payload' }; }
@@ -99,7 +99,7 @@ export function verifySignedGrant(g: OwnerGrant | undefined | null): { ok: boole
   if (!vr.ok) return { ok: false, reason: vr.reason ?? 'bad-signature' };
   try {
     const parsed = JSON.parse(g.payloadStr);
-    if (parsed.grantedBy !== g.grantedBy || parsed.grantee !== g.grantee || parsed.id !== g.id || parsed.projectId !== g.projectId) {
+    if (parsed.grantedBy !== g.grantedBy || parsed.grantee !== g.grantee || parsed.id !== g.id || parsed.projectId !== g.projectId || parsed.timestamp !== g.grantedAt) {
       return { ok: false, reason: 'field-mismatch' };
     }
   } catch { return { ok: false, reason: 'bad-payload' }; }
@@ -110,13 +110,14 @@ export function verifySignedGrant(g: OwnerGrant | undefined | null): { ok: boole
  * Derive the canonical-32 owner-id set by fixpoint. Seed = {creator}; repeatedly
  * admit any grant whose signature verifies AND whose grantedBy is already an owner,
  * until no change. Forged/orphan grants are never admitted. Order-independent.
+ * Only grants matching creation.projectId are considered.
  */
 export function deriveOwners(creation: ProjectCreation | undefined | null, grants: OwnerGrant[]): Set<string> {
   const owners = new Set<string>();
   if (!creation || !verifySignedCreation(creation).ok) return owners;
   owners.add(canonicalPeerId(creation.creatorKey));
 
-  const valid = (grants ?? []).filter(g => verifySignedGrant(g).ok);
+  const valid = (grants ?? []).filter(g => verifySignedGrant(g).ok && g.projectId === creation.projectId);
   let changed = true;
   while (changed) {
     changed = false;
