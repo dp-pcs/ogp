@@ -372,20 +372,40 @@ export async function projectContribute(
         ...(metadata && { metadata }),
         contribution: wire   // SAME envelope as the local record — identical id+signature
       });
-      let pushed = 0;
+      let acked = 0;       // peer confirmed the write
+      let unconfirmed = 0; // sent, but no ack (timeout / unreachable) — write may still have landed
+      let rejected = 0;    // peer explicitly rejected the write
       for (const peer of peers) {
         try {
           // B0032 P4: --to-agent applies uniformly to all auto-push targets.
           // If a peer doesn't support multi-agent-personas, federationSend logs
           // and skips that peer (returns null) without aborting the whole loop.
-          await federationSend(peer.id, 'project.contribute', payload, 5000, options.toAgent);
-          pushed++;
+          // bd-egmt: 30000ms (was 5000) — cross-gateway acks routinely run 5-10s,
+          // matching the bd-ogwd query-peer timeout. federationSend returns null on
+          // timeout (it does not throw), so classify the return rather than assume success.
+          const result = await federationSend(peer.id, 'project.contribute', payload, 30000, options.toAgent);
+          if (result && result.success === false) {
+            rejected++;
+          } else if (result) {
+            acked++;
+          } else {
+            // null: no ack (timeout or peer unreachable). The write may have landed —
+            // do NOT claim a confirmed sync.
+            unconfirmed++;
+          }
         } catch {
-          // Peer unreachable — skip silently, contribution saved locally
+          // Unexpected throw — treat as unconfirmed (contribution saved locally regardless).
+          unconfirmed++;
         }
       }
-      if (pushed > 0) {
-        console.log(`  ↗ Synced to ${pushed} peer${pushed > 1 ? 's' : ''}`);
+      if (acked > 0) {
+        console.log(`  ↗ Synced to ${acked} peer${acked > 1 ? 's' : ''}`);
+      }
+      if (unconfirmed > 0) {
+        console.log(`  ↗ Sent to ${unconfirmed} peer${unconfirmed > 1 ? 's' : ''} — ack unconfirmed (in-flight; the write may have landed, re-query to confirm)`);
+      }
+      if (rejected > 0) {
+        console.log(`  ✗ Rejected by ${rejected} peer${rejected > 1 ? 's' : ''} (see error above)`);
       }
     }
   }
