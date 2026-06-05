@@ -1,8 +1,33 @@
 import { Command } from 'commander';
 import { loadMetaConfig, saveMetaConfig } from '../shared/meta-config.js';
 import { detectFrameworks } from '../shared/framework-detection.js';
-import { loadConfig, saveConfig, requireConfig, type OGPConfig } from '../shared/config.js';
+import {
+  loadConfig,
+  saveConfig,
+  requireConfig,
+  synthesizePersonas,
+  effectiveHookAgentId,
+  type OGPConfig
+} from '../shared/config.js';
 import { loadHealthCheckConfig, getHeartbeatConfig } from '../daemon/heartbeat.js';
+
+function printPersonas(config: OGPConfig): void {
+  const personas = synthesizePersonas(config);
+  if (personas.length === 0) {
+    console.log('Personas:      (none)');
+    console.log('');
+    return;
+  }
+
+  console.log('Personas:');
+  personas.forEach((persona) => {
+    const marker = persona.role === 'primary' ? '*' : '-';
+    console.log(
+      `  ${marker} ${persona.id.padEnd(12)} ${persona.displayName.padEnd(16)} ${persona.role.padEnd(10)} -> hookAgentId: ${effectiveHookAgentId(persona)}`
+    );
+  });
+  console.log('');
+}
 
 /**
  * Show all configured frameworks and default
@@ -305,6 +330,7 @@ function showIdentity(): void {
   console.log(`Display name:  ${config.displayName}`);
   console.log(`Email:         ${config.email}`);
   console.log('');
+  printPersonas(config);
 }
 
 /**
@@ -359,6 +385,25 @@ export function whoami(): void {
   }
 
   console.log('');
+  printPersonas(config);
+}
+
+/**
+ * List local personas configured for the active framework.
+ */
+export function listAgents(quiet: boolean = false): void {
+  const config = requireConfig();
+  const personas = synthesizePersonas(config);
+
+  if (quiet) {
+    personas.forEach((persona) => console.log(persona.id));
+    return;
+  }
+
+  console.log('\nLocal personas');
+  console.log('━'.repeat(44));
+  console.log('');
+  printPersonas(config);
 }
 
 /**
@@ -581,6 +626,14 @@ configCommand
   .description('Show current identity configuration')
   .action(() => {
     showIdentity();
+  });
+
+configCommand
+  .command('list-agents')
+  .description('List local personas for the active framework')
+  .option('-q, --quiet', 'Output persona IDs only (for completion)')
+  .action((options) => {
+    listAgents(options.quiet);
   });
 
 configCommand
