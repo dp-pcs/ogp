@@ -89,6 +89,36 @@ describe('peer tombstone persistence', () => {
     expect(peer?.defaultLevel).toBeUndefined();
   });
 
+  it('clears stale tombstone fields when re-requesting a removed peer (bd-05sg)', () => {
+    // Federate, then remove → clean tombstone.
+    addPeer(createPeer());
+    expect(removePeer('peer-1')).toBe(true);
+    const tombstoned = getPeer('peer-1');
+    expect(tombstoned?.status).toBe('removed');
+    expect(tombstoned?.federationState).toBe('tombstoned');
+    expect(tombstoned?.removedAt).toBeTruthy();
+
+    // Re-request the same peer (CLI request path passes a fresh pending record).
+    addPeer({
+      id: 'peer-1',
+      displayName: 'Apollo @ Hermes',
+      email: 'apollo@example.com',
+      gatewayUrl: 'https://apollo.example.com',
+      publicKey: 'a'.repeat(64),
+      status: 'pending',
+      requestedAt: '2026-06-05T13:45:40.734Z'
+    });
+
+    const revived = getPeer('peer-1');
+    // The live status is pending — the display state MUST agree, not still say tombstoned.
+    expect(revived?.status).toBe('pending');
+    expect(revived?.federationState).toBe('init');
+    expect(revived?.removedAt).toBeUndefined();
+    expect(revived?.rejectedAt).toBeUndefined();
+    expect(revived?.federationStateReason).not.toBe('peer removed');
+    expect(revived?.requestedAt).toBe('2026-06-05T13:45:40.734Z');
+  });
+
   it('keeps only tombstone-safe fields when rejecting a peer', () => {
     addPeer(createPeer({ status: 'pending', approvedAt: undefined }));
 
