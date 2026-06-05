@@ -6,7 +6,6 @@ import {
   listProjectsForPeer,
   joinProject,
   isProjectMember,
-  contributeToProject,
   upsertContribution,
   getTopicContributions,
   getAuthorContributions,

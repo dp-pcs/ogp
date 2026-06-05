@@ -60,6 +60,15 @@ describe('upsertContribution', () => {
   it('returns not-found for an unknown project', () => {
     expect(upsertContribution('nope', mk())).toBe('not-found');
   });
+
+  it('stores a verified record WITH metadata (reconstruction byte-match)', () => {
+    const rec = buildSignedContribution({
+      projectId: 'proj', authorId: author.publicKey,
+      entryType: 'note', summary: 'hello',
+      metadata: { tool: 'claude', nested: { b: 1, a: 2 } }
+    }, author.privateKey).record;
+    expect(upsertContribution('proj', rec)).toBe('inserted'); // would be 'rejected' on canonical-order drift
+  });
 });
 
 describe('migrateLegacyContributions', () => {
