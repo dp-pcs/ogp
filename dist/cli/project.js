@@ -1,9 +1,10 @@
-import { createProject, addProject, getProject, listProjects, listProjectsForPeer, joinProject, isProjectMember, upsertContribution, getTopicContributions, getAuthorContributions, searchContributions, getProjectStatus, ensureProjectTopic, getContributionEntryType } from '../daemon/projects.js';
+import { createProject, addProject, getProject, listProjects, listProjectsForPeer, joinProject, isProjectMember, upsertContribution, getTopicContributions, getAuthorContributions, searchContributions, getProjectStatus, ensureProjectTopic, getContributionEntryType, setProjectCreation, addOwnerGrant, isOwner } from '../daemon/projects.js';
 import { loadConfig } from '../shared/config.js';
 import { getPeer } from '../daemon/peers.js';
 import { federationSend } from './federation.js';
 import { getPrivateKey, getPublicKey } from '../daemon/keypair.js';
 import { buildSignedContribution } from '../daemon/contribution-signing.js';
+import { buildSignedCreation, buildSignedGrant } from '../daemon/project-ownership.js';
 /**
  * Format author display with 3-tier fallback:
  * 1. Use authorIdentity if available (humanName + agentName)
@@ -100,12 +101,22 @@ export async function projectCreate(projectId, projectName, options = {}) {
     if (config?.email) {
         project.members.push(config.email);
     }
-    addProject(project);
+    // bd-hy3o: the creator is the root owner. Add the creator's public key as a
+    // member (so ownership + membership align — currently only config.email is added)
+    // and persist BEFORE minting the creation record (setProjectCreation reads from disk).
+    const myKey = getPublicKey();
+    if (!project.members.includes(myKey))
+        project.members.push(myKey);
+    addProject(project); // addProject upserts by id, so the mutated member array is persisted.
+    // Sign and store an 'original' creation record rooting ownership in the creator.
+    const creation = buildSignedCreation({ projectId, creatorKey: myKey, provenance: 'original' }, getPrivateKey());
+    setProjectCreation(projectId, creation);
     console.log(`✓ Created project: ${projectName} (${projectId})`);
     if (options.description) {
         console.log(`  Description: ${options.description}`);
     }
     console.log(`  Members: ${project.members.join(', ')}`);
+    console.log(`  Owner: you (${myKey.substring(0, 32)}…)`);
     // BUILD-102: Auto-register project ID as agent-comms topic for all approved peers
     const { listPeers, setPeerTopicPolicy } = await import('../daemon/peers.js');
     const memberPeers = listPeers('approved').filter(peer => listProjectsForPeer(peer.id, [project]).length > 0);
@@ -651,6 +662,103 @@ export async function projectStatusPeer(peerId, projectId) {
     catch (err) {
         console.error('Error sending status request:', err);
         process.exit(1);
+    }
+}
+/**
+ * bd-hy3o: Grant ownership of a project to a peer key (owners only).
+ */
+export async function projectAddOwner(projectId, granteeKey) {
+    const config = loadConfig();
+    if (!config) {
+        console.error('Error: Not configured. Run "ogp setup" first.');
+        process.exit(1);
+    }
+    const project = getProject(projectId);
+    if (!project) {
+        console.error(`Error: Project '${projectId}' not found`);
+        process.exit(1);
+    }
+    if (!isOwner(projectId, getPublicKey())) {
+        console.error(`Error: You are not an owner of '${projectId}'`);
+        process.exit(1);
+    }
+    const grant = buildSignedGrant({ projectId, grantee: granteeKey, grantedBy: getPublicKey() }, getPrivateKey());
+    addOwnerGrant(projectId, grant); // store locally
+    const { listPeers } = await import('../daemon/peers.js');
+    const peers = listPeers('approved').filter(p => listProjectsForPeer(p.id, [project]).length > 0);
+    let acked = 0;
+    for (const peer of peers) {
+        try {
+            const r = await federationSend(peer.id, 'project.grant-owner', JSON.stringify({ projectId, grant }), 30000);
+            if (r && r.success !== false)
+                acked++;
+        }
+        catch { /* peer unreachable; grant saved locally */ }
+    }
+    console.log(`✓ Granted ownership to ${granteeKey.substring(0, 32)}… on '${projectId}'${acked ? ` (synced to ${acked} peer${acked > 1 ? 's' : ''})` : ''}`);
+}
+/**
+ * bd-hy3o: Claim ownership of a pre-existing project (members only).
+ */
+export async function projectClaimOwnership(projectId) {
+    const config = loadConfig();
+    if (!config) {
+        console.error('Error: Not configured. Run "ogp setup" first.');
+        process.exit(1);
+    }
+    const project = getProject(projectId);
+    if (!project) {
+        console.error(`Error: Project '${projectId}' not found`);
+        process.exit(1);
+    }
+    if (project.creation?.provenance === 'original') {
+        console.error('Error: Project already has an original owner');
+        process.exit(1);
+    }
+    // Member check must tolerate 32-char / full-key / email member forms (members.includes is exact).
+    const myKey = getPublicKey();
+    const myShort = myKey.substring(0, 32);
+    const member = project.members.some(m => m === myKey || m === myShort || (m.length >= 32 && m.substring(0, 32) === myShort) || m === config.email);
+    if (!member) {
+        console.error('Error: Only an existing project member may claim ownership');
+        process.exit(1);
+    }
+    const creation = buildSignedCreation({ projectId, creatorKey: myKey, provenance: 'legacy-claim' }, getPrivateKey());
+    const result = setProjectCreation(projectId, creation);
+    if (result === 'rejected' || result === 'exists-original') {
+        console.error(`Error: claim failed (${result})`);
+        process.exit(1);
+    }
+    const { listPeers } = await import('../daemon/peers.js');
+    const peers = listPeers('approved').filter(p => listProjectsForPeer(p.id, [project]).length > 0);
+    for (const peer of peers) {
+        try {
+            await federationSend(peer.id, 'project.create', JSON.stringify({ projectId, projectName: project.name, creation }), 30000);
+        }
+        catch { /* best-effort */ }
+    }
+    console.log(`✓ Claimed ownership of '${projectId}' (legacy-claim). You are now root owner.`);
+}
+/**
+ * bd-hy3o: List the owners of a project.
+ */
+export function projectOwners(projectId) {
+    const project = getProject(projectId);
+    if (!project) {
+        console.error(`Error: Project '${projectId}' not found`);
+        process.exit(1);
+    }
+    if (!project.creation) {
+        console.log(`Project '${projectId}' has no ownership record. Run 'ogp project claim-ownership ${projectId}'.`);
+        return;
+    }
+    console.log(`Owners of '${projectId}':`);
+    console.log(`  • creator: ${project.creation.creatorKey.substring(0, 32)}…  [${project.creation.provenance}]`);
+    for (const g of project.ownerGrants ?? []) {
+        console.log(`  • ${g.grantee.substring(0, 32)}…  (granted by ${g.grantedBy.substring(0, 32)}…)`);
+    }
+    if (project.pendingGrants?.length) {
+        console.log(`  (${project.pendingGrants.length} pending grant(s) awaiting their root)`);
     }
 }
 //# sourceMappingURL=project.js.map
