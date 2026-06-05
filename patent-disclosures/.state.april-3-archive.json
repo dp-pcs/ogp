@@ -1,0 +1,36 @@
+{
+  "current_phase": "complete",
+  "active_invention": "gateway-mediated-federation",
+  "inventions": {
+    "gateway-mediated-federation": {
+      "title": "Gateway-Mediated Agent Federation with Containment Preservation",
+      "status": "complete",
+      "last_phase_completed": "phase_4",
+      "beads_task_id": "clawd-0gw.1",
+      "novelty_statement": "OGP (Open Gateway Protocol) is a gateway-mediated federation protocol that enables AI agents to collaborate across organizational boundaries while preserving the gateway containment security model. Existing agent-to-agent protocols (A2A, MCP) assume agents are directly addressable and expose capability cards publicly. This architecture is incompatible with gateway-based AI frameworks like OpenClaw, where agents intentionally remain behind security boundaries to prevent prompt injection, token exhaustion attacks, and data exfiltration. OGP's key innovation applies Border Gateway Protocol's 'trust at the boundary' principle to AI agents: federation occurs at the gateway layer, not the agent layer. Gateways establish bilateral cryptographic trust relationships using Ed25519 public keys, then negotiate scoped intents—semantically meaningful capabilities like 'agent-comms' or 'project.query'—that are cryptographically signed and can be routed, filtered, rate-limited, and logged at the gateway without exposing internal agent implementation. Unlike prior approaches that force a trade-off between agent collaboration and security, OGP achieves both simultaneously.",
+      "key_files": [
+        "src/daemon/server.ts",
+        "src/daemon/scopes.ts",
+        "src/daemon/doorman.ts",
+        "src/daemon/peers.ts",
+        "src/daemon/message-handler.ts"
+      ],
+      "notes": [
+        "Phase 1 complete. User confirmed this is the core invention.",
+        "Phase 2 complete. Novelty statement approved.",
+        "No known prior art.",
+        "Vendor-agnostic protocol, not tied to OpenClaw.",
+        "Problem: Enable agent collaboration while preserving gateway containment model.",
+        "Solution: Gateway-layer federation with intent negotiation and topic policies.",
+        "Triggering moment: Collaboration between David (Colorado) and Stanislav (Spain) - needed agents to work together without exposing them.",
+        "BGP inspiration: Apply 'trust at boundary' principle from network routing to AI agent federation.",
+        "Intents replace routes: Semantic capabilities (agent-comms, project.query) instead of network paths.",
+        "Symmetric scope mirroring: Auto-grant peer's offered intents by default (90% case), asymmetric supported via flags.",
+        "Topic hierarchy emerged from testing: Per-peer-topic granularity needed (e.g., allow Stanislav on project-validation, block general queries).",
+        "Inventor: David Proctor (sole). Stanislav = first test partner, not co-inventor.",
+        "Timeline: Conceived ~March 15, 2026; first federation March 20-25, 2026; public disclosure ~March 25, 2026.",
+        "DEADLINE: 12-month patent filing deadline = March 2027."
+      ]
+    }
+  }
+}

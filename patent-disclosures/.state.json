@@ -1,35 +1,98 @@
 {
-  "current_phase": "complete",
+  "current_phase": "phase_2",
   "active_invention": "gateway-mediated-federation",
+  "qc_max_rounds": 3,
+  "paused": true,
+  "paused_at": "2026-04-28T16:35:00Z",
+  "paused_reason": "Multi-agent personas (B0032) under active development. User electing to ship that feature first because it materially upgrades the OGP-vs-A2A differentiation (1 gateway card with N personas vs N agent cards with N endpoints). Resume disclosure once B0032 is shipped and reduced to practice.",
+  "resume_instructions": "Re-invoke /patent-disclosure:patent-disclosure. The skill will detect this in-progress work via .state.json + qc-rounds/ structure. When ready to resume: confirm B0032 status, then continue Phase 2 Round 2-3 (multi-agent disclose-now question is now answered: include as embodiment), Phase 2.3 (novelty statement), and onward.",
   "inventions": {
     "gateway-mediated-federation": {
       "title": "Gateway-Mediated Agent Federation with Containment Preservation",
-      "status": "complete",
-      "last_phase_completed": "phase_4",
-      "beads_task_id": "clawd-0gw.1",
-      "novelty_statement": "OGP (Open Gateway Protocol) is a gateway-mediated federation protocol that enables AI agents to collaborate across organizational boundaries while preserving the gateway containment security model. Existing agent-to-agent protocols (A2A, MCP) assume agents are directly addressable and expose capability cards publicly. This architecture is incompatible with gateway-based AI frameworks like OpenClaw, where agents intentionally remain behind security boundaries to prevent prompt injection, token exhaustion attacks, and data exfiltration. OGP's key innovation applies Border Gateway Protocol's 'trust at the boundary' principle to AI agents: federation occurs at the gateway layer, not the agent layer. Gateways establish bilateral cryptographic trust relationships using Ed25519 public keys, then negotiate scoped intents—semantically meaningful capabilities like 'agent-comms' or 'project.query'—that are cryptographically signed and can be routed, filtered, rate-limited, and logged at the gateway without exposing internal agent implementation. Unlike prior approaches that force a trade-off between agent collaboration and security, OGP achieves both simultaneously.",
+      "status": "in_progress",
+      "last_phase_completed": "phase_1",
+      "beads_epic_id": "clawd-5e8",
+      "path_choice": "D (full re-derivation, no inherited assumptions)",
+      "novelty_thesis": "Combination novelty (KSR): four-way co-location of (1) bilateral cryptographic handshake, (2) per-peer negotiated capability bundle, (3) runtime intent-and-topic enforcement, (4) agents-never-addressable. Closest in-domain prior art (A2A) explicitly chose agent-addressability — strong objective indicia of non-obviousness. Verdict from independent KSR review: DEFENSIBLE.",
       "key_files": [
         "src/daemon/server.ts",
+        "src/daemon/peers.ts",
         "src/daemon/scopes.ts",
         "src/daemon/doorman.ts",
-        "src/daemon/peers.ts",
-        "src/daemon/message-handler.ts"
+        "src/daemon/message-handler.ts",
+        "src/daemon/agent-comms.ts",
+        "src/daemon/heartbeat.ts",
+        "src/daemon/rendezvous.ts",
+        "src/daemon/projects.ts",
+        "src/daemon/reply-handler.ts",
+        "src/shared/signing.ts",
+        "src/shared/tls.ts"
       ],
+      "durable_inventor_facts": {
+        "inventor": "David Proctor",
+        "inventor_email": "david@proctorconsultingservices.com",
+        "sole_inventor": true,
+        "first_test_partner_not_inventor": "Stanislav (Spain)",
+        "conception_date": "2026-03-15",
+        "first_reduction_to_practice": "2026-03-25",
+        "public_disclosure_date": "2026-03-25",
+        "filing_deadline": "2027-03-25",
+        "bgp_inspiration_origin_story": true,
+        "vendor_agnostic_protocol": true,
+        "no_known_prior_art_as_of_april_3": true
+      },
+      "phase_1_findings": {
+        "agent_1_piece_by_piece": "zero candidates (each mechanism alone is obvious)",
+        "agent_2_combination_KSR": "DEFENSIBLE combination novelty",
+        "decision": "proceed with combination thesis as independent claim"
+      },
+      "phase_2_round_1_answers": {
+        "triggering_insight": "The user observed great productivity working with their OpenClaw instance and noticed they were relaying agent output to others; wondered 'what if my agent could be in the conversation directly.' The Colorado/Spain collaboration (David <-> Stanislav) was the first reduction to practice — real, not hyperbole.",
+        "canonical_use_case_dual_framing": {
+          "origin_inventive_moment": "Colorado/Spain (March 2026) — establishes problem, two countries, two frameworks, no shared infrastructure, the inventive recognition.",
+          "commercial_production": "AICOE Expert Network (April 2026) — hub-and-spoke, multiple humans contributing through their own gateways, real federation graph, project intent layer in production. Commercial-success indicia under KSR.",
+          "do_not_lead_with": "speculative SaaS / multi-tenant scenarios — they invite reduction-to-practice challenges."
+        },
+        "a2a_relationship": "Complement, not compete. A2A is about message shape; OGP is about who is allowed and what they may invoke. A2A connects agents-to-agents; OGP connects gateways-to-gateways. A2A assumes pre-existing trust; OGP establishes bilateral trust without shared identity infra. Scope decisions consistent with their respective threat models, not picking from same menu of solutions to the same problem.",
+        "true_differentiator_user_statement": "'show me how people using openclaw or hermes would communicate with another openclaw agent or hermes agent with the current implementation? a2a exists today and that isn't an option. whereas ogp exists today and it is, that is the true differentiator.'",
+        "multi_agent_personas_b0032": {
+          "status": "being implemented currently (April 28, 2026)",
+          "differentiator": "A2A: 5 agents = 5 well-known cards / 5 endpoints. OGP: 5 agents = 1 gateway card with N personas; Doorman routes via toAgent field.",
+          "trust_unit_axis": {
+            "a2a": "per agent",
+            "ogp_today": "per gateway",
+            "ogp_plus_personas": "per human (1 gateway card with N personas)"
+          }
+        },
+        "prior_art_landscape_april_28": {
+          "new_since_april_3": "Microsoft Agent Framework 1.0 (April 3, 2026) bundled MCP + A2A under one SDK; explicitly did NOT address cross-domain trust; assumes Entra ID / shared identity provider. Strengthens 'failure of others to solve' indicia — most resourced enterprise vendor shipped and left the gap.",
+          "no_new_direct_competitors": "Specific space of bilateral cross-domain agent gateway federation with human approval, signed intents, scope grants — no new entrants in last 25 days.",
+          "adjacent_prior_art_to_distinguish": [
+            "Matrix protocol — federated messaging; no agent intent routing, no per-peer per-intent scope grants, no behavioral policy layer, no project intent abstraction.",
+            "ActivityPub / fediverse — async social posts; no scope grants, no rate limits in spec, no human approval handshake.",
+            "DIDComm v2 (DIF) — identity layer for verifiable credentials; no gateway boundaries, no scope grants, no behavioral policy, no AI agent containment.",
+            "Cosmos IBC — asset/state transfer with consensus; different threat model entirely.",
+            "BGP — routes packets; doesn't carry agent intents or apply behavioral policy. OGP borrows BGP peering model but applies to fundamentally different domain.",
+            "OAuth 2.0 / OIDC — requires trusted authorization server; not bilateral; not designed for cross-domain peer-to-peer.",
+            "MCP (Anthropic) — inside one trust domain; tools, not agents; not a federation protocol.",
+            "A2A (Google) — stateless request/response; assumes pre-existing trust; no scope grants, no human approval, no persistent peering with lifecycle."
+          ],
+          "specifically_not_prior_art": [
+            "Anthropic/OpenAI 'computer use' — single-domain UI control, not federation",
+            "Federated learning (Google FL, Apple FL) — model training, different domain",
+            "AI agent frameworks (CrewAI, LangGraph, AutoGen) — orchestration inside one trust domain",
+            "Decentralized AI / Bittensor / Akash — compute markets, not communication",
+            "Cosmos blockchain ecosystem broadly — asset transfer with consensus, fundamentally different"
+          ]
+        },
+        "a2a_objective_indicia_refined_framing": "Containment was OUTSIDE A2A's threat model, not considered-and-rejected. STRONGER for non-obviousness: A2A optimized for a different problem (intra-domain enterprise) than OGP solves (cross-domain personal/small-team). Google has world-class engineers (BeyondCorp, OAuth, OpenID Connect) and demonstrated interest in agent communication via A2A itself; their decision NOT to address cross-domain trust establishment is failure-of-others-to-solve indicia under KSR. Recognition of the distinct problem is itself part of the inventive step.",
+        "draft_a2a_paragraph_for_disclosure": "Google's Agent2Agent (A2A) protocol, announced April 2025 and now bundled into Microsoft Agent Framework 1.0 (April 2026), is the closest publicly-shipped technology in the agent-communication space. A2A specifies Agent Cards for capability discovery and typed message exchange, but explicitly assumes that trust between communicating parties is established by the deployment environment — typically a shared identity provider, tenant CA, or pre-existing organizational trust relationship. A2A does not specify a bilateral handshake, per-peer scope grants, rate limits, or human-approval primitives. The choice not to include cross-domain trust establishment in A2A is consistent with its target deployment context and is not a solution to the cross-domain personal/small-team federation problem. Google's decision not to address this space — despite its considerable expertise in cross-domain trust (BeyondCorp, OAuth, OpenID Connect) and its evident interest in agent communication (A2A itself) — is offered as objective evidence that the present invention's combination of bilateral handshake, per-peer scope grants, behavioral policy enforcement, and lifecycle state machine for AI agent gateways was not an obvious extension of the prior art at the time of invention."
+      },
       "notes": [
-        "Phase 1 complete. User confirmed this is the core invention.",
-        "Phase 2 complete. Novelty statement approved.",
-        "No known prior art.",
-        "Vendor-agnostic protocol, not tied to OpenClaw.",
-        "Problem: Enable agent collaboration while preserving gateway containment model.",
-        "Solution: Gateway-layer federation with intent negotiation and topic policies.",
-        "Triggering moment: Collaboration between David (Colorado) and Stanislav (Spain) - needed agents to work together without exposing them.",
-        "BGP inspiration: Apply 'trust at boundary' principle from network routing to AI agent federation.",
-        "Intents replace routes: Semantic capabilities (agent-comms, project.query) instead of network paths.",
-        "Symmetric scope mirroring: Auto-grant peer's offered intents by default (90% case), asymmetric supported via flags.",
-        "Topic hierarchy emerged from testing: Per-peer-topic granularity needed (e.g., allow Stanislav on project-validation, block general queries).",
-        "Inventor: David Proctor (sole). Stanislav = first test partner, not co-inventor.",
-        "Timeline: Conceived ~March 15, 2026; first federation March 20-25, 2026; public disclosure ~March 25, 2026.",
-        "DEADLINE: 12-month patent filing deadline = March 2027."
+        "April 3 disclosure archived to gateway-mediated-federation.april-3-archive/",
+        "Path D: no prior content reused; durable Q&A facts only.",
+        "Codebase has had ~25 days of additional work since April 3 (F-01 through F-12, OSPF state machine, bidirectional health, federation resync).",
+        "Phase 2 Round 1: user provided exceptional synthesis from their coding agent. Captured verbatim into state file."
       ]
     }
   }

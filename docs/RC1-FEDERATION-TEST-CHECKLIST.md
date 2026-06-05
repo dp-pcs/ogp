@@ -268,6 +268,10 @@ Expected result:
 
 ### Persona routing
 
+Milestone note:
+
+- _2026-05-08_: Live remote validation succeeded from `Cosmo` to the `atlas` persona on David's OGP gateway. Atlas replied: "Received your persona-targeted OGP message and the federation smoke test came through clearly." This is the first confirmed real-gateway proof in this repo that `--to-agent` targeting reached a non-primary advertised persona across an existing federation.
+
 If the peer advertises more than one agent:
 
 ```bash
