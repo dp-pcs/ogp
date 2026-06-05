@@ -22,7 +22,7 @@ import {
   updatePeerReceivedScopes,
   updatePeer
 } from './peers.js';
-import { listProjectsForPeer } from './projects.js';
+import { listProjectsForPeer, migrateLegacyContributions } from './projects.js';
 import { handleMessage, type FederationMessage } from './message-handler.js';
 import { signObject, verify } from '../shared/signing.js';
 import { notifyOpenClaw } from './notify.js';
@@ -1056,6 +1056,13 @@ export function startServer(config?: OGPConfig, background = false): void {
 
     res.json({ received: true });
   });
+
+  try {
+    const migrated = migrateLegacyContributions();
+    if (migrated > 0) console.log(`[OGP] Tagged ${migrated} legacy (unsigned) contribution(s)`);
+  } catch (err) {
+    console.error('[OGP] Legacy contribution migration failed (non-fatal):', err);
+  }
 
   server = app.listen(cfg.daemonPort, () => {
     console.log(`[OGP] Daemon listening on port ${cfg.daemonPort}`);
