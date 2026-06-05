@@ -6,7 +6,7 @@ import { generateKeyPair } from '../src/shared/signing.js';
 import { buildSignedContribution } from '../src/daemon/contribution-signing.js';
 import {
   addProject, createProject, joinProject, getProject,
-  upsertContribution, type Project
+  upsertContribution, migrateLegacyContributions, saveProjects, type Project
 } from '../src/daemon/projects.js';
 
 describe('upsertContribution', () => {
@@ -59,5 +59,33 @@ describe('upsertContribution', () => {
 
   it('returns not-found for an unknown project', () => {
     expect(upsertContribution('nope', mk())).toBe('not-found');
+  });
+});
+
+describe('migrateLegacyContributions', () => {
+  let tempDir: string;
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogp-migrate-'));
+    process.env.OGP_HOME = tempDir;
+    const p = createProject('legacy', 'Legacy');
+    p.topics = [{ name: 'note', lastUpdated: '2026-05-20T00:00:00Z', contributions: [
+      { id: 'legacy-1', timestamp: '2026-05-20T00:00:00Z', authorId: 'a', summary: 'old', entryType: 'note' }
+    ]}];
+    addProject(p);
+    saveProjects([p]);
+  });
+  afterEach(() => {
+    delete process.env.OGP_HOME;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('tags unsigned records verified:false legacy:true and is idempotent', () => {
+    expect(migrateLegacyContributions()).toBe(1); // one record changed
+    const c = getProject('legacy')!.topics[0].contributions[0];
+    expect(c.verified).toBe(false);
+    expect(c.legacy).toBe(true);
+    expect(c.id).toBe('legacy-1'); // id preserved, not re-minted
+
+    expect(migrateLegacyContributions()).toBe(0); // idempotent: nothing left to change
   });
 });
