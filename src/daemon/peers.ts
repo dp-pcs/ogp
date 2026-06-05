@@ -303,6 +303,25 @@ export function addPeer(peer: Peer): boolean {
 
   const preservedAlias = peer.alias ?? matches.find((candidate) => candidate.alias)?.alias;
   const mergedPeer = preserveSource ? { ...preserveSource, ...peer } : peer;
+
+  // bd-05sg: when an incoming record revives a peer into `pending` (a fresh
+  // federation request), the merge above can carry over stale tombstone /
+  // lifecycle fields from a prior removed/rejected record (federationState
+  // 'tombstoned', removedAt, rejectedAt, "peer removed" reason). That makes
+  // `federation list` render "TOMBSTONED" for what is actually a live pending
+  // request. Reset the lifecycle to a clean `init` state and drop the
+  // tombstone markers so the display agrees with `status`. Only do this when
+  // the incoming record itself didn't explicitly set these fields.
+  if (mergedPeer.status === 'pending') {
+    if (peer.federationState === undefined) {
+      mergedPeer.federationState = 'init';
+      mergedPeer.federationStateChangedAt = peer.requestedAt ?? new Date().toISOString();
+      mergedPeer.federationStateReason = 'federation request received';
+    }
+    if (peer.removedAt === undefined) delete mergedPeer.removedAt;
+    if (peer.rejectedAt === undefined) delete mergedPeer.rejectedAt;
+  }
+
   const replacement = preservedAlias ? { ...mergedPeer, alias: preservedAlias } : mergedPeer;
   const filtered = peers.filter(
     (existingPeer) => !matches.some((candidate) => candidate.id === existingPeer.id)
