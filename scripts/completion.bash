@@ -61,7 +61,7 @@ _ogp_completion() {
   # agent-comms subcommands
   if [ "$cmd" = "agent-comms" ]; then
     if [ $COMP_CWORD -eq 2 ]; then
-      opts="policies configure add-topic set-topic set-default remove-topic reset activity default logging"
+      opts="send policies configure add-topic set-topic set-default remove-topic reset activity default logging"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
     fi
