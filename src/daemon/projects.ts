@@ -14,14 +14,17 @@ export interface AuthorIdentity {
 }
 
 export interface ProjectContribution {
-  id: string;           // unique contribution ID
-  timestamp: string;    // ISO timestamp
-  authorId: string;     // peer ID who contributed (stable key)
+  id: string;           // ULID, minted by the AUTHOR (was receiver-minted projectId-entryType-Date.now())
+  timestamp: string;    // ISO timestamp (author-set, covered by signature)
+  authorId: string;     // peer ID who contributed (ed25519 pubkey hex) — IS the verification key
   authorIdentity?: AuthorIdentity; // identity snapshot at contribution time
   entryType?: string;   // preferred contribution category name
   topic?: string;       // legacy alias for entryType
   summary: string;      // human-readable summary
   metadata?: Record<string, any>; // additional structured data
+  signature?: string;   // ed25519 sig over the canonical contribution (absent on legacy records)
+  verified?: boolean;   // true = signature checked & valid; false = legacy/unsigned
+  legacy?: boolean;     // true = predates signing (existing unsigned records)
 }
 
 export interface ProjectTopic {
