@@ -7,6 +7,7 @@ import {
   joinProject,
   isProjectMember,
   contributeToProject,
+  upsertContribution,
   getTopicContributions,
   getAuthorContributions,
   searchContributions,
@@ -19,6 +20,8 @@ import {
 import { loadConfig } from '../shared/config.js';
 import { getPeer } from '../daemon/peers.js';
 import { federationSend } from './federation.js';
+import { getPrivateKey, getPublicKey } from '../daemon/keypair.js';
+import { buildSignedContribution } from '../daemon/contribution-signing.js';
 
 /**
  * Format author display with 3-tier fallback:
@@ -336,15 +339,13 @@ export async function projectContribute(
     tags: config.tags
   };
 
-  // Add the contribution
-  const contributionId = contributeToProject(
-    projectId,
-    entryType,
-    config.email,
-    summary,
-    metadata,
-    authorIdentity
+  // Build the signed contribution ONCE; reuse for local store AND every peer (shared id+sig).
+  const { record, wire } = buildSignedContribution(
+    { projectId, authorId: getPublicKey(), entryType, summary, metadata, authorIdentity },
+    getPrivateKey()
   );
+  const upsert = upsertContribution(projectId, record);
+  const contributionId = (upsert === 'inserted' || upsert === 'duplicate') ? record.id : null;
 
   if (contributionId) {
     console.log(`✓ Contributed to project '${project.name}' [${entryType}]`);
@@ -369,7 +370,8 @@ export async function projectContribute(
         topic: entryType,
         summary,
         authorIdentity,
-        ...(metadata && { metadata })
+        ...(metadata && { metadata }),
+        contribution: wire   // SAME envelope as the local record — identical id+signature
       });
       let pushed = 0;
       for (const peer of peers) {
@@ -644,13 +646,14 @@ export async function projectSendContribution(
     tags: config.tags
   };
 
+  const { wire } = buildSignedContribution(
+    { projectId, authorId: getPublicKey(), entryType, summary, metadata, authorIdentity },
+    getPrivateKey()
+  );
   const payload = {
-    projectId,
-    entryType,
-    topic: entryType,
-    summary,
-    authorIdentity,
-    ...(metadata && { metadata })
+    projectId, entryType, topic: entryType, summary, authorIdentity,
+    ...(metadata && { metadata }),
+    contribution: wire
   };
 
   console.log(`Sending contribution to project '${projectId}' [${entryType}] to peer '${peerId}'...`);
