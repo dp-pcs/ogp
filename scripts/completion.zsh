@@ -433,6 +433,9 @@ _ogp_project() {
       query-peer\:"Query peer project contributions"
       status-peer\:"Request project status from peer"
       delete\:"Delete local project and all contributions"
+      add-owner\:"Grant ownership to a peer key (owners only)"
+      claim-ownership\:"Claim ownership of a pre-existing project (members only)"
+      owners\:"List the owners of a project"
     ))' \
     '*::arg:->args'
 
