@@ -33,3 +33,12 @@ CURRENT_WORK.md
 # (the published security_best_practices_report.md is intentionally tracked;
 # the implementation plan stays local until the fixes ship — see B0033-B0037)
 security_fix_plan.md
+
+# Generated overview-video output (regenerate via scripts/render-ogp-overview-video.mjs)
+/artifacts/
+
+# Dated scratch / daily working notes (root-level only — NOT .agent/memory/)
+/memory/
+
+# Superpowers brainstorm scratch (visual companion mockups)
+.superpowers/
