@@ -141,6 +141,27 @@ describe('projects ownership storage + isOwner', () => {
     const bad = { ...buildSignedCreation({ projectId: 'proj', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey), signature: 'deadbeef' };
     expect(setProjectCreation('proj', bad)).toBe('rejected');
   });
+
+  it('refuses an original creation that would overwrite an existing legacy-claim (security)', () => {
+    const mallory = generateKeyPair();
+    // alice legacy-claims (she's the legit owner)
+    const claim = buildSignedCreation({ projectId: 'proj', creatorKey: alice.publicKey, provenance: 'legacy-claim' }, alice.privateKey);
+    expect(setProjectCreation('proj', claim)).toBe('set');
+    expect(isOwner('proj', alice.publicKey)).toBe(true);
+    // mallory tries to re-root via a self-signed ORIGINAL
+    const evil = buildSignedCreation({ projectId: 'proj', creatorKey: mallory.publicKey, provenance: 'original' }, mallory.privateKey);
+    expect(setProjectCreation('proj', evil)).toBe('exists-original');
+    expect(isOwner('proj', mallory.publicKey)).toBe(false);
+    expect(isOwner('proj', alice.publicKey)).toBe(true); // alice still owner
+  });
+
+  it('refuses to overwrite an existing original; same original is idempotent duplicate', () => {
+    const c = buildSignedCreation({ projectId: 'proj', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
+    expect(setProjectCreation('proj', c)).toBe('set');
+    expect(setProjectCreation('proj', c)).toBe('duplicate'); // same -> idempotent
+    const other = buildSignedCreation({ projectId: 'proj', creatorKey: alice.publicKey, provenance: 'original' }, alice.privateKey);
+    expect(setProjectCreation('proj', other)).toBe('exists-original'); // different -> refused
+  });
 });
 
 describe('out-of-order grant resolution', () => {
