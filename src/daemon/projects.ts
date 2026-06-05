@@ -298,6 +298,30 @@ export function upsertContribution(
 }
 
 /**
+ * One-time, idempotent migration: tag every contribution lacking a signature as
+ * verified:false, legacy:true. Original ids are preserved (never re-minted).
+ * Returns the count of records changed (0 when already migrated). Safe to run on
+ * every daemon start.
+ */
+export function migrateLegacyContributions(): number {
+  const projects = loadProjects();
+  let changed = 0;
+  for (const project of projects) {
+    for (const topic of project.topics) {
+      for (const c of topic.contributions) {
+        if (!c.signature && (c.verified === undefined || c.legacy === undefined)) {
+          c.verified = false;
+          c.legacy = true;
+          changed++;
+        }
+      }
+    }
+  }
+  if (changed > 0) saveProjects(projects);
+  return changed;
+}
+
+/**
  * Get contributions for a specific entry type across all projects
  */
 export function getTopicContributions(
