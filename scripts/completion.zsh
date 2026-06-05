@@ -238,6 +238,7 @@ _ogp_agent_comms() {
 
   _arguments \
     '1:subcommand:((
+      send\:"Send an agent-comms message to a peer (alias of federation agent)"
       policies\:"Show response policies"
       configure\:"Configure response policies"
       add-topic\:"Add topic to peer response policy"
