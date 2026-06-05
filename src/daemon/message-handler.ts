@@ -9,7 +9,7 @@ import {
   getProject,
   joinProject,
   isProjectMember,
-  contributeToProject,
+  upsertContribution,
   getTopicContributions,
   getAuthorContributions,
   getProjectStatus,
@@ -757,6 +757,7 @@ async function handleProjectContribute(
     };
   }
 
+  // Member check stays: you cannot contribute to a project you are not in.
   if (!isProjectMember(projectId, message.from)) {
     return {
       success: false,
@@ -766,34 +767,49 @@ async function handleProjectContribute(
     };
   }
 
-  // Keep the existing topic bucket structure on disk; user-facing terminology is "entry type".
-  ensureProjectTopic(projectId, entryType);
+  // Signed-contribution gate (bd-6twb). No grace window: unsigned live
+  // contributions are rejected.
+  const contribution = payload.contribution;
+  if (!contribution || !contribution.payloadStr || !contribution.signature) {
+    return {
+      success: false, nonce: message.nonce,
+      error: 'Missing signed contribution envelope (id/payloadStr/signature)',
+      statusCode: 400
+    };
+  }
 
-  // Build authorIdentity with 3-tier fallback: payload → peer lookup → undefined
+  const { verifySignedContribution } = await import('./contribution-signing.js');
+  const verdict = verifySignedContribution(contribution, message.from);
+  if (!verdict.ok || !verdict.record) {
+    return {
+      success: false, nonce: message.nonce,
+      error: `Contribution signature rejected: ${verdict.reason ?? 'unknown'}`,
+      statusCode: 401
+    };
+  }
+
+  // Identity snapshot (payload → peer fallback) WITHOUT mutating signed fields.
   let identity = authorIdentity;
   if (!identity) {
-    // Fall back to peer lookup
     const peer = getPeer(message.from);
     if (peer) {
       identity = {
-        displayName: peer.displayName,
-        humanName: peer.humanName,
-        agentName: peer.agentName,
-        organization: peer.organization,
-        tags: peer.tags
+        displayName: peer.displayName, humanName: peer.humanName,
+        agentName: peer.agentName, organization: peer.organization, tags: peer.tags
       };
     }
   }
+  const record = { ...verdict.record, authorIdentity: identity };
 
-  // Add the contribution
-  const contributionId = contributeToProject(
-    projectId,
-    entryType,
-    message.from,
-    summary,
-    metadata,
-    identity
-  );
+  ensureProjectTopic(projectId, record.entryType || entryType);
+  const upsert = upsertContribution(projectId, record);
+  if (upsert === 'rejected' || upsert === 'not-found') {
+    return {
+      success: false, nonce: message.nonce,
+      error: `Contribution not stored: ${upsert}`, statusCode: 422
+    };
+  }
+  const contributionId = record.id; // 'inserted' or 'duplicate' both succeed (idempotent)
 
   if (contributionId) {
     const notificationText = `[OGP Project] ${displayName} contributed to '${project.name}' entry type '${entryType}': ${summary}`;
