@@ -443,6 +443,20 @@ When approving or granting scopes:
 | `ogp project query-peer <peer> <id> [options]` | Query peer's project |
 | `ogp project status-peer <peer> <id>` | Get peer's project status |
 | `ogp project delete <id> [options]` | Delete a project |
+| `ogp project add-owner <id> <peer-key>` | Grant ownership to another key (owners only) |
+| `ogp project claim-ownership <id>` | Claim a pre-existing project (members only) |
+| `ogp project owners <id>` | List the owners of a project |
+
+### Project Ownership (v0.9.0+)
+
+Projects have owners. The creator is the root owner (established by a signed creation record); additional owners are added via signed grants that any peer can verify independently, so the owner set converges across the federation. Pre-existing (legacy) projects can be claimed by an existing member with `claim-ownership`. Ownership authorizes moderation actions like retracting contributions.
+
+```bash
+ogp project create <id> <name>          # you become the root owner (signed)
+ogp project add-owner <id> <peer-key>   # grant ownership to another key (owners only)
+ogp project claim-ownership <id>        # claim a pre-existing project (members only)
+ogp project owners <id>                 # list the owners
+```
 
 ### Agent-Comms Policy Management (v0.2.0+)
 

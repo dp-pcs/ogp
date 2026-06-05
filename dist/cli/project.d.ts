@@ -84,5 +84,17 @@ export declare function projectQueryPeer(peerId: string, projectId: string, opti
  * Request project status from a peer
  */
 export declare function projectStatusPeer(peerId: string, projectId: string): Promise<void>;
+/**
+ * bd-hy3o: Grant ownership of a project to a peer key (owners only).
+ */
+export declare function projectAddOwner(projectId: string, granteeKey: string): Promise<void>;
+/**
+ * bd-hy3o: Claim ownership of a pre-existing project (members only).
+ */
+export declare function projectClaimOwnership(projectId: string): Promise<void>;
+/**
+ * bd-hy3o: List the owners of a project.
+ */
+export declare function projectOwners(projectId: string): void;
 export {};
 //# sourceMappingURL=project.d.ts.map

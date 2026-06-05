@@ -5,6 +5,14 @@ import {
   ensureConfigDir
 } from '../shared/config.js';
 import { verifySignedContribution } from './contribution-signing.js';
+import {
+  type ProjectCreation,
+  type OwnerGrant,
+  deriveOwners,
+  verifySignedCreation,
+  verifySignedGrant,
+  _ownershipCanonicalPeerId as canonicalPeerId
+} from './project-ownership.js';
 
 export interface AuthorIdentity {
   displayName?: string;
@@ -44,6 +52,9 @@ export interface Project {
   members: string[];    // peer IDs who are participants
   topics: ProjectTopic[]; // organized knowledge areas
   metadata?: Record<string, any>; // extensible metadata
+  creation?: ProjectCreation;
+  ownerGrants?: OwnerGrant[];
+  pendingGrants?: OwnerGrant[];
 }
 
 export function getContributionEntryType(contribution: Partial<ProjectContribution> | null | undefined): string {
@@ -97,6 +108,89 @@ export function addProject(project: Project): void {
     projects.push(project);
   }
   saveProjects(projects);
+}
+
+export function setProjectCreation(projectId: string, creation: ProjectCreation): 'set' | 'exists-original' | 'duplicate' | 'not-found' | 'rejected' {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return 'not-found';
+  if (!verifySignedCreation(creation).ok) return 'rejected';
+
+  const existing = project.creation;
+  if (existing) {
+    // An original creation is immutable — nothing supersedes it.
+    if (existing.provenance === 'original') {
+      // Idempotent re-delivery of the SAME original is a no-op success; anything else is refused.
+      return existing.signature === creation.signature ? 'duplicate' : 'exists-original';
+    }
+    // existing is a legacy-claim.
+    if (creation.provenance === 'original') {
+      // An 'original' must NOT overwrite a legacy-claim (security: would re-root ownership).
+      // Original is only valid on a project with no prior creation.
+      return 'exists-original';
+    }
+    // legacy-claim replacing legacy-claim: deterministic earliest-createdAt + key tie-break (peer convergence).
+    if (existing.signature === creation.signature) return 'duplicate'; // idempotent re-delivery
+    const keep = creation.createdAt < existing.createdAt
+      || (creation.createdAt === existing.createdAt && canonicalPeerId(creation.creatorKey) < canonicalPeerId(existing.creatorKey));
+    if (!keep) return 'duplicate'; // current claim wins; incoming is a no-op (NOT an error)
+  }
+
+  project.creation = creation;
+  saveProjects(projects);
+  resolvePendingGrants(projectId);
+  return 'set';
+}
+
+export function addOwnerGrant(projectId: string, grant: OwnerGrant): 'added' | 'duplicate' | 'pending' | 'rejected' | 'not-found' {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return 'not-found';
+  if (!verifySignedGrant(grant).ok) return 'rejected';
+  if (grant.projectId !== projectId) return 'rejected';
+  project.ownerGrants ??= [];
+  project.pendingGrants ??= [];
+  if (project.ownerGrants.some(g => g.id === grant.id) || project.pendingGrants.some(g => g.id === grant.id)) {
+    return 'duplicate';
+  }
+  const owners = deriveOwners(project.creation, project.ownerGrants);
+  if (owners.has(canonicalPeerId(grant.grantedBy))) {
+    project.ownerGrants.push(grant);
+    saveProjects(projects);
+    resolvePendingGrants(projectId);
+    return 'added';
+  }
+  project.pendingGrants.push(grant);
+  saveProjects(projects);
+  return 'pending';
+}
+
+export function resolvePendingGrants(projectId: string): number {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project || !project.pendingGrants?.length) return 0;
+  project.ownerGrants ??= [];
+  let moved = 0, changed = true;
+  while (changed) {
+    changed = false;
+    const owners = deriveOwners(project.creation, project.ownerGrants);
+    for (let i = project.pendingGrants.length - 1; i >= 0; i--) {
+      const g = project.pendingGrants[i];
+      if (owners.has(canonicalPeerId(g.grantedBy))) {
+        project.ownerGrants.push(g);
+        project.pendingGrants.splice(i, 1);
+        moved++; changed = true;
+      }
+    }
+  }
+  if (moved > 0) saveProjects(projects);
+  return moved;
+}
+
+export function isOwner(projectId: string, key: string): boolean {
+  const project = loadProjects().find(p => p.id === projectId);
+  if (!project) return false;
+  return deriveOwners(project.creation, project.ownerGrants ?? []).has(canonicalPeerId(key));
 }
 
 export function getProject(projectId: string): Project | null {

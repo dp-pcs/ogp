@@ -61,7 +61,10 @@ import {
   projectRequestJoin,
   projectSendContribution,
   projectQueryPeer,
-  projectStatusPeer
+  projectStatusPeer,
+  projectAddOwner,
+  projectClaimOwnership,
+  projectOwners
 } from './cli/project.js';
 import { configCommand, whoami } from './cli/config.js';
 import { keychainCommand } from './cli/keychain.js';
@@ -1180,6 +1183,31 @@ project
     }
     deleteProject(projectId);
     console.log(`✓ Deleted project '${proj.name}' (${projectId})`);
+  });
+
+project
+  .command('add-owner')
+  .description('Grant ownership of a project to a peer key (owners only)')
+  .argument('<project-id>', 'Project ID')
+  .argument('<grantee-key>', 'Public key of the new owner')
+  .action(async (projectId, granteeKey) => {
+    await projectAddOwner(projectId, granteeKey);
+  });
+
+project
+  .command('claim-ownership')
+  .description('Claim ownership of a pre-existing project (members only)')
+  .argument('<project-id>', 'Project ID')
+  .action(async (projectId) => {
+    await projectClaimOwnership(projectId);
+  });
+
+project
+  .command('owners')
+  .description('List the owners of a project')
+  .argument('<project-id>', 'Project ID')
+  .action((projectId) => {
+    projectOwners(projectId);
   });
 
 // Completion commands
