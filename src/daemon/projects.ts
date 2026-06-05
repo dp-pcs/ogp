@@ -4,6 +4,7 @@ import {
   getConfigDir,
   ensureConfigDir
 } from '../shared/config.js';
+import { verifySignedContribution } from './contribution-signing.js';
 
 export interface AuthorIdentity {
   displayName?: string;
@@ -244,6 +245,56 @@ export function contributeToProject(
 
   saveProjects(projects);
   return contributionId;
+}
+
+export type UpsertResult = 'inserted' | 'duplicate' | 'rejected' | 'not-found';
+
+/**
+ * Merge a fully-formed contribution into a project by id. Idempotent: a record
+ * whose id already exists is a no-op ('duplicate'). A signed record is verified
+ * before insert. Unlike contributeToProject, this does NOT require the author to
+ * be a project member — a verified signature is sufficient provenance, which is
+ * what lets bd-53c (Story B) merge relayed contributions. Records lacking a
+ * signature are rejected here (only the migration path may store unsigned/legacy).
+ */
+export function upsertContribution(
+  projectId: string,
+  record: ProjectContribution
+): UpsertResult {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return 'not-found';
+
+  for (const topic of project.topics) {
+    if (topic.contributions.some(c => c.id === record.id)) return 'duplicate';
+  }
+
+  if (!record.signature) return 'rejected';
+  const check = verifySignedContribution({
+    id: record.id,
+    authorId: record.authorId,
+    timestamp: record.timestamp,
+    payloadStr: JSON.stringify({
+      id: record.id, projectId, authorId: record.authorId,
+      entryType: record.entryType, summary: record.summary,
+      ...(record.metadata !== undefined && { metadata: record.metadata }),
+      timestamp: record.timestamp
+    }),
+    signature: record.signature
+  });
+  if (!check.ok) return 'rejected';
+
+  const entryTypeName = record.entryType || record.topic || 'unknown';
+  let topic = project.topics.find(t => t.name === entryTypeName);
+  if (!topic) {
+    topic = { name: entryTypeName, contributions: [], lastUpdated: record.timestamp };
+    project.topics.push(topic);
+  }
+  topic.contributions.push({ ...record, verified: true });
+  topic.lastUpdated = record.timestamp;
+  project.updatedAt = new Date().toISOString();
+  saveProjects(projects);
+  return 'inserted';
 }
 
 /**
