@@ -50,4 +50,30 @@ describe('contribution-signing', () => {
     expect(verifySignedContribution(wire, 'someone-else').ok).toBe(false);
     expect(verifySignedContribution(wire, 'someone-else').reason).toBe('sender-mismatch');
   });
+
+  it('rejects tampered metadata', () => {
+    const { wire } = buildSignedContribution(base, author.privateKey);
+    const parsed = JSON.parse(wire.payloadStr);
+    parsed.metadata = { tool: 'evil' };
+    const tampered = { ...wire, payloadStr: JSON.stringify(parsed) };
+    expect(verifySignedContribution(tampered).ok).toBe(false);
+  });
+
+  it('fails closed on malformed input', () => {
+    expect(verifySignedContribution(null).ok).toBe(false);
+    expect(verifySignedContribution(null).reason).toBe('missing-contribution');
+    expect(verifySignedContribution(undefined).ok).toBe(false);
+
+    const { wire } = buildSignedContribution(base, author.privateKey);
+    expect(verifySignedContribution({ ...wire, payloadStr: '' }).reason).toBe('missing-signed-fields');
+    expect(verifySignedContribution({ ...wire, signature: '' }).reason).toBe('missing-signed-fields');
+    expect(verifySignedContribution({ ...wire, payloadStr: 'not json' }).reason).toBe('bad-payload');
+  });
+
+  it('relay path (no expectedSenderId) accepts a valid author signature; strict path with wrong sender rejects', () => {
+    const { wire } = buildSignedContribution(base, author.privateKey);
+    expect(verifySignedContribution(wire).ok).toBe(true);                       // relay: no sender binding
+    expect(verifySignedContribution(wire, author.publicKey).ok).toBe(true);     // strict: correct sender
+    expect(verifySignedContribution(wire, 'wrong-key').reason).toBe('sender-mismatch'); // strict: wrong sender
+  });
 });
