@@ -117,7 +117,15 @@ Receiver `handleProjectGrantOwner`:
 `creation`. Mints a `ProjectCreation` with `provenance: 'legacy-claim'`, signed by
 the claimant, federates it (same lazy + on-demand path).
 
-**Convergence on competing claims** (two peers both claim a legacy project):
+**Member-gated (hardening).** A claim is only valid if the claimant's key is already
+in the project's `members[]` — a random federated peer cannot claim ownership of a
+project it has no relationship to; only an existing participant can root ownership.
+Locally the CLI fails fast if the caller is not a member; the receiver rejects a
+legacy-claim whose `creatorKey` is not a member of the project in its view (`403`).
+For the single-operator case this is a no-op (you are a member); for the federated
+case it turns "anyone first" into "a participant first."
+
+**Convergence on competing claims** (two *members* both claim a legacy project):
 receiver keeps the claim with the **earliest `createdAt`, tie-broken by lowest
 canonical key** — deterministic, so all peers converge on the same root owner.
 A claim is **rejected (`409`)** if a `provenance: 'original'` creation already exists;
@@ -166,7 +174,8 @@ These ship **with** the feature, not later (per the recent stale-completion/READ
 | Grant signed by a provable non-owner | reject `403` |
 | Grant whose grantor not yet known (out-of-order) | defer to pending, re-evaluate later (no reject) |
 | `claim-ownership` when an `original` creation exists | reject `409` |
-| Two legacy claims race | earliest createdAt, key tie-break (deterministic) |
+| `claim-ownership` by a non-member (local pre-check / receiver) | fail fast / reject `403` |
+| Two legacy claims race (both members) | earliest createdAt, key tie-break (deterministic) |
 | Creator self-grant | no-op (already owner) |
 | Duplicate grant id (re-apply / backfill) | idempotent no-op |
 | `add-owner` by a non-owner (local pre-check) | fail fast, no federation send |
@@ -179,8 +188,9 @@ These ship **with** the feature, not later (per the recent stale-completion/READ
 2. Transitive depth: creator→A→B→C all resolve (each grant by an existing owner).
 3. `project.create` round-trip: signed creation verifies + stored verbatim; tampered creatorKey fails.
 4. Out-of-order: grant arrives before its creation → pending → resolves when creation lands.
-5. Legacy claim: two competing claims converge (earliest createdAt, key tie-break);
-   claim rejected when an `original` creation exists.
+5. Legacy claim: a member's claim is accepted; a **non-member's claim is rejected (403)**;
+   two competing *member* claims converge (earliest createdAt, key tie-break); claim
+   rejected when an `original` creation exists.
 6. `project.grant-owner` receiver: provable non-owner grantor → 403; idempotent re-apply.
 7. Union-merge convergence: two peers with disjoint grant subsets derive the SAME owner set after merge.
 8. Completion scripts include the new commands (grep assertion); README updated (grep assertion).
@@ -191,7 +201,7 @@ These ship **with** the feature, not later (per the recent stale-completion/READ
 |---|----------|--------|
 | 1 | Ownership model | **Creator-rooted, signed grants** (derived, not a replicated mutable set) |
 | 2 | Root of trust | **Signed creation record** (`project.create` becomes a signed event) |
-| 3 | Legacy projects | **One-time signed creation backfill** via `claim-ownership` (provenance: legacy-claim, first-claimer + deterministic race convergence) |
+| 3 | Legacy projects | **One-time signed creation backfill** via `claim-ownership` (provenance: legacy-claim), **member-gated** (only an existing project member may claim) + deterministic race convergence |
 | 4 | remove-owner in v1 | **No** — revocation deferred to its own bead |
 | 5 | Completion + README | **First-class deliverables shipped with the feature** |
 
@@ -200,9 +210,12 @@ These ship **with** the feature, not later (per the recent stale-completion/READ
 - **Crypto-adjacent** (signed authority records on the federation path) → escalate-before-merge.
   Mitigated: reuses `signCanonical`/`verifyCanonical`/`canonicalPeerId` — no new crypto;
   ownership is *derived* from immutable signed facts (no mutable shared state to corrupt).
-- **Legacy claim trust:** for pre-federation-trust legacy projects, first-claimer roots
-  ownership. Acceptable because the operator controls both ends today; `provenance:
-  legacy-claim` keeps it honest and auditable, distinct from an original creation.
+- **Legacy claim trust:** claims are **member-gated** — only an existing project member
+  may root ownership of a legacy project, so a random federated peer cannot hijack it.
+  Among members it is first-claimer (deterministic tie-break); `provenance: legacy-claim`
+  keeps it honest and auditable, distinct from an original creation. Residual: a
+  malicious *member* could still race-claim, but membership already implies a trust
+  relationship with the project, so this is an acceptable bound for v1.
 - **Append-only growth:** grants accumulate. Bounded in practice (few owners per project);
   revocation/compaction is a future bead, not a v1 concern.
 - **bd-tq31 coupling:** this exists to unblock retract. `isOwner` is the only API retract
