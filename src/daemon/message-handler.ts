@@ -15,7 +15,9 @@ import {
   getProjectStatus,
   ensureProjectTopic,
   createProject,
-  addProject
+  addProject,
+  setProjectCreation,
+  addOwnerGrant
 } from './projects.js';
 import {
   loadConfig,
@@ -513,6 +515,10 @@ function formatNotification(message: FederationMessage, displayName: string): st
       return `[OGP Project] ${displayName} wants to join project '${payload.projectName}' (${payload.projectId})`;
     case 'project.contribute':
       return `[OGP Project] ${displayName} contributed to project '${payload.projectId}' entry type '${payload.entryType || payload.topic}': ${payload.summary}`;
+    case 'project.grant-owner':
+      return `[OGP Project] ${displayName} granted ownership on project '${payload.projectId}'`;
+    case 'project.create':
+      return `[OGP Project] ${displayName} created/claimed project '${payload.projectId}'`;
     case 'project.query':
       return `[OGP Project] ${displayName} queried project '${payload.projectId}'`;
     case 'project.status':
@@ -626,6 +632,12 @@ async function handleProjectIntent(
 
       case 'project.contribute':
         return await handleProjectContribute(message, displayName, payload, hookAgentId);
+
+      case 'project.grant-owner':
+        return await handleProjectGrantOwner(message, displayName, payload, hookAgentId);
+
+      case 'project.create':
+        return await handleProjectCreate(message, displayName, payload, hookAgentId);
 
       case 'project.query':
         return await handleProjectQuery(message, displayName, payload, hookAgentId);
@@ -852,6 +864,79 @@ async function handleProjectContribute(
       statusCode: 500
     };
   }
+}
+
+/**
+ * Handle project.grant-owner intent — store a signed owner grant.
+ */
+async function handleProjectGrantOwner(
+  message: FederationMessage,
+  displayName: string,
+  payload: any,
+  hookAgentId: string  // B0032 P3
+): Promise<MessageResponse> {
+  const { projectId, grant } = payload;
+  if (!projectId || !grant) {
+    return { success: false, nonce: message.nonce, error: 'Missing projectId or grant', statusCode: 400 };
+  }
+  if (!getProject(projectId)) {
+    return { success: false, nonce: message.nonce, error: `Project '${projectId}' not found`, statusCode: 404 };
+  }
+  const result = addOwnerGrant(projectId, grant);
+  if (result === 'rejected') {
+    return { success: false, nonce: message.nonce, error: 'Owner grant rejected (bad signature or grantor not an owner)', statusCode: 403 };
+  }
+  if (result === 'not-found') {
+    return { success: false, nonce: message.nonce, error: 'Project not found', statusCode: 404 };
+  }
+  // 'added' | 'duplicate' | 'pending' succeed
+  return { success: true, nonce: message.nonce, response: { projectId, grantState: result, timestamp: new Date().toISOString() } };
+}
+
+/**
+ * Membership check that tolerates 32-char canonical ids, full keys, or
+ * mixed-form members. (isProjectMember does an exact match; members may be
+ * stored as 32-char ids OR full keys OR emails — email members simply won't
+ * match a key, which is expected.)
+ */
+function claimantIsMember(projectId: string, creatorKey: string): boolean {
+  const proj = getProject(projectId);
+  if (!proj) return false;
+  const full = creatorKey;
+  const short = creatorKey.substring(0, 32);
+  return proj.members.some(m => m === full || m === short || (m.length >= 32 && m.substring(0, 32) === short));
+}
+
+/**
+ * Handle project.create intent — record a signed creation (original or
+ * legacy-claim). Legacy claims must come from an existing project member.
+ */
+async function handleProjectCreate(
+  message: FederationMessage,
+  displayName: string,
+  payload: any,
+  hookAgentId: string  // B0032 P3
+): Promise<MessageResponse> {
+  const { projectId, projectName, creation } = payload;
+  if (!projectId || !creation) {
+    return { success: false, nonce: message.nonce, error: 'Missing projectId or creation', statusCode: 400 };
+  }
+  let project = getProject(projectId);
+  if (!project) {
+    project = createProject(projectId, projectName || projectId);
+    addProject(project);
+  }
+  if (creation.provenance === 'legacy-claim' && !claimantIsMember(projectId, creation.creatorKey)) {
+    return { success: false, nonce: message.nonce, error: 'Legacy ownership claim requires project membership', statusCode: 403 };
+  }
+  const result = setProjectCreation(projectId, creation);
+  if (result === 'rejected') {
+    return { success: false, nonce: message.nonce, error: 'Creation rejected (bad signature)', statusCode: 401 };
+  }
+  if (result === 'exists-original') {
+    return { success: false, nonce: message.nonce, error: 'Project already has an original creation', statusCode: 409 };
+  }
+  return { success: true, nonce: message.nonce, response: { projectId, creationState: result, timestamp: new Date().toISOString() } };
 }
 
 /**
