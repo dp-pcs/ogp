@@ -842,7 +842,30 @@ program.addCommand(keychainCommand);
 // Agent-comms configuration commands
 const agentComms = program
   .command('agent-comms')
-  .description('Configure agent-to-agent communication policies');
+  .description('Configure agent-to-agent communication policies (use "agent-comms send" to send a message)');
+
+// Discoverability alias for sending: the send path historically lives at
+// "ogp federation agent". Mirror it here so "ogp agent-comms send" works too.
+agentComms
+  .command('send')
+  .description('Send an agent-comms message to a peer (alias of "ogp federation agent")')
+  .argument('<peer-id>', 'Peer ID')
+  .argument('<topic>', 'Topic (e.g., memory-management)')
+  .argument('<message>', 'Message text')
+  .option('-p, --priority <level>', 'Priority (low|normal|high)', 'normal')
+  .option('-c, --conversation <id>', 'Conversation ID for threading')
+  .option('-w, --wait', 'Wait for reply')
+  .option('-t, --timeout <ms>', 'Reply timeout in milliseconds', '30000')
+  .option('--to-agent <persona>', 'Target a specific persona on the peer (requires multi-agent-personas capability)')
+  .action(async (peerId, topic, message, options) => {
+    await federationSendAgentComms(peerId, topic, message, {
+      priority: options.priority as 'low' | 'normal' | 'high',
+      conversationId: options.conversation,
+      waitForReply: options.wait,
+      replyTimeout: parseInt(options.timeout, 10),
+      toAgent: options.toAgent
+    });
+  });
 
 agentComms
   .command('interview')
