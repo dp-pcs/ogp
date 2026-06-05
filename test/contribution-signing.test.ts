@@ -94,4 +94,29 @@ describe('contribution-signing', () => {
     expect(res.ok).toBe(false);
     expect(res.reason).toBe('project-mismatch');
   });
+
+  it('accepts when expectedSenderId is the 32-char canonical prefix of the author key (real wire path)', () => {
+    // federationSend sends message.from = keypair.publicKey.substring(0, 32);
+    // the receiver passes that as expectedSenderId. The signed authorId is the full key.
+    const { wire } = buildSignedContribution(base, author.privateKey);
+    const wireSenderId = author.publicKey.substring(0, 32); // what transport actually presents
+    const res = verifySignedContribution(wire, wireSenderId);
+    expect(res.ok).toBe(true);
+    expect(res.reason).toBeUndefined();
+  });
+
+  it('still rejects a genuine cross-peer relay (different author vs sender)', () => {
+    const other = generateKeyPair();
+    const { wire } = buildSignedContribution(base, author.privateKey); // signed by author
+    const otherSenderId = other.publicKey.substring(0, 32);            // transport says someone else
+    const res = verifySignedContribution(wire, otherSenderId);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('sender-mismatch');
+  });
+
+  it('still accepts when expectedSenderId is the full author key (local self path)', () => {
+    const { wire } = buildSignedContribution(base, author.privateKey);
+    const res = verifySignedContribution(wire, author.publicKey); // full key, not prefix
+    expect(res.ok).toBe(true);
+  });
 });
