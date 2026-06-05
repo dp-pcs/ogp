@@ -8,7 +8,7 @@ const OGP_VERSION = _require('../../package.json').version;
 import { requireConfig, loadConfig, getConfigDir, synthesizePersonas } from '../shared/config.js';
 import { getPublicKey } from './keypair.js';
 import { addPeer, createPendingPeerRecord, derivePeerIdFromPublicKey, findBestPeerForApproval, getPeer, getPeerByUrl, listPeers, removePeer, replacePeersByIdentity, updatePeer } from './peers.js';
-import { listProjectsForPeer } from './projects.js';
+import { listProjectsForPeer, migrateLegacyContributions } from './projects.js';
 import { handleMessage } from './message-handler.js';
 import { verify } from '../shared/signing.js';
 import { notifyOpenClaw } from './notify.js';
@@ -815,6 +815,14 @@ export function startServer(config, background = false) {
         console.log(`[OGP] Received signed reply for nonce ${nonce} from peer ${signingPeer.id}`);
         res.json({ received: true });
     });
+    try {
+        const migrated = migrateLegacyContributions();
+        if (migrated > 0)
+            console.log(`[OGP] Tagged ${migrated} legacy (unsigned) contribution(s)`);
+    }
+    catch (err) {
+        console.error('[OGP] Legacy contribution migration failed (non-fatal):', err);
+    }
     server = app.listen(cfg.daemonPort, () => {
         console.log(`[OGP] Daemon listening on port ${cfg.daemonPort}`);
         console.log(`[OGP] Public key: ${getPublicKey()}`);
