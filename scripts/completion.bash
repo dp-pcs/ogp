@@ -116,7 +116,7 @@ _ogp_completion() {
   # project subcommands
   if [ "$cmd" = "project" ]; then
     if [ $COMP_CWORD -eq 2 ]; then
-      opts="create join list remove contribute query status request-join send-contribution query-peer status-peer delete"
+      opts="create join list remove contribute query status request-join send-contribution query-peer status-peer delete add-owner claim-ownership owners"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
     fi
