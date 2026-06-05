@@ -61,4 +61,34 @@ describe('project-ownership', () => {
   it('returns empty owners when creation is absent', () => {
     expect(deriveOwners(undefined, []).size).toBe(0);
   });
+
+  it('admits NEITHER party in a rootless cycle (A grants B, B grants A, no creator link)', () => {
+    const c = buildSignedCreation({ projectId: 'p', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
+    const gAB = buildSignedGrant({ projectId: 'p', grantee: bob.publicKey, grantedBy: alice.publicKey }, alice.privateKey);
+    const gBA = buildSignedGrant({ projectId: 'p', grantee: alice.publicKey, grantedBy: bob.publicKey }, bob.privateKey);
+    const owners = deriveOwners(c, [gAB, gBA]);
+    expect(owners.has(alice.publicKey.substring(0,32))).toBe(false);
+    expect(owners.has(bob.publicKey.substring(0,32))).toBe(false);
+    expect(owners.has(creator.publicKey.substring(0,32))).toBe(true); // creator unaffected
+  });
+
+  it('does not bootstrap a non-owner via self-grant', () => {
+    const c = buildSignedCreation({ projectId: 'p', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
+    const selfGrant = buildSignedGrant({ projectId: 'p', grantee: alice.publicKey, grantedBy: alice.publicKey }, alice.privateKey);
+    expect(deriveOwners(c, [selfGrant]).has(alice.publicKey.substring(0,32))).toBe(false);
+  });
+
+  it('rejects a grant whose outer field was swapped after signing (field-mismatch)', () => {
+    // valid grant alice->bob, then tamper the outer grantedBy to a real owner's key
+    const g = buildSignedGrant({ projectId: 'p', grantee: bob.publicKey, grantedBy: alice.publicKey }, alice.privateKey);
+    const tampered = { ...g, grantedBy: creator.publicKey }; // claim creator granted it, but signed by alice over alice
+    expect(verifySignedGrant(tampered).ok).toBe(false);
+    expect(['bad-signature', 'field-mismatch']).toContain(verifySignedGrant(tampered).reason);
+  });
+
+  it('ignores a grant for a different project', () => {
+    const c = buildSignedCreation({ projectId: 'p', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
+    const otherProjGrant = buildSignedGrant({ projectId: 'other', grantee: alice.publicKey, grantedBy: creator.publicKey }, creator.privateKey);
+    expect(deriveOwners(c, [otherProjGrant]).has(alice.publicKey.substring(0,32))).toBe(false);
+  });
 });
