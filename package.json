@@ -40,8 +40,16 @@
   "files": [
     "dist",
     "skills",
-    "scripts",
+    "scripts/completion.bash",
+    "scripts/completion.zsh",
+    "scripts/install-skills.js",
     "docs",
+    "!docs/escalations",
+    "!docs/superpowers",
+    "!docs/case-studies",
+    "!docs/RC1-FEDERATION-TEST-CHECKLIST.md",
+    "!docs/project-intent-testing.md",
+    "!docs/nat-hole-punch-spike.md",
     "README.md",
     "package.json"
   ],

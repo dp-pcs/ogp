@@ -18,8 +18,11 @@ This is a companion daemon that adds federation capabilities to any standard Ope
 - **Peer relationship management** (request, approve, reject)
 - **Identity attribution** with separate human and agent names (v0.5.0+)
 - **Project collaboration** with identity snapshots for historical accuracy (v0.6.0+)
+- **Per-contribution signatures** — every project contribution is author-signed and verified on receipt, with a stable ULID id (v0.8.0+)
+- **Multi-agent personas** — multiple local agents per gateway, listable via `ogp config list-agents` (v0.7.0+)
+- **Single-daemon stateDir lock** preventing duplicate `ogp start` write-races (v0.8.0+)
 - **Message verification and relay** to your OpenClaw agent
-- **Public tunnel support** (cloudflared/ngrok) for internet accessibility
+- **Public tunnel support** (cloudflared/ngrok) for internet accessibility, managed via `ogp tunnel`
 - **Optional macOS LaunchAgent** for automatic startup
 
 ## Prerequisites
@@ -54,22 +57,45 @@ Verify the installed copies after an upgrade:
 rg -n '^version:' ~/.openclaw/skills/ogp*/SKILL.md ~/.claude/skills/ogp*/SKILL.md 2>/dev/null
 ```
 
-For the current `0.6.0` release line, the changed skills should report:
-- `ogp` `2.6.0`
-- `ogp-agent-comms` `0.6.0`
-- `ogp-project` `2.2.0`
+The installed skill versions should match the skills bundled with the `@dp-pcs/ogp`
+version you have installed (run `ogp completion install` / `ogp-install-skills` after
+upgrading to refresh them). If the reported versions are older than the bundled
+`skills/*/SKILL.md` in this package, re-run the skill installer.
 
 ### Shell Completion and Help
 
 OGP includes intelligent tab completion and context-sensitive help (inspired by Cisco IOS).
 
+**What tab completion does:** once installed, pressing `Tab` while typing an `ogp`
+command completes command names, subcommands, and flags — and completes some values
+dynamically (for example, `ogp config set-default <Tab>` lists your enabled frameworks).
+It means you don't have to memorize the command tree: type `ogp <Tab>` to see the
+top-level commands, `ogp federation <Tab>` to see federation subcommands, and so on.
+Completion is provided by the `scripts/completion.bash` and `scripts/completion.zsh`
+scripts bundled with the package.
+
 **Install tab completion:**
 
 ```bash
-ogp completion install
+ogp completion install            # auto-detects your shell (bash or zsh)
+ogp completion install bash       # or target a shell explicitly
+ogp completion install zsh
 ```
 
-This installs completion for your shell (bash or zsh). After installation, **open a new terminal window** for the changes to take effect.
+The installer writes the completion script and wires it into your shell's startup
+file. After installing, **open a new terminal window** (or `source` your shell rc) for
+it to take effect. If you upgrade OGP and new commands don't complete, just re-run
+`ogp completion install` to refresh the script.
+
+**Using it:**
+
+```bash
+ogp <Tab>                         # list top-level commands
+ogp fed<Tab>                      # completes to "federation"
+ogp federation <Tab>              # list federation subcommands
+ogp config set-default <Tab>      # completes enabled framework names
+ogp tunnel <Tab>                  # list / start / stop
+```
 
 **Context-sensitive help:**
 
@@ -296,10 +322,12 @@ After installation, restart your shell or run `source ~/.bashrc` (bash) or `sour
 
 | Command | Description |
 |---------|-------------|
-| `ogp expose` | Start a Cloudflare quick tunnel in the foreground; use the `ogp-expose` skill/doc flow for guided setup |
-| `ogp expose --background` | Run tunnel as background process |
-| `ogp expose --method ngrok` | Use ngrok instead of cloudflared |
-| `ogp expose stop` | Stop the tunnel |
+| `ogp tunnel list` | List running cloudflared/ngrok tunnels and reconcile them against your configured `gatewayUrl` (✓/✗/⚠) |
+| `ogp tunnel start cloudflared` | Start a Cloudflare quick tunnel (idempotent — no-op if one is already running) |
+| `ogp tunnel start ngrok` | Start an ngrok tunnel instead of cloudflared |
+| `ogp tunnel stop` | Stop the OGP-managed tunnel |
+
+For a stable, named tunnel (recommended for production), see the [Making Your Gateway Reachable](#3-making-your-gateway-reachable) section above or the `ogp-expose` skill.
 
 ### System Integration (macOS)
 
@@ -317,6 +345,8 @@ After installation, restart your shell or run `source ~/.bashrc` (bash) or `sour
 | `ogp config enable <framework>` | Enable a framework |
 | `ogp config disable <framework>` | Disable a framework |
 | `ogp config show [--for <framework>]` | Show current configuration |
+| `ogp config list-agents` | List local personas for the active framework (v0.7.0+) |
+| `ogp config show-identity` | Show current identity + personas |
 
 ### Identity Management
 
@@ -760,7 +790,24 @@ Update your `rendezvous.url` config to point to your instance.
 
 Custom intents can be registered with `ogp intent register` (v0.2.0+).
 
-## Key Features (v0.6.0)
+## Key Features
+
+### Signed Project Contributions (v0.8.0+)
+
+Every project contribution is signed by its author. When you `ogp project contribute`,
+the CLI mints a sortable **ULID**, builds a canonical record
+(`id, projectId, authorId, entryType, summary, metadata, timestamp`), and signs it with
+your Ed25519 key. The same signed envelope is used for the local store **and** every
+peer the contribution is pushed to, so a contribution keeps one stable id across the
+whole federation.
+
+On receipt, the daemon verifies three things before storing, all at the authentication
+layer: the signature is valid, the signed `authorId` matches the federation-authenticated
+sender, and the signed `projectId` matches the target project. Unsigned live contributions
+are rejected (`400`); bad/forged/mismatched signatures are rejected (`401`). Pre-existing
+unsigned contributions are migrated once and tagged `verified: false, legacy: true` so old
+data is preserved but honestly marked. `authorId` **is** the Ed25519 public key, so no key
+distribution is needed — verification is against the key embedded in the signed bytes.
 
 ### 1. Scope Negotiation (v0.2.0+)
 
