@@ -110,18 +110,32 @@ export function addProject(project: Project): void {
   saveProjects(projects);
 }
 
-export function setProjectCreation(projectId: string, creation: ProjectCreation): 'set' | 'exists-original' | 'not-found' | 'rejected' {
+export function setProjectCreation(projectId: string, creation: ProjectCreation): 'set' | 'exists-original' | 'duplicate' | 'not-found' | 'rejected' {
   const projects = loadProjects();
   const project = projects.find(p => p.id === projectId);
   if (!project) return 'not-found';
   if (!verifySignedCreation(creation).ok) return 'rejected';
-  if (project.creation?.provenance === 'original') return 'exists-original';
-  if (project.creation?.provenance === 'legacy-claim' && creation.provenance === 'legacy-claim') {
-    const cur = project.creation;
-    const keep = creation.createdAt < cur.createdAt
-      || (creation.createdAt === cur.createdAt && canonicalPeerId(creation.creatorKey) < canonicalPeerId(cur.creatorKey));
-    if (!keep) return 'exists-original'; // current claim wins; no-op
+
+  const existing = project.creation;
+  if (existing) {
+    // An original creation is immutable — nothing supersedes it.
+    if (existing.provenance === 'original') {
+      // Idempotent re-delivery of the SAME original is a no-op success; anything else is refused.
+      return existing.signature === creation.signature ? 'duplicate' : 'exists-original';
+    }
+    // existing is a legacy-claim.
+    if (creation.provenance === 'original') {
+      // An 'original' must NOT overwrite a legacy-claim (security: would re-root ownership).
+      // Original is only valid on a project with no prior creation.
+      return 'exists-original';
+    }
+    // legacy-claim replacing legacy-claim: deterministic earliest-createdAt + key tie-break (peer convergence).
+    if (existing.signature === creation.signature) return 'duplicate'; // idempotent re-delivery
+    const keep = creation.createdAt < existing.createdAt
+      || (creation.createdAt === existing.createdAt && canonicalPeerId(creation.creatorKey) < canonicalPeerId(existing.creatorKey));
+    if (!keep) return 'duplicate'; // current claim wins; incoming is a no-op (NOT an error)
   }
+
   project.creation = creation;
   saveProjects(projects);
   resolvePendingGrants(projectId);

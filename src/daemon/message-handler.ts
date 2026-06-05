@@ -931,11 +931,12 @@ async function handleProjectCreate(
   }
   const result = setProjectCreation(projectId, creation);
   if (result === 'rejected') {
-    return { success: false, nonce: message.nonce, error: 'Creation rejected (bad signature)', statusCode: 401 };
+    return { success: false, nonce: message.nonce, error: 'Creation rejected (bad signature)', statusCode: 403 };
   }
   if (result === 'exists-original') {
-    return { success: false, nonce: message.nonce, error: 'Project already has an original creation', statusCode: 409 };
+    return { success: false, nonce: message.nonce, error: 'Project already has an owner; cannot supersede', statusCode: 409 };
   }
+  // 'set' | 'duplicate' succeed (idempotent re-delivery must not error)
   return { success: true, nonce: message.nonce, response: { projectId, creationState: result, timestamp: new Date().toISOString() } };
 }
 
