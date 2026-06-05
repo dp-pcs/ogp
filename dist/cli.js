@@ -947,7 +947,7 @@ project
     .option('--topic <name>', 'Filter by entry type (alias for --type)')
     .option('--author <id>', 'Filter by author')
     .option('--limit <n>', 'Maximum results to return', '20')
-    .option('--timeout <ms>', 'Response timeout in milliseconds', '10000')
+    .option('--timeout <ms>', 'Response timeout in milliseconds', '30000')
     .option('--json', 'Output machine-readable JSON (includes contribution ids + ISO timestamps)')
     .action(async (peerId, projectId, options) => {
     const queryOptions = {
