@@ -779,7 +779,7 @@ async function handleProjectContribute(
   }
 
   const { verifySignedContribution } = await import('./contribution-signing.js');
-  const verdict = verifySignedContribution(contribution, message.from);
+  const verdict = verifySignedContribution(contribution, message.from, projectId);
   if (!verdict.ok || !verdict.record) {
     return {
       success: false, nonce: message.nonce,
@@ -812,7 +812,8 @@ async function handleProjectContribute(
   const contributionId = record.id; // 'inserted' or 'duplicate' both succeed (idempotent)
 
   if (contributionId) {
-    const notificationText = `[OGP Project] ${displayName} contributed to '${project.name}' entry type '${entryType}': ${summary}`;
+    const signedEntryType = record.entryType ?? record.topic;
+    const notificationText = `[OGP Project] ${displayName} contributed to '${project.name}' entry type '${signedEntryType}': ${record.summary}`;
     await notifyOpenClaw({
       text: notificationText,
       hookAgentId,
@@ -822,9 +823,9 @@ async function handleProjectContribute(
           intent: 'project.contribute',
           nonce: message.nonce,
           projectId,
-          entryType,
-          topic: entryType,
-          summary,
+          entryType: signedEntryType,
+          topic: signedEntryType,
+          summary: record.summary,
           contributionId,
           payload: message.payload
         }
@@ -837,8 +838,8 @@ async function handleProjectContribute(
       response: {
         contributed: true,
         projectId,
-        entryType,
-        topic: entryType,
+        entryType: signedEntryType,
+        topic: signedEntryType,
         contributionId,
         timestamp: new Date().toISOString()
       }

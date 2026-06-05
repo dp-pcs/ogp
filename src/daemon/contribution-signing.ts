@@ -98,7 +98,8 @@ export function buildSignedContribution(
  */
 export function verifySignedContribution(
   wire: SignedContributionWire | undefined | null,
-  expectedSenderId?: string
+  expectedSenderId?: string,
+  expectedProjectId?: string
 ): VerifyOutcome {
   if (!wire || typeof wire !== 'object') return { ok: false, reason: 'missing-contribution' };
   const { payloadStr, signature } = wire;
@@ -123,6 +124,10 @@ export function verifySignedContribution(
 
   if (expectedSenderId !== undefined && canonical.authorId !== expectedSenderId) {
     return { ok: false, reason: 'sender-mismatch' };
+  }
+
+  if (expectedProjectId !== undefined && canonical.projectId !== expectedProjectId) {
+    return { ok: false, reason: 'project-mismatch' };
   }
 
   const record: ProjectContribution = {

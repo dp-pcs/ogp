@@ -76,4 +76,22 @@ describe('contribution-signing', () => {
     expect(verifySignedContribution(wire, author.publicKey).ok).toBe(true);     // strict: correct sender
     expect(verifySignedContribution(wire, 'wrong-key').reason).toBe('sender-mismatch'); // strict: wrong sender
   });
+
+  it('rejects a forged payloadStr (mutated signed bytes)', () => {
+    const { wire } = buildSignedContribution(base, author.privateKey);
+    const forged = { ...wire, payloadStr: wire.payloadStr.replace('hello', 'HELLO') };
+    // 'hello' may not appear; mutate a stable character instead if so:
+    const reallyForged = forged.payloadStr === wire.payloadStr
+      ? { ...wire, payloadStr: wire.payloadStr.slice(0, -2) + (wire.payloadStr.slice(-2, -1) === 'a' ? 'b' : 'a') + wire.payloadStr.slice(-1) }
+      : forged;
+    expect(verifySignedContribution(reallyForged).ok).toBe(false);
+  });
+
+  it('rejects a contribution signed for a different project (project-mismatch)', () => {
+    const { wire } = buildSignedContribution(base, author.privateKey); // base.projectId === 'aicoe-expert-network'
+    expect(verifySignedContribution(wire, undefined, 'aicoe-expert-network').ok).toBe(true);
+    const res = verifySignedContribution(wire, undefined, 'some-other-project');
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('project-mismatch');
+  });
 });
