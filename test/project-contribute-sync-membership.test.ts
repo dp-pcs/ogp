@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   ensureProjectTopic: vi.fn(),
   contributeToProject: vi.fn(() => 'contrib-1'),
+  upsertContribution: vi.fn(() => 'inserted'),
   getProject: vi.fn(() => ({
     id: 'apollo',
     name: 'Apollo',
@@ -36,6 +37,7 @@ vi.mock('../src/daemon/projects.js', () => ({
   joinProject: vi.fn(),
   isProjectMember: mocks.isProjectMember,
   contributeToProject: mocks.contributeToProject,
+  upsertContribution: mocks.upsertContribution,
   getTopicContributions: vi.fn(),
   getAuthorContributions: vi.fn(),
   searchContributions: vi.fn(),
@@ -58,6 +60,15 @@ vi.mock('../src/daemon/peers.js', () => ({
 vi.mock('../src/cli/federation.js', () => ({
   federationSend: mocks.federationSend
 }));
+
+// Real keypair so buildSignedContribution produces a valid signature without touching disk.
+vi.mock('../src/daemon/keypair.js', async () => {
+  const { generateKeyPair } = await vi.importActual<typeof import('../src/shared/signing.js')>(
+    '../src/shared/signing.js'
+  );
+  const kp = generateKeyPair();
+  return { getPublicKey: () => kp.publicKey, getPrivateKey: () => kp.privateKey };
+});
 
 import { projectContribute } from '../src/cli/project.js';
 

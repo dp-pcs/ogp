@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getConfigDir, ensureConfigDir } from '../shared/config.js';
+import { verifySignedContribution } from './contribution-signing.js';
 export function getContributionEntryType(contribution) {
     return contribution?.entryType || contribution?.topic || 'unknown';
 }
@@ -167,6 +168,75 @@ export function contributeToProject(projectId, entryTypeName, authorId, summary,
     project.updatedAt = now;
     saveProjects(projects);
     return contributionId;
+}
+/**
+ * Merge a fully-formed contribution into a project by id. Idempotent: a record
+ * whose id already exists is a no-op ('duplicate'). A signed record is verified
+ * before insert. Unlike contributeToProject, this does NOT require the author to
+ * be a project member — a verified signature is sufficient provenance, which is
+ * what lets bd-53c (Story B) merge relayed contributions. Records lacking a
+ * signature are rejected here (only the migration path may store unsigned/legacy).
+ */
+export function upsertContribution(projectId, record) {
+    const projects = loadProjects();
+    const project = projects.find(p => p.id === projectId);
+    if (!project)
+        return 'not-found';
+    for (const topic of project.topics) {
+        if (topic.contributions.some(c => c.id === record.id))
+            return 'duplicate';
+    }
+    if (!record.signature)
+        return 'rejected';
+    const check = verifySignedContribution({
+        id: record.id,
+        authorId: record.authorId,
+        timestamp: record.timestamp,
+        payloadStr: JSON.stringify({
+            id: record.id, projectId, authorId: record.authorId,
+            entryType: record.entryType, summary: record.summary,
+            ...(record.metadata !== undefined && { metadata: record.metadata }),
+            timestamp: record.timestamp
+        }),
+        signature: record.signature
+    });
+    if (!check.ok)
+        return 'rejected';
+    const entryTypeName = record.entryType || record.topic || 'unknown';
+    let topic = project.topics.find(t => t.name === entryTypeName);
+    if (!topic) {
+        topic = { name: entryTypeName, contributions: [], lastUpdated: record.timestamp };
+        project.topics.push(topic);
+    }
+    topic.contributions.push({ ...record, verified: true });
+    topic.lastUpdated = record.timestamp;
+    project.updatedAt = new Date().toISOString();
+    saveProjects(projects);
+    return 'inserted';
+}
+/**
+ * One-time, idempotent migration: tag every contribution lacking a signature as
+ * verified:false, legacy:true. Original ids are preserved (never re-minted).
+ * Returns the count of records changed (0 when already migrated). Safe to run on
+ * every daemon start.
+ */
+export function migrateLegacyContributions() {
+    const projects = loadProjects();
+    let changed = 0;
+    for (const project of projects) {
+        for (const topic of project.topics) {
+            for (const c of topic.contributions) {
+                if (!c.signature && (c.verified === undefined || c.legacy === undefined)) {
+                    c.verified = false;
+                    c.legacy = true;
+                    changed++;
+                }
+            }
+        }
+    }
+    if (changed > 0)
+        saveProjects(projects);
+    return changed;
 }
 /**
  * Get contributions for a specific entry type across all projects
