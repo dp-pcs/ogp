@@ -33,9 +33,11 @@ import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { connectBridge, disconnectBridge } from './openclaw-bridge.js';
 import type { ScopeBundle } from './scopes.js';
 import { loadIntents } from './intent-registry.js';
+import { acquireStateDirLock, StateDirLockedError, type StateDirLockHandle } from './state-lock.js';
 
 let server: any = null;
 let shutdownInProgress = false;
+let stateDirLock: StateDirLockHandle | null = null;
 
 /**
  * Validate an inbound /federation/approve body. Pure function, exported for tests.
@@ -349,8 +351,26 @@ export function startServer(config?: OGPConfig, background = false): void {
   shutdownInProgress = false;
   const cfg = config || requireConfig();
 
+  // bd-ffl: refuse a second daemon on the same stateDir BEFORE doing any work.
+  // In background mode this is a fast pre-check (the durable lock is acquired by
+  // the forked foreground child); in foreground mode we acquire and hold it.
+  // The lock keys on the stateDir — NOT the port — because a dup can fall back
+  // to a different port (EADDRINUSE) and still race projects.json/peers.json.
+  const stateDir = getConfigDir();
+
   // If background mode requested, fork and exit parent
   if (background) {
+    try {
+      // Pre-check only: acquire then immediately release so the long-lived child
+      // can take the real lock. If a live daemon holds it, this throws.
+      acquireStateDirLock(stateDir).release();
+    } catch (err) {
+      if (err instanceof StateDirLockedError) {
+        console.error(`✗ ${err.message}`);
+        process.exit(1);
+      }
+      throw err;
+    }
     const logStream = fs.openSync(getDaemonLogFile(), 'a');
     const child = spawn(process.execPath, [process.argv[1], 'start'], {
       detached: true,
@@ -364,6 +384,19 @@ export function startServer(config?: OGPConfig, background = false): void {
     console.log(`Logs: ${getDaemonLogFile()}`);
     process.exit(0);
   }
+
+  // Foreground (long-lived) process: acquire and HOLD the stateDir lock for the
+  // lifetime of the daemon. Released on graceful shutdown / process exit.
+  try {
+    stateDirLock = acquireStateDirLock(stateDir);
+  } catch (err) {
+    if (err instanceof StateDirLockedError) {
+      console.error(`✗ ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  process.once('exit', () => { stateDirLock?.release(); stateDirLock = null; });
 
   const app: Express = express();
 
@@ -1097,7 +1130,7 @@ export function startServer(config?: OGPConfig, background = false): void {
     stopRendezvous,
     stopHeartbeat,
     getServer: () => server,
-    exit: (code: number) => process.exit(code),
+    exit: (code: number) => { stateDirLock?.release(); stateDirLock = null; process.exit(code); },
     setTimer: setTimeout,
     clearTimer: clearTimeout,
     logError: console.error
