@@ -2,6 +2,17 @@ import { ulid } from 'ulid';
 import { signCanonical, verifyCanonical } from '../shared/signing.js';
 import type { ProjectContribution, AuthorIdentity } from './projects.js';
 
+// Peers are identified by a 32-char public-key prefix (BUILD-111). The federation
+// transport sets message.from to this prefix, while a signed contribution's authorId
+// is the full SPKI hex key. Normalize both to this canonical form before comparing
+// sender identity. Kept as a local constant (must equal CANONICAL_PEER_ID_LENGTH in
+// peers.ts) to avoid coupling this signing module to the peer store for one number;
+// the comment is the guard against silent drift if peers.ts ever changes the length.
+const CANONICAL_PEER_ID_LENGTH = 32;
+function canonicalPeerId(key: string): string {
+  return key.length > CANONICAL_PEER_ID_LENGTH ? key.substring(0, CANONICAL_PEER_ID_LENGTH) : key;
+}
+
 /**
  * Contributions are durable artifacts, not ephemeral handshake messages, so we
  * disable verifyCanonical's default 5-minute max-age check by passing an
@@ -122,7 +133,10 @@ export function verifySignedContribution(
   );
   if (!vr.ok) return { ok: false, reason: vr.reason ?? 'bad-signature' };
 
-  if (expectedSenderId !== undefined && canonical.authorId !== expectedSenderId) {
+  if (
+    expectedSenderId !== undefined &&
+    canonicalPeerId(canonical.authorId) !== canonicalPeerId(expectedSenderId)
+  ) {
     return { ok: false, reason: 'sender-mismatch' };
   }
 
