@@ -99,6 +99,19 @@ describe('project-ownership', () => {
     const otherProjGrant = buildSignedGrant({ projectId: 'other', grantee: alice.publicKey, grantedBy: creator.publicKey }, creator.privateKey);
     expect(deriveOwners(c, [otherProjGrant]).has(alice.publicKey.substring(0,32))).toBe(false);
   });
+
+  it('two peers with disjoint grant subsets derive the same owner set after union (bd-53c convergence)', () => {
+    const c = buildSignedCreation({ projectId: 'p', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
+    const gA = buildSignedGrant({ projectId: 'p', grantee: alice.publicKey, grantedBy: creator.publicKey }, creator.privateKey);
+    const gB = buildSignedGrant({ projectId: 'p', grantee: bob.publicKey, grantedBy: alice.publicKey }, alice.privateKey);
+    // After a union-merge, both peers hold [gA, gB] and derive the identical owner set.
+    const union = deriveOwners(c, [gA, gB]);
+    expect(union.has(alice.publicKey.substring(0, 32))).toBe(true);
+    expect(union.has(bob.publicKey.substring(0, 32))).toBe(true);
+    // A peer holding ONLY gB (no gA) cannot derive bob — proving convergence is monotonic:
+    // ownership only grows as grants merge in, never diverges. bob is an orphan without gA.
+    expect(deriveOwners(c, [gB]).has(bob.publicKey.substring(0, 32))).toBe(false);
+  });
 });
 
 describe('projects ownership storage + isOwner', () => {
