@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach } from 'vitest';
 import { generateKeyPair } from '../src/shared/signing.js';
 import {
   buildSignedCreation,
@@ -9,6 +13,10 @@ import {
   type ProjectCreation,
   type OwnerGrant
 } from '../src/daemon/project-ownership.js';
+import {
+  addProject, createProject, getProject,
+  setProjectCreation, addOwnerGrant, isOwner, resolvePendingGrants, type Project
+} from '../src/daemon/projects.js';
 
 describe('project-ownership', () => {
   const creator = generateKeyPair();
@@ -90,5 +98,70 @@ describe('project-ownership', () => {
     const c = buildSignedCreation({ projectId: 'p', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
     const otherProjGrant = buildSignedGrant({ projectId: 'other', grantee: alice.publicKey, grantedBy: creator.publicKey }, creator.privateKey);
     expect(deriveOwners(c, [otherProjGrant]).has(alice.publicKey.substring(0,32))).toBe(false);
+  });
+});
+
+describe('projects ownership storage + isOwner', () => {
+  let tempDir: string;
+  const creator = generateKeyPair();
+  const alice = generateKeyPair();
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogp-own-'));
+    process.env.OGP_HOME = tempDir;
+    addProject(createProject('proj', 'Proj'));
+  });
+  afterEach(() => { delete process.env.OGP_HOME; fs.rmSync(tempDir, { recursive: true, force: true }); });
+
+  it('isOwner: creator after setProjectCreation; non-owner otherwise', () => {
+    expect(isOwner('proj', creator.publicKey)).toBe(false);
+    const c = buildSignedCreation({ projectId: 'proj', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
+    expect(setProjectCreation('proj', c)).toBe('set');
+    expect(isOwner('proj', creator.publicKey)).toBe(true);
+    expect(isOwner('proj', alice.publicKey)).toBe(false);
+  });
+
+  it('isOwner: grantee after a valid grant; idempotent grant', () => {
+    const c = buildSignedCreation({ projectId: 'proj', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
+    setProjectCreation('proj', c);
+    const g = buildSignedGrant({ projectId: 'proj', grantee: alice.publicKey, grantedBy: creator.publicKey }, creator.privateKey);
+    expect(addOwnerGrant('proj', g)).toBe('added');
+    expect(addOwnerGrant('proj', g)).toBe('duplicate');
+    expect(isOwner('proj', alice.publicKey)).toBe(true);
+  });
+
+  it('isOwner accepts a 32-char prefix as the key argument', () => {
+    const c = buildSignedCreation({ projectId: 'proj', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
+    setProjectCreation('proj', c);
+    expect(isOwner('proj', creator.publicKey.substring(0, 32))).toBe(true);
+  });
+
+  it('setProjectCreation: not-found for unknown project; rejected for bad signature', () => {
+    const c = buildSignedCreation({ projectId: 'nope', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
+    expect(setProjectCreation('nope', c)).toBe('not-found');
+    const bad = { ...buildSignedCreation({ projectId: 'proj', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey), signature: 'deadbeef' };
+    expect(setProjectCreation('proj', bad)).toBe('rejected');
+  });
+});
+
+describe('out-of-order grant resolution', () => {
+  let tempDir: string;
+  const creator = generateKeyPair();
+  const alice = generateKeyPair();
+  const bob = generateKeyPair();
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogp-ooo-'));
+    process.env.OGP_HOME = tempDir;
+    addProject(createProject('proj', 'Proj'));
+  });
+  afterEach(() => { delete process.env.OGP_HOME; fs.rmSync(tempDir, { recursive: true, force: true }); });
+
+  it('defers a grant whose grantor is not yet an owner, then resolves it', () => {
+    const gAliceBob = buildSignedGrant({ projectId: 'proj', grantee: bob.publicKey, grantedBy: alice.publicKey }, alice.privateKey);
+    expect(addOwnerGrant('proj', gAliceBob)).toBe('pending');
+    const c = buildSignedCreation({ projectId: 'proj', creatorKey: creator.publicKey, provenance: 'original' }, creator.privateKey);
+    setProjectCreation('proj', c);
+    const gCreatorAlice = buildSignedGrant({ projectId: 'proj', grantee: alice.publicKey, grantedBy: creator.publicKey }, creator.privateKey);
+    expect(addOwnerGrant('proj', gCreatorAlice)).toBe('added');
+    expect(isOwner('proj', bob.publicKey)).toBe(true);
   });
 });
