@@ -31,6 +31,29 @@ struct OGPClient {
 
     private func ogpPath() -> String? { OGPClient.locateOGP() }
 
+    /// Finder-launched apps inherit a minimal PATH (no /opt/homebrew/bin), so the
+    /// `ogp` script's `#!/usr/bin/env node` shebang can't find node. Build an
+    /// environment with the common node/tool locations prepended.
+    static func augmentedEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var extra = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "\(home)/.npm-global/bin",
+        ]
+        // nvm: prepend the newest installed node bin if present.
+        let nvmRoot = "\(home)/.nvm/versions/node"
+        if let versions = try? FileManager.default.contentsOfDirectory(atPath: nvmRoot) {
+            if let newest = versions.sorted().reversed().first {
+                extra.append("\(nvmRoot)/\(newest)/bin")
+            }
+        }
+        let existing = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = (extra + [existing]).joined(separator: ":")
+        return env
+    }
+
     /// Run `ogp [--for fw] <args...>`, return stdout data.
     @discardableResult
     private func run(_ args: [String]) throws -> Data {
@@ -38,6 +61,7 @@ struct OGPClient {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: path)
         task.arguments = context.forArgs() + args
+        task.environment = OGPClient.augmentedEnvironment()
         let out = Pipe(); let err = Pipe()
         task.standardOutput = out; task.standardError = err
         try task.run()
