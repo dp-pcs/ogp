@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -14,6 +14,7 @@
 		OGP00020 /* TunnelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00021 /* TunnelManager.swift */; };
 		OGP00022 /* TunnelSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00023 /* TunnelSelectionView.swift */; };
 		OGP00025 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = OGP00024 /* Assets.xcassets */; };
+		OGP00030 /* OGPKit in Frameworks */ = {isa = PBXBuildFile; productRef = OGP00031 /* OGPKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,10 +29,18 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		991D376F2FD5EA8A0014B179 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		OGP00010 = {
 			isa = PBXGroup;
 			children = (
 				OGP00011 /* OGPMonitor */,
+				991D376F2FD5EA8A0014B179 /* Frameworks */,
 				OGP00012 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -60,6 +69,17 @@
 		};
 /* End PBXGroup section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		OGP00032 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				OGP00030 /* OGPKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXNativeTarget section */
 		OGP00013 /* OGPMonitor */ = {
 			isa = PBXNativeTarget;
@@ -67,12 +87,16 @@
 			buildPhases = (
 				OGP00026 /* Resources */,
 				OGP00015 /* Sources */,
+				OGP00032 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = OGPMonitor;
+			packageProductDependencies = (
+				OGP00031 /* OGPKit */,
+			);
 			productName = OGPMonitor;
 			productReference = OGP00009 /* OGPMonitor.app */;
 			productType = "com.apple.product-type.application";
@@ -96,6 +120,9 @@
 				Base,
 			);
 			mainGroup = OGP00010;
+			packageReferences = (
+				991D376D2FD5E8B10014B179 /* XCLocalSwiftPackageReference "OGPKit" */,
+			);
 			productRefGroup = OGP00012 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -272,6 +299,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		991D376D2FD5E8B10014B179 /* XCLocalSwiftPackageReference "OGPKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = OGPKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		OGP00031 /* OGPKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OGPKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = OGP00016 /* Project object */;
 }
