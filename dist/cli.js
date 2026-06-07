@@ -732,8 +732,9 @@ program
 program
     .command('whoami')
     .description('Show current identity and configuration')
-    .action(() => {
-    whoami();
+    .option('--json', 'Output machine-readable JSON')
+    .action((options) => {
+    whoami(options.json ?? false);
 });
 program.addCommand(configCommand);
 program.addCommand(keychainCommand);
