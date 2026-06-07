@@ -453,23 +453,28 @@ federation
     .argument('[peer-id]', 'Peer ID (optional — auto-resolved from /.well-known/ogp)')
     .option('-a, --alias <name>', 'User-friendly alias for this peer (e.g., "big-papa")')
     .option('--petname <name>', 'Deprecated: use --alias instead')
+    .option('--json', 'Output machine-readable JSON')
     .action(async (peerUrl, peerId, options) => {
+    const json = options.json ?? false;
     // Handle backward compatibility: --petname maps to --alias with deprecation warning
     let alias = options.alias;
     if (options.petname) {
         if (!alias) {
-            console.warn('⚠️  --petname is deprecated. Use --alias instead.');
+            if (!json)
+                console.warn('⚠️  --petname is deprecated. Use --alias instead.');
             alias = options.petname;
         }
         else {
-            console.warn('⚠️  Both --alias and --petname provided. Using --alias.');
+            if (!json)
+                console.warn('⚠️  Both --alias and --petname provided. Using --alias.');
         }
     }
     // Auto-resolve peer ID from /.well-known/ogp if not provided
     if (!peerId) {
         try {
             const wellKnownUrl = `${peerUrl.replace(/\/$/, '')}/.well-known/ogp`;
-            console.log(`Resolving peer ID from ${wellKnownUrl}...`);
+            if (!json)
+                console.log(`Resolving peer ID from ${wellKnownUrl}...`);
             const res = await fetch(wellKnownUrl, { signal: AbortSignal.timeout(10000) });
             if (!res.ok)
                 throw new Error(`HTTP ${res.status}`);
@@ -477,15 +482,21 @@ federation
             if (!data.publicKey)
                 throw new Error('No publicKey in response');
             peerId = data.publicKey;
-            console.log(`✓ Resolved peer: ${data.displayName || 'Unknown'} (${peerId.slice(0, 16)}...)`);
+            if (!json)
+                console.log(`✓ Resolved peer: ${data.displayName || 'Unknown'} (${peerId.slice(0, 16)}...)`);
         }
         catch (err) {
-            console.error(`✗ Could not resolve peer ID from ${peerUrl}/.well-known/ogp: ${err.message}`);
-            console.error(`  Provide it manually: ogp federation request <peer-url> <peer-id>`);
+            if (json) {
+                console.log(JSON.stringify({ ok: false, peerUrl, status: 'failed', error: `could not resolve peer ID: ${err.message}` }));
+            }
+            else {
+                console.error(`✗ Could not resolve peer ID from ${peerUrl}/.well-known/ogp: ${err.message}`);
+                console.error(`  Provide it manually: ogp federation request <peer-url> <peer-id>`);
+            }
             process.exit(1);
         }
     }
-    await federationRequest(peerUrl, peerId, alias);
+    await federationRequest(peerUrl, peerId, alias, json);
 });
 federation
     .command('connect')
@@ -597,20 +608,37 @@ federation
     .command('ping')
     .description('Ping a peer gateway to test connectivity')
     .argument('<peer-url>', 'Peer gateway URL')
-    .action(async (peerUrl) => {
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (peerUrl, options) => {
+    const json = options.json ?? false;
     try {
         const res = await fetch(`${peerUrl}/federation/ping`);
         if (res.ok) {
             const data = await res.json();
-            console.log(`✓ Pong from ${data.displayName} (${data.gatewayUrl})`);
-            console.log(`  Time: ${data.timestamp}`);
+            if (json) {
+                console.log(JSON.stringify({ ok: true, peerUrl, status: res.status, displayName: data.displayName, gatewayUrl: data.gatewayUrl, timestamp: data.timestamp }, null, 2));
+            }
+            else {
+                console.log(`✓ Pong from ${data.displayName} (${data.gatewayUrl})`);
+                console.log(`  Time: ${data.timestamp}`);
+            }
         }
         else {
-            console.error(`✗ Ping failed: ${res.status} ${res.statusText}`);
+            if (json) {
+                console.log(JSON.stringify({ ok: false, peerUrl, status: res.status, error: res.statusText }, null, 2));
+            }
+            else {
+                console.error(`✗ Ping failed: ${res.status} ${res.statusText}`);
+            }
         }
     }
     catch (err) {
-        console.error(`✗ Ping failed:`, err);
+        if (json) {
+            console.log(JSON.stringify({ ok: false, peerUrl, error: err instanceof Error ? err.message : String(err) }, null, 2));
+        }
+        else {
+            console.error(`✗ Ping failed:`, err);
+        }
     }
 });
 federation

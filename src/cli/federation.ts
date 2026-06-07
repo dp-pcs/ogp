@@ -673,11 +673,12 @@ export async function federationStatus(json = false): Promise<void> {
   }
 }
 
-export async function federationRequest(peerUrl: string, peerId: string, alias?: string): Promise<boolean> {
+export async function federationRequest(peerUrl: string, peerId: string, alias?: string, json = false): Promise<boolean> {
   const config = requireConfig();
   const keypair = loadOrGenerateKeyPair();
 
   if (!await ensureLocalGatewayReachable(config, 'send federation requests')) {
+    if (json) console.log(JSON.stringify({ ok: false, peerUrl, peerId, status: 'failed', error: 'local gateway not reachable' }));
     return false;
   }
 
@@ -692,7 +693,11 @@ export async function federationRequest(peerUrl: string, peerId: string, alias?:
     resolvedPeerUrl = resolved.gatewayUrl;
     peerCard = resolved.card;
   } catch (error: any) {
-    console.error(error.message);
+    if (json) {
+      console.log(JSON.stringify({ ok: false, peerUrl, peerId, status: 'failed', error: error.message }));
+    } else {
+      console.error(error.message);
+    }
     return false;
   }
 
@@ -735,14 +740,20 @@ export async function federationRequest(peerUrl: string, peerId: string, alias?:
     });
 
     if (!response.ok) {
-      console.error(`Request failed: ${response.status} ${response.statusText}`);
+      if (json) {
+        console.log(JSON.stringify({ ok: false, peerUrl: resolvedPeerUrl, peerId, status: 'failed', error: `${response.status} ${response.statusText}` }));
+      } else {
+        console.error(`Request failed: ${response.status} ${response.statusText}`);
+      }
       return false;
     }
 
     const result = await response.json() as { status?: string; message?: string };
-    console.log('✓ Federation request sent');
-    console.log(`  Status: ${result.status}`);
-    console.log(`  Message: ${result.message}`);
+    if (!json) {
+      console.log('✓ Federation request sent');
+      console.log(`  Status: ${result.status}`);
+      console.log(`  Message: ${result.message}`);
+    }
 
     // Fetch their federation card to get their actual identity
     // Store them as a pending peer so we can send intents when approved
@@ -771,9 +782,16 @@ export async function federationRequest(peerUrl: string, peerId: string, alias?:
       }
     } catch { /* non-fatal */ }
 
+    if (json) {
+      console.log(JSON.stringify({ ok: true, peerUrl: resolvedPeerUrl, peerId, status: result.status ?? 'requested', message: result.message }));
+    }
     return true;
   } catch (error) {
-    console.error('Failed to send request:', error);
+    if (json) {
+      console.log(JSON.stringify({ ok: false, peerUrl: resolvedPeerUrl, peerId, status: 'failed', error: error instanceof Error ? error.message : String(error) }));
+    } else {
+      console.error('Failed to send request:', error);
+    }
     return false;
   }
 }
