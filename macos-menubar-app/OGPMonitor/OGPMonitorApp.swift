@@ -8,17 +8,21 @@ struct OGPMonitorApp: App {
         MenuBarExtra {
             ContentView(service: service)
         } label: {
-            // Show OGP status glyph with color based on status
             Image("OGPStatusGlyph")
                 .renderingMode(.template)
                 .foregroundColor(statusColor)
         }
+
+        Window("Add Gateway", id: "add-gateway") {
+            AddGatewayWindow(service: service)
+        }
+        .windowResizability(.contentSize)
     }
 
     private var statusColor: Color {
-        switch service.status.overallStatus {
+        switch service.daemonStatus {
         case .running:
-            return .green
+            return service.tunnelStatus == .running ? .green : .yellow
         case .stopped:
             return .red
         case .unknown:

@@ -1,160 +1,105 @@
 import SwiftUI
+import OGPKit
 
 struct ContentView: View {
     @ObservedObject var service: OGPService
-    @State private var expandedPeers: Set<String> = []
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
-                Text("OGP Monitor")
+                Text("OGP Federation")
                     .font(.headline)
                 Spacer()
-                Button("Refresh") {
-                    service.refreshStatus()
-                }
-                .buttonStyle(.borderless)
-            }
-            .padding(.bottom, 4)
-
-            Divider()
-
-            // Daemon Status
-            StatusRow(
-                label: "Daemon",
-                status: service.status.daemonStatus,
-                action: daemonAction
-            )
-
-            // Tunnel Status
-            StatusRow(
-                label: "Tunnel",
-                status: service.status.tunnelStatus,
-                action: tunnelAction
-            )
-
-            // Tunnel selection (inline)
-            if service.showTunnelSelection {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Select tunnel:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.leading, 20)
-
-                    ForEach(service.tunnelOptions) { option in
-                        Button(action: {
-                            service.startTunnel(option)
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: tunnelIcon(for: option))
-                                    .font(.caption)
-                                Text(option.name)
-                                    .font(.caption)
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 4)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    Button("Cancel") {
-                        service.showTunnelSelection = false
-                    }
+                Button("Refresh") { service.refresh() }
                     .buttonStyle(.borderless)
-                    .font(.caption)
-                    .padding(.leading, 20)
+            }
+
+            // Framework switcher (only when >1)
+            if service.frameworks.count > 1 {
+                Picker("Framework", selection: Binding(
+                    get: { service.selectedFramework },
+                    set: { if let fw = $0 { service.selectFramework(fw) } }
+                )) {
+                    ForEach(service.frameworks) { fw in
+                        Text(fw.displayName).tag(Optional(fw))
+                    }
                 }
-                .padding(.vertical, 4)
+                .pickerStyle(.menu)
+            } else if let fw = service.selectedFramework {
+                Text(fw.displayName)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Divider()
 
-            // Peers Section
+            // Daemon + Tunnel status
+            StatusRow(label: "Daemon", status: service.daemonStatus, action: daemonAction)
+            StatusRow(label: "Tunnel", status: service.tunnelStatus, action: nil)
+
+            Divider()
+
+            // Pending requests
+            if !service.pendingPeers.isEmpty {
+                Text("Pending Requests")
+                    .font(.subheadline).foregroundColor(.secondary)
+                ForEach(service.pendingPeers) { peer in
+                    PendingPeerRow(
+                        peer: peer,
+                        onApprove: {
+                            service.approve(peer, policy: AuthorizationPolicy(
+                                intents: ["message", "agent-comms"], rate: nil, topics: []))
+                        },
+                        onReject: { service.reject(peer) }
+                    )
+                }
+                Divider()
+            }
+
+            // Approved peers
             HStack {
                 Text("Federated Peers")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .font(.subheadline).foregroundColor(.secondary)
                 Spacer()
-                Text("\(service.status.peerCount)")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                Text("\(service.approvedPeers.count)")
+                    .font(.subheadline).foregroundColor(.secondary)
             }
 
-            if service.status.peers.isEmpty {
+            if service.approvedPeers.isEmpty {
                 Text("No approved peers")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.caption).foregroundColor(.secondary)
                     .padding(.leading, 8)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(service.status.peers) { peer in
-                            PeerRow(peer: peer, isExpanded: expandedPeers.contains(peer.id)) {
-                                togglePeerExpansion(peer.id)
-                            }
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(service.approvedPeers) { peer in
+                            ApprovedPeerRow(peer: peer)
                         }
                     }
                 }
-                .frame(maxHeight: 300)
+                .frame(maxHeight: 260)
             }
 
             Divider()
 
-            // Actions
+            // Footer
             HStack {
-                Button("Terminal Status") {
-                    service.openTerminalStatus()
-                }
-                .buttonStyle(.borderless)
-
+                Button("＋ Add Gateway…") { openWindow(id: "add-gateway") }
+                    .buttonStyle(.borderless)
                 Spacer()
-
-                Button("Quit") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.borderless)
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+                    .buttonStyle(.borderless)
             }
         }
         .padding()
-        .frame(width: 350)
-    }
-
-    // MARK: - Helpers
-
-    private func togglePeerExpansion(_ peerId: String) {
-        if expandedPeers.contains(peerId) {
-            expandedPeers.remove(peerId)
-        } else {
-            expandedPeers.insert(peerId)
-        }
+        .frame(width: 360)
     }
 
     private func daemonAction() {
-        if service.status.daemonStatus == .running {
-            service.stopDaemon()
-        } else {
-            service.startDaemon()
-        }
-    }
-
-    private func tunnelAction() {
-        if service.status.tunnelStatus == .running {
-            service.stopTunnel()
-        } else {
-            service.promptTunnelSelection()
-        }
-    }
-
-    private func tunnelIcon(for option: TunnelOption) -> String {
-        switch option.type {
-        case .cloudflareNamed:
-            return "cloud.fill"
-        case .cloudflareFree:
-            return "cloud"
-        case .ngrok:
-            return "network"
-        }
+        if service.daemonStatus == .running { service.stopDaemon() }
+        else { service.startDaemon() }
     }
 }
 
@@ -163,120 +108,93 @@ struct ContentView: View {
 struct StatusRow: View {
     let label: String
     let status: ServiceStatus
-    let action: () -> Void
-    @Environment(\.dismiss) private var dismiss
+    let action: (() -> Void)?
 
     var body: some View {
         HStack {
             Text(status.icon)
-            Text(label)
-                .font(.subheadline)
-            Text(status.text)
-                .font(.caption)
-                .foregroundColor(.secondary)
-
+            Text(label).font(.subheadline)
+            Text(status.text).font(.caption).foregroundColor(.secondary)
             Spacer()
-
-            Button(actionLabel) {
-                // Don't dismiss menu when clicking these buttons
-                action()
+            if let action {
+                Button(actionLabel) { action() }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(4)
             }
-            .buttonStyle(.plain)
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.blue.opacity(0.1))
-            .cornerRadius(4)
         }
     }
 
     private var actionLabel: String {
-        switch status {
-        case .running:
-            return "Stop"
-        case .stopped:
-            return "Start"
-        case .unknown:
-            return "Start"
-        }
+        status == .running ? "Stop" : "Start"
     }
 }
 
-// MARK: - Peer Row
+// MARK: - Pending Peer Row
 
-struct PeerRow: View {
-    let peer: Peer
-    let isExpanded: Bool
-    let onTap: () -> Void
+struct PendingPeerRow: View {
+    let peer: PeerJson
+    let onApprove: () -> Void
+    let onReject: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button(action: onTap) {
-                HStack {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption)
-                    Text(peer.displayAlias)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Spacer()
-                    if let lastSeen = peer.lastSeen {
-                        Text(formatLastSeen(lastSeen))
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                }
+        HStack {
+            Text("?")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(peer.displayAlias).font(.subheadline).fontWeight(.medium)
+                Text(peer.gatewayUrl).font(.caption2).foregroundColor(.secondary)
             }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 4) {
-                    if !peer.intentsGranted.isEmpty {
-                        Text("Intents: \(peer.intentsGranted.joined(separator: ", "))")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.leading, 20)
-                    }
-
-                    Text(peer.gatewayUrl)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .padding(.leading, 20)
-                }
-            }
+            Spacer()
+            Button("Approve", action: onApprove)
+                .buttonStyle(.plain).font(.caption)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.green.opacity(0.15)).cornerRadius(4)
+            Button("Reject", action: onReject)
+                .buttonStyle(.plain).font(.caption)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.red.opacity(0.15)).cornerRadius(4)
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .background(isExpanded ? Color.secondary.opacity(0.1) : Color.clear)
-        .cornerRadius(4)
-    }
-
-    private func formatLastSeen(_ isoDate: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: isoDate) else {
-            return "Unknown"
-        }
-
-        let interval = Date().timeIntervalSince(date)
-
-        if interval < 60 {
-            return "Just now"
-        } else if interval < 3600 {
-            let minutes = Int(interval / 60)
-            return "\(minutes)m ago"
-        } else if interval < 86400 {
-            let hours = Int(interval / 3600)
-            return "\(hours)h ago"
-        } else {
-            let days = Int(interval / 86400)
-            return "\(days)d ago"
-        }
+        .padding(.vertical, 2)
     }
 }
 
-// MARK: - Preview
+// MARK: - Approved Peer Row
 
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView(service: OGPService())
+struct ApprovedPeerRow: View {
+    let peer: PeerJson
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Circle()
+                    .fill(peer.isHealthy ? Color.green : Color.red)
+                    .frame(width: 8, height: 8)
+                Text(peer.displayAlias).font(.subheadline).fontWeight(.medium)
+                Spacer()
+                if let last = peer.lastSeenAt {
+                    Text(formatRelative(last)).font(.caption2).foregroundColor(.secondary)
+                }
+            }
+            if !peer.intentsGranted.isEmpty {
+                Text(peer.intentsGranted.joined(separator: ", "))
+                    .font(.caption2).foregroundColor(.secondary)
+                    .padding(.leading, 16)
+            }
+        }
+        .padding(.vertical, 3).padding(.horizontal, 6)
+        .background(Color.secondary.opacity(0.06)).cornerRadius(4)
+    }
+
+    private func formatRelative(_ iso: String) -> String {
+        let f = ISO8601DateFormatter()
+        guard let date = f.date(from: iso) else { return "" }
+        let interval = Date().timeIntervalSince(date)
+        if interval < 60 { return "just now" }
+        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        if interval < 86400 { return "\(Int(interval / 3600))h ago" }
+        return "\(Int(interval / 86400))d ago"
     }
 }
