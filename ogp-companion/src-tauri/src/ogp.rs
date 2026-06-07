@@ -1,0 +1,278 @@
+// ogp.rs — bridge to the `ogp` CLI. Locates the binary, runs it with an
+// augmented PATH (GUI apps inherit a minimal PATH with no node/homebrew), and
+// shapes the `--json` output into the snapshot the React UI consumes.
+
+use serde_json::{json, Map, Value};
+use std::path::PathBuf;
+use std::process::Command;
+
+/// Locate the `ogp` binary in the usual install locations (GUI apps lack the
+/// shell PATH). Mirrors the SwiftUI OGPClient.locateOGP() logic.
+fn locate_ogp() -> Option<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut candidates = vec![
+        "/opt/homebrew/bin/ogp".to_string(),
+        "/usr/local/bin/ogp".to_string(),
+        format!("{home}/.npm-global/bin/ogp"),
+    ];
+    // nvm: newest installed node bin
+    let nvm_root = format!("{home}/.nvm/versions/node");
+    if let Ok(entries) = std::fs::read_dir(&nvm_root) {
+        let mut versions: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        versions.sort();
+        if let Some(newest) = versions.into_iter().rev().next() {
+            candidates.push(format!("{nvm_root}/{newest}/bin/ogp"));
+        }
+    }
+    candidates.into_iter().find(|p| PathBuf::from(p).exists())
+}
+
+/// PATH that includes node/homebrew so the `ogp` `#!/usr/bin/env node` shebang
+/// resolves even when launched from Finder.
+fn augmented_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut parts = vec![
+        "/opt/homebrew/bin".to_string(),
+        "/usr/local/bin".to_string(),
+        format!("{home}/.npm-global/bin"),
+    ];
+    let nvm_root = format!("{home}/.nvm/versions/node");
+    if let Ok(entries) = std::fs::read_dir(&nvm_root) {
+        let mut versions: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        versions.sort();
+        if let Some(newest) = versions.into_iter().rev().next() {
+            parts.push(format!("{nvm_root}/{newest}/bin"));
+        }
+    }
+    let existing = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin:/usr/sbin:/sbin".into());
+    parts.push(existing);
+    parts.join(":")
+}
+
+#[derive(Debug)]
+pub struct OgpError(pub String);
+
+impl std::fmt::Display for OgpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl std::error::Error for OgpError {}
+impl serde::Serialize for OgpError {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+
+/// Run `ogp [--for <fw>] <args...>` and return stdout. `framework` of None runs
+/// against the default framework (no --for flag).
+fn run(framework: Option<&str>, args: &[&str]) -> Result<String, OgpError> {
+    let bin = locate_ogp().ok_or_else(|| OgpError("ogp binary not found".into()))?;
+    let mut cmd = Command::new(&bin);
+    cmd.env("PATH", augmented_path());
+    if let Some(fw) = framework {
+        cmd.arg("--for").arg(fw);
+    }
+    cmd.args(args);
+    let out = cmd
+        .output()
+        .map_err(|e| OgpError(format!("failed to run ogp: {e}")))?;
+    if !out.status.success() {
+        return Err(OgpError(format!(
+            "ogp {} exited {}: {}",
+            args.join(" "),
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn run_json(framework: Option<&str>, args: &[&str]) -> Result<Value, OgpError> {
+    let s = run(framework, args)?;
+    serde_json::from_str(&s).map_err(|e| OgpError(format!("bad JSON from ogp {}: {e}", args.join(" "))))
+}
+
+// ── framework discovery ──────────────────────────────────────────
+fn discover_frameworks() -> Vec<Value> {
+    // Try `ogp --for all whoami --json` (array), else single object.
+    if let Ok(Value::Array(rows)) = run_json(Some("all"), &["whoami", "--json"]) {
+        let mapped: Vec<Value> = rows.iter().filter_map(framework_from_whoami).collect();
+        if !mapped.is_empty() {
+            return mapped;
+        }
+    }
+    if let Ok(row) = run_json(None, &["whoami", "--json"]) {
+        if let Some(fw) = framework_from_whoami(&row) {
+            return vec![fw];
+        }
+    }
+    vec![]
+}
+
+fn framework_from_whoami(r: &Value) -> Option<Value> {
+    let id = r.get("framework")?.as_str()?.to_string();
+    let display = r
+        .get("displayName")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&id)
+        .to_string();
+    Some(json!({
+        "id": id,
+        "displayName": display,
+        "stateDir": r.get("stateDir").cloned().unwrap_or(Value::Null),
+        "gatewayUrl": r.get("gatewayUrl").cloned().unwrap_or(Value::Null),
+        "daemonPort": r.get("daemonPort").cloned().unwrap_or(json!(18790)),
+        "identity": {
+            "human": r.get("humanName").and_then(|v| v.as_str()).unwrap_or("—"),
+            "agent": r.get("agentName").and_then(|v| v.as_str()).unwrap_or(""),
+            "org":   r.get("organization").and_then(|v| v.as_str()).unwrap_or(""),
+        }
+    }))
+}
+
+// ── snapshot: the full state the UI renders ──────────────────────
+pub fn snapshot() -> Result<Value, OgpError> {
+    let frameworks = discover_frameworks();
+
+    let mut peers = Map::new();
+    let mut tunnels = Map::new();
+    let mut daemon = Map::new();
+    let activity = Map::new();
+
+    for fw in &frameworks {
+        let id = fw.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let fwref = Some(id.as_str());
+
+        // peers: federation list --json (array of PeerJson)
+        let plist = run_json(fwref, &["federation", "list", "--json"]).unwrap_or(json!([]));
+        peers.insert(id.clone(), plist);
+
+        // daemon: derive running from whoami + (best-effort) status text
+        let port = fw.get("daemonPort").cloned().unwrap_or(json!(18790));
+        daemon.insert(
+            id.clone(),
+            json!({ "running": daemon_running(fwref), "port": port, "version": null, "uptimeMs": 0, "pid": null }),
+        );
+
+        // tunnels: tunnel list --json → { active, options }
+        let traw = run_json(fwref, &["tunnel", "list", "--json"]).unwrap_or(json!({}));
+        tunnels.insert(id.clone(), map_tunnels(&traw));
+    }
+
+    Ok(json!({
+        "frameworks": frameworks,
+        "peers": peers,
+        "tunnels": tunnels,
+        "daemon": daemon,
+        "activity": activity,
+    }))
+}
+
+/// Best-effort daemon liveness: `ogp status` exits 0 when the daemon answers.
+fn daemon_running(fw: Option<&str>) -> bool {
+    run(fw, &["status"]).is_ok()
+}
+
+/// Map `tunnel list --json` ({ tools:[{tool,infos:[{live,publicUrl,name,...}]}], reconcile })
+/// into the UI's { active, options } shape.
+fn map_tunnels(raw: &Value) -> Value {
+    let mut options = vec![];
+    let mut active = Value::Null;
+    if let Some(tools) = raw.get("tools").and_then(|v| v.as_array()) {
+        for pane in tools {
+            let tool = pane.get("tool").and_then(|v| v.as_str()).unwrap_or("");
+            let installed = pane.get("error").is_none();
+            if let Some(infos) = pane.get("infos").and_then(|v| v.as_array()) {
+                for info in infos {
+                    let live = info.get("live").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let name = info.get("name").and_then(|v| v.as_str()).unwrap_or(tool);
+                    let hostname = info
+                        .get("publicUrl")
+                        .and_then(|v| v.as_str())
+                        .map(|u| u.replace("https://", "").replace("http://", ""));
+                    let ttype = match tool {
+                        "cloudflared" => "cloudflareNamed",
+                        "ngrok" => "ngrok",
+                        _ => tool,
+                    };
+                    let opt = json!({
+                        "id": format!("{tool}-{name}"),
+                        "name": name,
+                        "type": ttype,
+                        "hostname": hostname,
+                        "configured": true,
+                        "installed": installed,
+                    });
+                    if live && active.is_null() {
+                        active = json!({
+                            "id": format!("{tool}-{name}"),
+                            "name": name,
+                            "type": ttype,
+                            "hostname": opt.get("hostname").cloned().unwrap_or(Value::Null),
+                        });
+                    }
+                    options.push(opt);
+                }
+            }
+        }
+    }
+    json!({ "active": active, "options": options })
+}
+
+// ── actions ──────────────────────────────────────────────────────
+pub fn start_tunnel(framework: &str, option_id: &str) -> Result<Value, OgpError> {
+    // option_id is "<tool>-<name>"; the CLI starts by tool.
+    let tool = option_id.split('-').next().unwrap_or("cloudflared");
+    let arg = if tool == "ngrok" { "ngrok" } else { "cloudflared" };
+    run(Some(framework), &["tunnel", "start", arg])?;
+    Ok(json!({ "ok": true }))
+}
+
+pub fn stop_tunnel(framework: &str) -> Result<Value, OgpError> {
+    run(Some(framework), &["tunnel", "stop"])?;
+    Ok(json!({ "ok": true }))
+}
+
+pub fn toggle_daemon(framework: &str, run_it: bool) -> Result<Value, OgpError> {
+    if run_it {
+        run(Some(framework), &["start", "--background"])?;
+    } else {
+        run(Some(framework), &["stop"])?;
+    }
+    Ok(json!({ "ok": true }))
+}
+
+pub fn approve(framework: &str, peer_id: &str, intents: Vec<String>) -> Result<Value, OgpError> {
+    let mut args: Vec<String> = vec!["federation".into(), "approve".into(), peer_id.into()];
+    if !intents.is_empty() {
+        args.push("--intents".into());
+        args.push(intents.join(","));
+    }
+    let argrefs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    run(Some(framework), &argrefs)?;
+    Ok(json!({ "ok": true }))
+}
+
+pub fn reject(framework: &str, peer_id: &str) -> Result<Value, OgpError> {
+    run(Some(framework), &["federation", "reject", peer_id])?;
+    Ok(json!({ "ok": true }))
+}
+
+pub fn request(framework: &str, peer_url: &str, alias: Option<String>) -> Result<Value, OgpError> {
+    let mut args: Vec<String> = vec!["federation".into(), "request".into(), peer_url.into()];
+    if let Some(a) = alias.filter(|a| !a.is_empty()) {
+        args.push("--alias".into());
+        args.push(a);
+    }
+    args.push("--json".into());
+    let argrefs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let out = run(Some(framework), &argrefs)?;
+    Ok(serde_json::from_str(&out).unwrap_or(json!({ "ok": true })))
+}

@@ -1,0 +1,331 @@
+/* =========================================================
+   TOTOGI — Colors & Type
+   Source of truth: /Page-1/Colors, /Page-1/Space, /Page-1/Buttons
+   ========================================================= */
+
+/* ---------- FONTS ---------- */
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-Thin.ttf") format("truetype");
+  font-weight: 100; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-ThinItalic.ttf") format("truetype");
+  font-weight: 100; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-ExtraLight.ttf") format("truetype");
+  font-weight: 200; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-ExtraLightItalic.ttf") format("truetype");
+  font-weight: 200; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-Light.ttf") format("truetype");
+  font-weight: 300; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-LightItalic.ttf") format("truetype");
+  font-weight: 300; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-Regular.ttf") format("truetype");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-Italic.ttf") format("truetype");
+  font-weight: 400; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-Medium.ttf") format("truetype");
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-MediumItalic.ttf") format("truetype");
+  font-weight: 500; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-SemiBold.ttf") format("truetype");
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-SemiBoldItalic.ttf") format("truetype");
+  font-weight: 600; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-Bold.ttf") format("truetype");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-BoldItalic.ttf") format("truetype");
+  font-weight: 700; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-ExtraBold.ttf") format("truetype");
+  font-weight: 800; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-ExtraBoldItalic.ttf") format("truetype");
+  font-weight: 800; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-Black.ttf") format("truetype");
+  font-weight: 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("fonts/Poppins-BlackItalic.ttf") format("truetype");
+  font-weight: 900; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("fonts/SpaceGrotesk-VariableFont_wght.ttf") format("truetype-variations"),
+       url("fonts/SpaceGrotesk-VariableFont_wght.ttf") format("truetype");
+  font-weight: 300 700; font-style: normal; font-display: swap;
+}
+
+:root {
+  /* ---------- CORE BRAND PALETTE ---------- */
+  /* Core brand — use at ~20%/20%/20%/10%/5%/5% of a page.
+     See preview/color-ratios.html. */
+  --totogi-purple: #802DC8;       /* primary brand — 20% of canvas */
+  --totogi-navy:   #001D3D;       /* primary dark   — 20% of canvas */
+  --totogi-pink:   #EF50FF;       /* accent / CTA on dark — 10% */
+  --totogi-lilac:  #ECE1F0;       /* soft surface — 5% */
+  --totogi-red:    #FF4F59;       /* secondary / marker dots — 5% */
+  --totogi-white:  #FFFFFF;       /* 20% of canvas */
+
+  /* Extended purple scale (observed in Figma) */
+  --purple-900: #36069D;   /* deep purple, used on light-lilac badges */
+  --purple-800: #6A32D4;   /* hover / press */
+  --purple-700: #7A41F7;   /* electric purple (buttons pressed) */
+  --purple-600: #802DC8;   /* = totogi-purple */
+  --purple-500: #803CCA;   /* CTA pressed */
+  --purple-400: #B75EFF;   /* accent stroke */
+  --purple-300: #D152FF;   /* pink-purple — callouts */
+  --purple-200: #E8B5FD;   /* decorative strokes / bubbles */
+  --purple-100: #EFD6FC;   /* tinted card */
+  --purple-050: #F1EBFE;   /* badge background */
+
+  /* Pink / magenta accent scale */
+  --pink-600: #EF50FF;     /* = totogi-pink */
+  --pink-500: #E546FF;
+  --pink-400: #E8B5FD;
+  --pink-100: #ECC5FC;
+  --pink-050: #EED4FB;
+
+  /* Navy scale */
+  --navy-900: #001D3D;     /* = totogi-navy */
+  --navy-700: #011D3E;     /* stroke */
+  --navy-600: #122B52;     /* footer text */
+  --navy-500: #707F96;     /* muted navy */
+
+  /* Neutrals */
+  --ink:          #1F1F1F; /* body text / titles */
+  --ink-soft:     #4B5563; /* muted / meta */
+  --ink-faint:    #908EA1; /* input stroke */
+  --surface:      #FFFFFF;
+  --surface-tint: #F5F5FA; /* panel bg */
+  --surface-alt:  #F9F9FC;
+  --surface-line: #CDC9ED; /* thin lilac rules */
+  --hairline:     rgba(128, 45, 200, 0.5);  /* 0.5px vertical rules used across sections */
+
+  /* ---------- SEMANTIC ---------- */
+  --fg:         var(--ink);
+  --fg-muted:   var(--ink-soft);
+  --fg-faint:   var(--ink-faint);
+  --bg:         var(--surface);
+  --bg-soft:    var(--surface-tint);
+
+  --brand:      var(--totogi-purple);
+  --brand-ink:  var(--purple-900);      /* purple text on purple-050 */
+  --brand-soft: var(--purple-050);
+  --accent:     var(--totogi-pink);     /* use for wedge markers + dark-bg buttons */
+  --marker:     var(--totogi-red);      /* timeline dots */
+  --link:       var(--totogi-purple);
+
+  /* ---------- SIGNATURE GRADIENTS (copied from Figma variables) ---------- */
+  --grad-hero:         linear-gradient(180deg, #001C3D 33%, #7339A6 100%);
+  --grad-purple-navy:  linear-gradient(180deg, #802DC8 0%, #001D3D 100%);
+  --grad-pink-navy:    linear-gradient(135deg, #EF50FF 0%, #001D3D 100%);
+  --grad-white-lilac:  linear-gradient(180deg, #FFFFFF 19%, #F5F5FA 72%);
+  /* totogi.com homepage hero — diagonal navy → pink, base layer under the dot-grid */
+  --grad-hero-grid:    linear-gradient(245deg, #001D3D 42.63%, #EF50FF 87.11%);
+
+  /* ---------- TYPE ---------- */
+  --font-display: "Space Grotesk", "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-sans:    "Poppins", ui-sans-serif, system-ui, sans-serif;
+
+  /* Type scale — 1rem = 16px.
+     h1 4rem · h2 3rem · h3 2.25rem · h4 1.5rem · h5 1.25rem · p 1.125rem. */
+
+  /* Display — Space Grotesk Bold */
+  --t-display:    700 4rem/1.1   var(--font-display);  /* h1 hero · 64px · 1% tracking */
+  --t-h1:         700 4rem/1.1   var(--font-display);  /* h1 · 64px */
+  --t-h2:         700 3rem/1.15  var(--font-display);  /* h2 · 48px */
+  --t-h3:         700 2.25rem/1.2 var(--font-display); /* h3 · 36px */
+  --t-h4:         700 1.5rem/1.3 var(--font-sans);     /* h4 · 24px (Poppins) */
+  --t-h5:         700 1.25rem/1.3 var(--font-sans);    /* h5 · 20px (Poppins) */
+
+  /* UI — Poppins */
+  --t-eyebrow-lg: 500 1.5rem/1.25 var(--font-sans);    /* sub-title · 24px */
+  --t-card-title: 700 1.5rem/1.3  var(--font-sans);    /* card / FAQ h4 · 24px */
+  --t-lead:       400 1.125rem/1.6 var(--font-sans);   /* p · 18px */
+  --t-body:       400 1.125rem/1.55 var(--font-sans);  /* p · 18px */
+  --t-body-sb:    600 1.125rem/1.3 var(--font-sans);   /* bold links / nav · 18px */
+  --t-btn:        500 1rem/1.3 var(--font-sans);       /* btn · 16px */
+  --t-btn-bold:   700 1rem/1.3 var(--font-sans);       /* primary CTA · 16px */
+  --t-small:      400 0.875rem/1.5 var(--font-sans);   /* meta · 14px */
+  --t-tiny:       400 0.75rem/1.3 var(--font-sans);    /* caption · 12px */
+
+  /* ---------- SPACE ---------- */
+  /* Main sections: 220px apart (110 top + 110 bottom) */
+  --space-section:     220px;
+  --space-section-y:   110px;   /* top OR bottom of a section */
+  --space-content-pad: 40px;    /* content side padding inside a card */
+  --space-title-lead:  30px;    /* section title → description */
+
+  /* Cards */
+  --space-card-1: 20px;
+  --space-card-2: 16px;
+  --space-card-3: 12px;
+
+  /* Raw spacing scale */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 30px;
+  --s-8: 40px;
+  --s-9: 60px;
+  --s-10: 80px;
+  --s-11: 110px;
+  --s-12: 220px;
+
+  /* Radii */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 20px;
+  --r-pill: 50px;    /* all CTAs, tags, chips */
+  --r-round: 9999px;
+
+  /* Shadows (observed) */
+  --shadow-card:    0px 4px 25px 0px rgba(0,0,0,0.05);
+  --shadow-btn:     0px 4px 10px 0px rgba(0,0,0,0.15);
+  --shadow-raise:   0px 4px 6px -2px rgba(16,24,40,0.05), 0px 12px 16px -4px rgba(16,24,40,0.1);
+
+  /* Borders */
+  --stroke-hairline: 0.5px solid rgba(128,45,200,0.5);
+  --stroke-thin:     1px solid var(--surface-line);
+  --stroke-input:    1px solid var(--ink-faint);
+}
+
+/* ---------- UTILITY CLASSES ---------- */
+html, body { font: var(--t-body); color: var(--fg); background: var(--bg); }
+body { margin: 0; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+.t-display   { font: var(--t-display);    letter-spacing: 0.01em; color: var(--ink); }
+.t-h1        { font: var(--t-h1);         letter-spacing: 0.01em; color: var(--ink); }
+.t-h2        { font: var(--t-h2);         color: var(--ink); }
+.t-h3        { font: var(--t-h3);         color: var(--ink); }
+.t-h4        { font: var(--t-h4);         color: var(--ink); }
+.t-h5        { font: var(--t-h5);         color: var(--ink); }
+.t-eyebrow-lg{ font: var(--t-eyebrow-lg); color: var(--ink); }
+.t-card-title{ font: var(--t-card-title); color: var(--ink); }
+.t-lead      { font: var(--t-lead);       color: var(--ink); }
+.t-body      { font: var(--t-body);       color: var(--ink); }
+.t-small     { font: var(--t-small);      color: var(--ink-soft); }
+.t-tiny      { font: var(--t-tiny);       color: var(--ink-soft); }
+
+/* ---------- BUTTONS ---------- */
+/* Dark-bg CTA — pink, white text, no shadow */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 10px; border: 0; cursor: pointer;
+  border-radius: var(--r-pill);
+  padding: 16px 26px;
+  font: var(--t-btn-bold);
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 120ms ease;
+}
+.btn-primary-on-dark {
+  background: var(--totogi-pink);
+  color: #fff;
+}
+.btn-primary-on-dark:hover { background: var(--purple-500); }
+
+/* Light-bg CTA — white pill, dark text, soft shadow */
+.btn-primary-on-light {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: var(--shadow-btn);
+}
+.btn-primary-on-light:hover { background: var(--totogi-purple); color: #fff; }
+
+/* Nav / secondary — short pill with medium weight */
+.btn-sm {
+  padding: 16px 20px;
+  font: var(--t-btn);
+}
+.btn-sm.btn-primary-on-dark { background: var(--totogi-pink); }
+
+/* Badge / section label */
+.badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 16px; border-radius: var(--r-sm);
+  background: var(--purple-050); color: var(--purple-900);
+  border: 1px solid var(--purple-700);
+  font: var(--t-body-sb);
+}
+
+/* Pink wedge — sits along top-left of hero/feature cards */
+.wedge-pink {
+  position: absolute; top: 0; left: 0; right: 0; height: 27.5px;
+  background: linear-gradient(var(--totogi-pink), var(--totogi-pink));
+  clip-path: polygon(0 0, 100% 0, 100% 40%, 2% 40%, 0 100%);
+}
+.wedge-pink.right { transform: scaleX(-1); }
+
+/* ---------- HERO GRID BACKGROUND ---------- */
+/* totogi.com homepage hero. Three stacked layers:
+   1. base diagonal navy → pink gradient
+   2. dot + line constellation grid (assets/hero-grid.svg)
+   3. navy fade from the top edge so nav + headline stay legible
+   Usage:
+     <section class="hero-grid">
+       <div class="hero-grid__pattern"></div>   layer 2
+       <div class="hero-grid__content"> … </div>  your markup (z-index 10)
+     </section>                                                                */
+.hero-grid {
+  position: relative;
+  overflow: hidden;
+  background: var(--grad-hero-grid);
+}
+.hero-grid__pattern {
+  position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  background: url("assets/hero-grid.svg") center / cover no-repeat;
+}
+.hero-grid::before {
+  content: ""; position: absolute; inset: 0; z-index: 5; pointer-events: none;
+  background: linear-gradient(var(--totogi-navy), var(--totogi-navy) 40%, rgba(0,29,61,0));
+}
+.hero-grid__content { position: relative; z-index: 10; }
