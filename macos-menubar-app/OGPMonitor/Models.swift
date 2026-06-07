@@ -1,6 +1,7 @@
 import Foundation
+import OGPKit
 
-// MARK: - OGP Status Models
+// MARK: - App display status
 
 enum ServiceStatus {
     case running
@@ -24,82 +25,27 @@ enum ServiceStatus {
     }
 }
 
-struct OGPStatus {
-    var daemonStatus: ServiceStatus
-    var tunnelStatus: ServiceStatus
-    var peerCount: Int
-    var peers: [Peer]
+// MARK: - Framework
 
-    var overallStatus: ServiceStatus {
-        if daemonStatus == .running && tunnelStatus == .running {
-            return .running
-        } else if daemonStatus == .running {
-            return .unknown  // Yellow - partial service
-        } else {
-            return .stopped  // Red - daemon down
-        }
-    }
-
-    static let empty = OGPStatus(
-        daemonStatus: .unknown,
-        tunnelStatus: .unknown,
-        peerCount: 0,
-        peers: []
-    )
-}
-
-struct Peer: Identifiable, Codable {
-    let id: String
+/// One OGP framework (state dir + identity), discovered via `ogp whoami --json`.
+struct FrameworkInfo: Identifiable, Hashable {
+    let id: String          // framework id, e.g. "openclaw" / "hermes"
     let displayName: String
-    let email: String?
-    let gatewayUrl: String
-    let publicKey: String
-    let status: String
-    let alias: String?
-    let grantedScopes: ScopeBundle?
-    let receivedScopes: ScopeBundle?
-    let lastSeen: String?
-
-    var intentsGranted: [String] {
-        grantedScopes?.scopes.map { $0.intent } ?? []
-    }
-
-    var displayAlias: String {
-        alias ?? displayName
-    }
-}
-
-struct ScopeBundle: Codable {
-    let scopes: [ScopeGrant]
-    let grantedAt: String
-}
-
-struct ScopeGrant: Codable {
-    let intent: String
-    let enabled: Bool
-    let rateLimit: RateLimit?
-    let topics: [String]?
-}
-
-struct RateLimit: Codable {
-    let requests: Int
-    let windowSeconds: Int
-}
-
-// MARK: - OGP Config
-
-struct OGPConfig: Codable {
-    let daemonPort: Int
-    let openclawUrl: String
+    let stateDir: String
     let gatewayUrl: String?
-    let displayName: String
-    let email: String?
+    let daemonPort: Int
 
-    static let `default` = OGPConfig(
-        daemonPort: 18790,
-        openclawUrl: "http://localhost:18789",
-        gatewayUrl: nil,
-        displayName: "Unknown",
-        email: nil
-    )
+    var context: FrameworkContext { FrameworkContext(framework: id, stateDir: stateDir) }
 }
+
+// MARK: - PeerJson display helpers
+
+extension PeerJson {
+    var displayAlias: String { alias ?? displayName }
+    var intentsGranted: [String] { grantedScopes?.scopes.map { $0.intent } ?? [] }
+    /// Green unless explicitly unhealthy.
+    var isHealthy: Bool { healthy != false }
+}
+
+// Note: PeerJson, ScopeBundle, ScopeGrant, RateLimit, AgentPersona, WellKnown,
+// AuthorizationPolicy, and FrameworkContext now live in the OGPKit package.
