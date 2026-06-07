@@ -92,4 +92,23 @@ window.OGP_BACKEND = {
   approve: (fw, peerId, intents) => invoke("ogp_approve", { framework: fw, peerId, intents }),
   reject: (fw, peerId) => invoke("ogp_reject", { framework: fw, peerId }),
   addGateway: (fw, peerUrl, alias) => invoke("ogp_request", { framework: fw, peerUrl, alias }),
+  // Message composer: agent-comms (topic+priority+wait) or a plain message intent.
+  sendMessage: (fw, peerId, opts) =>
+    invoke("ogp_send_message", {
+      framework: fw,
+      peerId,
+      agent: opts.intent === "agent-comms",
+      topic: opts.topic || "general",
+      text: opts.text,
+      priority: opts.priority || "normal",
+      wait: !!opts.wait,
+    }),
+  // Agent-comms policy editor: per-peer default + per-topic rules.
+  setPolicy: (fw, peerId, policy) =>
+    invoke("ogp_set_policy", {
+      framework: fw,
+      peerId,
+      defaultLevel: policy.default,
+      topics: (policy.topics || []).map((t) => ({ topic: t.topic, level: t.level, notes: t.notes || "" })),
+    }),
 };
