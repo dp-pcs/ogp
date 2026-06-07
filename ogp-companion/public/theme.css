@@ -1,0 +1,173 @@
+/* =========================================================
+   OGP Companion — semantic theme tokens
+   Built on Totogi brand tokens (colors_and_type.css).
+   Two themes (light default + dark), driven by [data-theme].
+   Accent + density are set on :root from JS (tweaks).
+   ========================================================= */
+
+:root {
+  /* status palette — shared across themes (tuned per theme below) */
+  --ok:     #16A36B;   /* healthy / running */
+  --warn:   #D69100;   /* pending / degraded */
+  --danger: #E23B45;   /* down / unhealthy (brand red family) */
+  --pink:   #EF50FF;   /* brand accent / live pulse */
+
+  /* accent (overridden by JS tweak) */
+  --accent:      #802DC8;
+  --accent-2:    #B75EFF;
+  --accent-soft: #F1EBFE;
+  --accent-ink:  #36069D;
+
+  /* density (overridden by JS tweak) */
+  --row-h: 56px;
+  --pad:   20px;
+  --gap:   14px;
+
+  --font-display: "Space Grotesk", "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+
+  --radius:    12px;
+  --radius-sm: 8px;
+  --radius-lg: 18px;
+
+  color-scheme: light;
+}
+
+/* ---------------- LIGHT ---------------- */
+:root[data-theme="light"] {
+  --desktop: radial-gradient(120% 120% at 80% -10%, #ECE1F0 0%, #F5F5FA 38%, #EEF0F6 100%);
+  --window-border: rgba(0,0,0,0.10);
+  --window-shadow: 0 0 0 1px rgba(20,12,40,0.06), 0 32px 80px -24px rgba(36,6,80,0.34);
+
+  --bg:        #F4F3F9;   /* content canvas */
+  --panel:     #FFFFFF;   /* cards */
+  --panel-2:   #FAF9FD;   /* nested / hover */
+  --panel-3:   #F1EEF8;   /* track / inset */
+  --sidebar:   #FBFAFE;
+  --titlebar:  #FFFFFF;
+
+  --text:       #1A1430;
+  --text-muted: #5B5570;
+  --text-faint: #948EAA;
+
+  --border:      #E8E3F2;
+  --border-soft: #F0ECF8;
+  --hairline:    rgba(128,45,200,0.22);
+
+  --ok:     #149A63;
+  --warn:   #BD8200;
+  --danger: #D8323C;
+
+  --ok-soft:     #E2F5EC;
+  --warn-soft:   #FBF1DA;
+  --danger-soft: #FCE5E7;
+
+  --shadow-card: 0 1px 2px rgba(20,12,40,0.04), 0 8px 24px -12px rgba(20,12,40,0.10);
+  --shadow-pop:  0 12px 40px -8px rgba(20,12,40,0.22), 0 0 0 1px rgba(20,12,40,0.06);
+
+  --accent:      #802DC8;
+  --accent-2:    #B75EFF;
+  --accent-soft: color-mix(in srgb, var(--accent) 11%, var(--panel));
+  --accent-ink:  color-mix(in srgb, var(--accent) 78%, #000);
+
+  color-scheme: light;
+}
+
+/* ---------------- DARK ---------------- */
+:root[data-theme="dark"] {
+  --desktop: radial-gradient(120% 120% at 82% -12%, #3a1466 0%, #0a1b38 42%, #02101f 100%);
+  --window-border: rgba(255,255,255,0.10);
+  --window-shadow: 0 0 0 1px rgba(0,0,0,0.55), 0 40px 90px -28px rgba(0,0,0,0.75);
+
+  --bg:        #061328;
+  --panel:     #0C2038;
+  --panel-2:   #102844;
+  --panel-3:   #0A1B30;
+  --sidebar:   #04101F;
+  --titlebar:  #081B33;
+
+  --text:       #F2F5FB;
+  --text-muted: #9FB2CE;
+  --text-faint: #5E7595;
+
+  --border:      rgba(255,255,255,0.09);
+  --border-soft: rgba(255,255,255,0.05);
+  --hairline:    rgba(183,94,255,0.30);
+
+  --accent:      #B75EFF;
+  --accent-2:    #D152FF;
+  --accent-soft: color-mix(in srgb, var(--accent) 20%, transparent);
+  --accent-ink:  color-mix(in srgb, var(--accent) 50%, #fff);
+
+  --ok:     #2ED48E;
+  --warn:   #F2B43B;
+  --danger: #FF5A63;
+
+  --ok-soft:     rgba(46,212,142,0.14);
+  --warn-soft:   rgba(242,180,59,0.16);
+  --danger-soft: rgba(255,90,99,0.16);
+
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.30), 0 12px 32px -16px rgba(0,0,0,0.55);
+  --shadow-pop:  0 18px 50px -10px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--desktop);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  transition: background 280ms ease;
+}
+
+#root { width: 100%; display: flex; align-items: center; justify-content: center; }
+
+/* Tauri desktop shell: the OS window is the chrome — fill it, no desktop card. */
+html.tauri, html.tauri body { height: 100vh; overflow: hidden; }
+html.tauri body { display: block; padding: 0; background: var(--bg); }
+html.tauri #root { width: 100vw; height: 100vh; display: block; }
+
+/* scrollbars */
+.scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 20px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.scroll::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+
+::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+
+/* shared keyframes */
+@keyframes ogp-spin { to { transform: rotate(360deg); } }
+@keyframes ogp-dash { to { stroke-dashoffset: -1000; } }
+@keyframes ogp-pulse-ring {
+  0%   { transform: scale(0.6); opacity: 0.7; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes ogp-fade-up {
+  from { transform: translateY(9px); }
+  to   { transform: translateY(0); }
+}
+@keyframes ogp-flow {
+  to { stroke-dashoffset: -28; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
+}
