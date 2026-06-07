@@ -265,6 +265,79 @@ pub fn reject(framework: &str, peer_id: &str) -> Result<Value, OgpError> {
     Ok(json!({ "ok": true }))
 }
 
+/// Send a message: agent-comms (topic/priority/wait) or a plain message intent.
+pub fn send_message(
+    framework: &str,
+    peer_id: &str,
+    agent: bool,
+    topic: &str,
+    text: &str,
+    priority: &str,
+    wait: bool,
+) -> Result<Value, OgpError> {
+    if agent {
+        let mut args: Vec<String> = vec![
+            "federation".into(),
+            "agent".into(),
+            peer_id.into(),
+            topic.into(),
+            text.into(),
+        ];
+        if priority != "normal" {
+            args.push("--priority".into());
+            args.push(priority.into());
+        }
+        if wait {
+            args.push("--wait".into());
+        }
+        let argrefs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        run(Some(framework), &argrefs)?;
+    } else {
+        // plain message: payload is JSON; wrap the text.
+        let payload = json!({ "text": text }).to_string();
+        run(
+            Some(framework),
+            &["federation", "send", peer_id, "message", &payload],
+        )?;
+    }
+    Ok(json!({ "ok": true }))
+}
+
+/// Persist a per-peer agent-comms policy: default level + per-topic rules.
+pub fn set_policy(
+    framework: &str,
+    peer_id: &str,
+    default_level: &str,
+    topics: Vec<Value>,
+) -> Result<Value, OgpError> {
+    run(
+        Some(framework),
+        &["agent-comms", "set-default", peer_id, default_level],
+    )?;
+    for t in &topics {
+        let topic = t.get("topic").and_then(|v| v.as_str()).unwrap_or("");
+        let level = t.get("level").and_then(|v| v.as_str()).unwrap_or("summary");
+        let notes = t.get("notes").and_then(|v| v.as_str()).unwrap_or("");
+        if topic.is_empty() {
+            continue;
+        }
+        let mut args: Vec<String> = vec![
+            "agent-comms".into(),
+            "set-topic".into(),
+            peer_id.into(),
+            topic.into(),
+            level.into(),
+        ];
+        if !notes.is_empty() {
+            args.push("--notes".into());
+            args.push(notes.into());
+        }
+        let argrefs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        run(Some(framework), &argrefs)?;
+    }
+    Ok(json!({ "ok": true }))
+}
+
 pub fn request(framework: &str, peer_url: &str, alias: Option<String>) -> Result<Value, OgpError> {
     let mut args: Vec<String> = vec!["federation".into(), "request".into(), peer_url.into()];
     if let Some(a) = alias.filter(|a| !a.is_empty()) {

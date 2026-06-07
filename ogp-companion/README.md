@@ -67,6 +67,7 @@ for the desktop build.
   status palette), tuned to harmonize with the purple/navy/pink.
 - The `_ds/` design-system bundle's marketing `_ds_bundle.js` was dropped (not used);
   only its `colors_and_type.css` tokens and fonts are needed.
-- This wires the read + core action surface. Message send and agent-comms policy
-  persistence are still UI-only (the CLI surface for those — `ogp federation agent`,
-  `ogp agent-comms configure` — can be added to `backend.js` + Rust next).
+- All actions are wired to the CLI: peers (approve/reject/request), tunnels
+  (start/stop), daemon (start/stop), message send (`ogp federation agent` for
+  agent-comms, `ogp federation send` for plain messages), and agent-comms policy
+  persistence (`ogp agent-comms set-default` + `set-topic` per rule).

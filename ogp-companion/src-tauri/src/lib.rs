@@ -37,6 +37,30 @@ fn ogp_request(framework: String, peer_url: String, alias: Option<String>) -> Re
     ogp::request(&framework, &peer_url, alias)
 }
 
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn ogp_send_message(
+    framework: String,
+    peer_id: String,
+    agent: bool,
+    topic: String,
+    text: String,
+    priority: String,
+    wait: bool,
+) -> Result<Value, ogp::OgpError> {
+    ogp::send_message(&framework, &peer_id, agent, &topic, &text, &priority, wait)
+}
+
+#[tauri::command]
+fn ogp_set_policy(
+    framework: String,
+    peer_id: String,
+    default_level: String,
+    topics: Vec<Value>,
+) -> Result<Value, ogp::OgpError> {
+    ogp::set_policy(&framework, &peer_id, &default_level, topics)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -48,6 +72,8 @@ pub fn run() {
             ogp_approve,
             ogp_reject,
             ogp_request,
+            ogp_send_message,
+            ogp_set_policy,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

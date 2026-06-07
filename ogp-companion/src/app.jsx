@@ -233,6 +233,13 @@ function App() {
     sendMessage(peer, opts) {
       const name = peer.alias || peer.displayName;
       const isAgent = opts.intent === "agent-comms";
+      if (LIVE) {
+        Promise.resolve(BK.sendMessage(fwId, peer.id, opts))
+          .then(() => hydrate())
+          .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }));
+        showToast(peer.healthy === false ? `Queued for ${name} (offline)` : `Message sent to ${name}`, { icon: "send", tone: peer.healthy === false ? "warn" : "ok" });
+        return;
+      }
       patch((s) => pushActivity(s, { kind: isAgent ? "agent" : "message", dir: "out", peer: name, topic: isAgent ? opts.topic : "message", level: opts.priority !== "normal" ? opts.priority : null, text: `Sent: ${opts.text.slice(0, 64)}` }));
       showToast(peer.healthy === false ? `Queued for ${name} (offline)` : `Message sent to ${name}`, { icon: "send", tone: peer.healthy === false ? "warn" : "ok" });
       if (opts.wait && peer.healthy !== false) {
@@ -244,6 +251,7 @@ function App() {
     },
     setPolicy(peerId, policy) {
       patch((s) => { const p = s.peers.find((x) => x.id === peerId); if (p) p.commsPolicy = policy; });
+      bk(() => BK.setPolicy(fwId, peerId, policy));
       showToast("Response policies updated", { icon: "shieldCheck", tone: "ok" });
     },
     addPeer(peer) {
