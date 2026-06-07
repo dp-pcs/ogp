@@ -442,8 +442,9 @@ federation
 federation
     .command('status')
     .description('Show federation status and alias → public key mappings (use --for all for all frameworks)')
-    .action(async () => {
-    await federationStatus();
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (options) => {
+    await federationStatus(options.json ?? false);
 });
 federation
     .command('request')

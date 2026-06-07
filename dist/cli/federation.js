@@ -344,7 +344,7 @@ export async function federationList(status, filterTag, json = false) {
         console.log('');
     });
 }
-export async function federationStatus() {
+export async function federationStatus(json = false) {
     // Check if --for all was specified
     if (process.env.OGP_FOR_ALL === 'true') {
         const metaConfig = loadMetaConfig();
@@ -352,6 +352,42 @@ export async function federationStatus() {
         if (enabledFrameworks.length === 0) {
             console.error('Error: No enabled frameworks found. Run "ogp setup" first.');
             process.exit(1);
+        }
+        // --json across all frameworks: emit a per-framework array (mirrors federationList).
+        if (json) {
+            const perFramework = [];
+            for (const framework of enabledFrameworks) {
+                const originalOgpHome = process.env.OGP_HOME;
+                process.env.OGP_HOME = expandTilde(framework.configDir);
+                try {
+                    const config = loadConfig();
+                    if (!config) {
+                        perFramework.push({ framework: framework.id, total: 0, approved: [], pending: [], rejected: [] });
+                        continue;
+                    }
+                    const fwPeers = listPeers();
+                    perFramework.push({
+                        framework: framework.id,
+                        total: fwPeers.length,
+                        approved: peersToJson(fwPeers.filter(p => p.status === 'approved')),
+                        pending: peersToJson(fwPeers.filter(p => p.status === 'pending')),
+                        rejected: peersToJson(fwPeers.filter(p => p.status === 'rejected')),
+                    });
+                }
+                catch {
+                    perFramework.push({ framework: framework.id, total: 0, approved: [], pending: [], rejected: [] });
+                }
+                finally {
+                    if (originalOgpHome) {
+                        process.env.OGP_HOME = originalOgpHome;
+                    }
+                    else {
+                        delete process.env.OGP_HOME;
+                    }
+                }
+            }
+            console.log(JSON.stringify(perFramework, null, 2));
+            return;
         }
         // Print header
         console.log('\n═══════════════════════════════════════════════════════════════');
@@ -448,6 +484,15 @@ export async function federationStatus() {
     const pendingPeers = peers.filter(p => p.status === 'pending');
     const rejectedPeers = peers.filter(p => p.status === 'rejected');
     const removedPeers = peers.filter(p => p.status === 'removed');
+    if (json) {
+        console.log(JSON.stringify({
+            total: peers.length,
+            approved: peersToJson(approvedPeers),
+            pending: peersToJson(pendingPeers),
+            rejected: peersToJson(rejectedPeers),
+        }, null, 2));
+        return;
+    }
     // Health statistics for approved peers (Issue #3: directional)
     const stateCounts = {
         established: 0,

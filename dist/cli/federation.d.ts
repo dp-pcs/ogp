@@ -29,7 +29,7 @@ export interface PeerJson {
 /** Pure projection of peers to the stable `--json` wire shape. */
 export declare function peersToJson(peers: Peer[]): PeerJson[];
 export declare function federationList(status?: 'pending' | 'approved' | 'rejected' | 'removed', filterTag?: string, json?: boolean): Promise<void>;
-export declare function federationStatus(): Promise<void>;
+export declare function federationStatus(json?: boolean): Promise<void>;
 export declare function federationRequest(peerUrl: string, peerId: string, alias?: string): Promise<boolean>;
 export interface ApproveOptions {
     intents?: string[];
