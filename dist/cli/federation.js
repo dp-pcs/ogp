@@ -144,7 +144,24 @@ function resolvePeerId(identifier) {
     }
     return null;
 }
-export async function federationList(status, filterTag) {
+/** Pure projection of peers to the stable `--json` wire shape. */
+export function peersToJson(peers) {
+    return peers.map(p => ({
+        id: p.id,
+        alias: p.alias,
+        displayName: p.displayName,
+        status: p.status,
+        gatewayUrl: p.gatewayUrl,
+        publicKey: p.publicKey,
+        healthState: p.healthState,
+        healthy: p.healthy,
+        grantedScopes: p.grantedScopes,
+        offeredIntents: p.offeredIntents,
+        lastSeenAt: p.lastSeenAt,
+        tags: p.tags,
+    }));
+}
+export async function federationList(status, filterTag, json = false) {
     // Check if --for all was specified
     if (process.env.OGP_FOR_ALL === 'true') {
         const metaConfig = loadMetaConfig();
@@ -153,10 +170,14 @@ export async function federationList(status, filterTag) {
             console.error('Error: No enabled frameworks found. Run "ogp setup" first.');
             process.exit(1);
         }
+        // Accumulator for --json output (per-framework peers).
+        const perFramework = [];
         // Print header
-        console.log('\n═══════════════════════════════════════════════════════════════');
-        console.log(`Federation Peers (All Frameworks)`);
-        console.log('═══════════════════════════════════════════════════════════════\n');
+        if (!json) {
+            console.log('\n═══════════════════════════════════════════════════════════════');
+            console.log(`Federation Peers (All Frameworks)`);
+            console.log('═══════════════════════════════════════════════════════════════\n');
+        }
         let totalPeers = 0;
         // Iterate through each framework
         for (const framework of enabledFrameworks) {
@@ -165,15 +186,25 @@ export async function federationList(status, filterTag) {
             try {
                 const config = loadConfig();
                 if (!config) {
-                    console.log(`${framework.name} (${framework.displayName || framework.id})`);
-                    console.log('───────────────────────────────────────────────────────────────');
-                    console.log('  No config found - run setup');
-                    console.log('');
+                    if (json) {
+                        perFramework.push({ framework: framework.id, peers: [] });
+                    }
+                    else {
+                        console.log(`${framework.name} (${framework.displayName || framework.id})`);
+                        console.log('───────────────────────────────────────────────────────────────');
+                        console.log('  No config found - run setup');
+                        console.log('');
+                    }
                     continue;
                 }
                 // Load peers for this framework
                 const allPeers = loadPeers();
                 const peers = status ? allPeers.filter(p => p.status === status) : allPeers.filter(p => p.status !== 'removed');
+                if (json) {
+                    totalPeers += peers.length;
+                    perFramework.push({ framework: framework.id, peers: peersToJson(peers) });
+                    continue;
+                }
                 // Print framework header
                 console.log(`${framework.name} (${framework.displayName || framework.id})`);
                 console.log('───────────────────────────────────────────────────────────────');
@@ -211,10 +242,15 @@ export async function federationList(status, filterTag) {
                 console.log('');
             }
             catch (error) {
-                console.log(`${framework.name} (${framework.displayName || framework.id})`);
-                console.log('───────────────────────────────────────────────────────────────');
-                console.log(`  Error: ${error.message}`);
-                console.log('');
+                if (json) {
+                    perFramework.push({ framework: framework.id, peers: [] });
+                }
+                else {
+                    console.log(`${framework.name} (${framework.displayName || framework.id})`);
+                    console.log('───────────────────────────────────────────────────────────────');
+                    console.log(`  Error: ${error.message}`);
+                    console.log('');
+                }
             }
             finally {
                 // Restore original OGP_HOME
@@ -226,6 +262,10 @@ export async function federationList(status, filterTag) {
                 }
             }
         }
+        if (json) {
+            console.log(JSON.stringify(perFramework, null, 2));
+            return;
+        }
         console.log(`Total: ${totalPeers} peer${totalPeers !== 1 ? 's' : ''} across ${enabledFrameworks.length} framework${enabledFrameworks.length !== 1 ? 's' : ''}`);
         return;
     }
@@ -236,6 +276,10 @@ export async function federationList(status, filterTag) {
     // Filter by tag if specified
     if (filterTag) {
         peers = peers.filter(p => p.tags && p.tags.includes(filterTag));
+    }
+    if (json) {
+        console.log(JSON.stringify(peersToJson(peers), null, 2));
+        return;
     }
     if (peers.length === 0) {
         console.log('No peers found.');
