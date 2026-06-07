@@ -551,8 +551,9 @@ federation
   .description('List all peers (use --for all to show all frameworks)')
   .option('-s, --status <status>', 'Filter by status (pending|approved|rejected)')
   .option('-t, --tag <tag>', 'Filter by tag')
+  .option('--json', 'Output machine-readable JSON')
   .action(async (options) => {
-    await federationList(options.status, options.tag);
+    await federationList(options.status, options.tag, options.json ?? false);
   });
 
 federation
