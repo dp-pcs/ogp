@@ -1,3 +1,4 @@
+import { type Peer } from '../daemon/peers.js';
 import { type OGPConfig } from '../shared/config.js';
 type FederationCard = {
     displayName?: string;
@@ -11,9 +12,25 @@ export declare function fetchFederationCard(gatewayUrl: string, fetchImpl?: type
     card: FederationCard;
 }>;
 export declare function ensureLocalGatewayReachable(config: Pick<OGPConfig, 'gatewayUrl'>, actionLabel: string, fetchImpl?: typeof fetch): Promise<boolean>;
-export declare function federationList(status?: 'pending' | 'approved' | 'rejected' | 'removed', filterTag?: string): Promise<void>;
-export declare function federationStatus(): Promise<void>;
-export declare function federationRequest(peerUrl: string, peerId: string, alias?: string): Promise<boolean>;
+export interface PeerJson {
+    id: string;
+    alias?: string;
+    displayName: string;
+    status: Peer['status'];
+    gatewayUrl: string;
+    publicKey: string;
+    healthState?: Peer['healthState'];
+    healthy?: boolean;
+    grantedScopes?: Peer['grantedScopes'];
+    offeredIntents?: string[];
+    lastSeenAt?: string;
+    tags?: string[];
+}
+/** Pure projection of peers to the stable `--json` wire shape. */
+export declare function peersToJson(peers: Peer[]): PeerJson[];
+export declare function federationList(status?: 'pending' | 'approved' | 'rejected' | 'removed', filterTag?: string, json?: boolean): Promise<void>;
+export declare function federationStatus(json?: boolean): Promise<void>;
+export declare function federationRequest(peerUrl: string, peerId: string, alias?: string, json?: boolean): Promise<boolean>;
 export interface ApproveOptions {
     intents?: string[];
     rate?: string;
