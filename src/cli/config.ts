@@ -336,9 +336,26 @@ function showIdentity(): void {
 /**
  * Show comprehensive identity and configuration ("whoami")
  */
-export function whoami(): void {
+export function whoami(json = false): void {
   const config = requireConfig();
   const meta = loadMetaConfig();
+
+  const currentFrameworkForJson = meta.frameworks.find(f => f.configDir === config.stateDir);
+  if (json) {
+    console.log(JSON.stringify({
+      framework: currentFrameworkForJson?.id ?? meta.default ?? null,
+      displayName: config.displayName,
+      humanName: config.humanName ?? null,
+      agentName: config.agentName ?? null,
+      organization: config.organization ?? null,
+      email: config.email,
+      stateDir: currentFrameworkForJson?.configDir ?? config.stateDir,
+      gatewayUrl: config.gatewayUrl ?? null,
+      daemonPort: config.daemonPort,
+      platform: config.platform ?? null,
+    }, null, 2));
+    return;
+  }
 
   console.log('\nWho Am I?');
   console.log('━'.repeat(44));

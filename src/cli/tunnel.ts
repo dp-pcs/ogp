@@ -256,7 +256,20 @@ export async function listNgrokTunnels(): Promise<TunnelPane> {
   return { tool: 'ngrok', infos: [], note: 'No local ngrok agent running on :4040.' };
 }
 
-export async function tunnelList(tool?: TunnelTool): Promise<void> {
+export interface TunnelJson {
+  tools: TunnelPane[];
+  reconcile: ReconcileResult | null;
+}
+
+/** Pure shaping for `ogp tunnel list --json`. */
+export function buildTunnelJson(
+  panes: TunnelPane[],
+  reconcile: ReconcileResult | null
+): TunnelJson {
+  return { tools: panes, reconcile };
+}
+
+export async function tunnelList(tool?: TunnelTool, json = false): Promise<void> {
   const panes: TunnelPane[] = [];
   if (!tool || tool === 'cloudflared') panes.push(await listCloudflaredTunnels());
   if (!tool || tool === 'ngrok') panes.push(await listNgrokTunnels());
@@ -285,6 +298,11 @@ export async function tunnelList(tool?: TunnelTool): Promise<void> {
 
   const config = loadConfig();
   const reconcile = config ? reconcileGatewayUrl(liveHosts, config.gatewayUrl) : null;
+
+  if (json) {
+    console.log(JSON.stringify(buildTunnelJson(panes, reconcile), null, 2));
+    return;
+  }
 
   console.log(renderTunnels(panes, reconcile));
 }
@@ -412,13 +430,14 @@ tunnelCommand
   .alias('show')
   .description('List running tunnels (cloudflared, ngrok, or both)')
   .argument('[tool]', 'Limit to one tool: cloudflared | ngrok')
-  .action(async (tool?: string) => {
+  .option('--json', 'Output machine-readable JSON')
+  .action(async (tool: string | undefined, options: { json?: boolean }) => {
     if (tool && tool !== 'cloudflared' && tool !== 'ngrok') {
       console.error(`Unknown tool '${tool}'. Use 'cloudflared' or 'ngrok'.`);
       process.exitCode = 1;
       return;
     }
-    await tunnelList(tool as TunnelTool | undefined);
+    await tunnelList(tool as TunnelTool | undefined, options.json ?? false);
   });
 
 tunnelCommand
