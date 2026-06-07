@@ -79,6 +79,7 @@ final class OGPService: ObservableObject {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: path)
         task.arguments = args
+        task.environment = OGPClient.augmentedEnvironment()
         let out = Pipe(); let err = Pipe()
         task.standardOutput = out; task.standardError = err
         do {
