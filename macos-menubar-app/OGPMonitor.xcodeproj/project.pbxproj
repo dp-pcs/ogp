@@ -12,9 +12,12 @@
 		OGP00005 /* OGPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00006 /* OGPService.swift */; };
 		OGP00007 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00008 /* Models.swift */; };
 		OGP00020 /* TunnelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00021 /* TunnelManager.swift */; };
-		OGP00022 /* TunnelSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00023 /* TunnelSelectionView.swift */; };
 		OGP00025 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = OGP00024 /* Assets.xcassets */; };
 		OGP00030 /* OGPKit in Frameworks */ = {isa = PBXBuildFile; productRef = OGP00031 /* OGPKit */; };
+		OGP00040 /* OGPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00041 /* OGPClient.swift */; };
+		OGP00042 /* StateReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00043 /* StateReader.swift */; };
+		OGP00044 /* AuthorizationStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00045 /* AuthorizationStepView.swift */; };
+		OGP00046 /* AddGatewayWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = OGP00047 /* AddGatewayWindow.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,8 +27,11 @@
 		OGP00008 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		OGP00009 /* OGPMonitor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OGPMonitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		OGP00021 /* TunnelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelManager.swift; sourceTree = "<group>"; };
-		OGP00023 /* TunnelSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelSelectionView.swift; sourceTree = "<group>"; };
 		OGP00024 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		OGP00041 /* OGPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OGPClient.swift; sourceTree = "<group>"; };
+		OGP00043 /* StateReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateReader.swift; sourceTree = "<group>"; };
+		OGP00045 /* AuthorizationStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationStepView.swift; sourceTree = "<group>"; };
+		OGP00047 /* AddGatewayWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddGatewayWindow.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -50,10 +56,13 @@
 			children = (
 				OGP00002 /* OGPMonitorApp.swift */,
 				OGP00004 /* ContentView.swift */,
-				OGP00023 /* TunnelSelectionView.swift */,
 				OGP00006 /* OGPService.swift */,
 				OGP00021 /* TunnelManager.swift */,
 				OGP00008 /* Models.swift */,
+				OGP00041 /* OGPClient.swift */,
+				OGP00043 /* StateReader.swift */,
+				OGP00045 /* AuthorizationStepView.swift */,
+				OGP00047 /* AddGatewayWindow.swift */,
 				OGP00024 /* Assets.xcassets */,
 			);
 			path = OGPMonitor;
@@ -150,10 +159,13 @@
 			files = (
 				OGP00001 /* OGPMonitorApp.swift in Sources */,
 				OGP00003 /* ContentView.swift in Sources */,
-				OGP00022 /* TunnelSelectionView.swift in Sources */,
 				OGP00005 /* OGPService.swift in Sources */,
 				OGP00020 /* TunnelManager.swift in Sources */,
 				OGP00007 /* Models.swift in Sources */,
+				OGP00040 /* OGPClient.swift in Sources */,
+				OGP00042 /* StateReader.swift in Sources */,
+				OGP00044 /* AuthorizationStepView.swift in Sources */,
+				OGP00046 /* AddGatewayWindow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
