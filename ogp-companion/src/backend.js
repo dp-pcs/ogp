@@ -121,4 +121,6 @@ window.OGP_BACKEND = {
       defaultLevel: policy.default,
       topics: (policy.topics || []).map((t) => ({ topic: t.topic, level: t.level, notes: t.notes || "" })),
     }),
+  // Open Terminal.app pre-filled with `ogp --for <fw> <command>`.
+  openTerminal: (fw, command) => invoke("ogp_open_terminal", { framework: fw, command }),
 };

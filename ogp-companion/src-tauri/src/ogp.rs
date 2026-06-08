@@ -178,9 +178,10 @@ pub fn snapshot() -> Result<Value, OgpError> {
         // daemon: cheap liveness via the state dir's daemon.pid (no subprocess).
         let port = fw.get("daemonPort").cloned().unwrap_or(json!(18790));
         let state_dir = fw.get("stateDir").and_then(|v| v.as_str());
+        let (running, pid) = daemon_state(state_dir);
         daemon.insert(
             id.clone(),
-            json!({ "running": daemon_running(state_dir), "port": port, "version": null, "uptimeMs": 0, "pid": null }),
+            json!({ "running": running, "port": port, "version": ogp_version(), "uptimeMs": 0, "pid": pid }),
         );
 
         // tunnels: tunnel list --json → { active, options }
@@ -197,10 +198,11 @@ pub fn snapshot() -> Result<Value, OgpError> {
     }))
 }
 
-/// Cheap daemon liveness: read <stateDir>/daemon.pid and probe with kill(pid,0).
-/// Avoids spawning `ogp status` (a node process) on every 5s poll.
-fn daemon_running(state_dir: Option<&str>) -> bool {
-    let Some(dir) = state_dir else { return false };
+/// Cheap daemon state: read <stateDir>/daemon.pid and probe with kill(pid,0).
+/// Avoids spawning `ogp status` (a node process) on every 5s poll. Returns
+/// (running, pid).
+fn daemon_state(state_dir: Option<&str>) -> (bool, Value) {
+    let Some(dir) = state_dir else { return (false, Value::Null) };
     // expand a leading ~ to $HOME
     let dir = if let Some(rest) = dir.strip_prefix("~") {
         format!("{}{}", std::env::var("HOME").unwrap_or_default(), rest)
@@ -208,15 +210,34 @@ fn daemon_running(state_dir: Option<&str>) -> bool {
         dir.to_string()
     };
     let pid_path = std::path::Path::new(&dir).join("daemon.pid");
-    let Ok(s) = std::fs::read_to_string(&pid_path) else { return false };
-    let Ok(pid) = s.trim().parse::<i32>() else { return false };
+    let Ok(s) = std::fs::read_to_string(&pid_path) else { return (false, Value::Null) };
+    let Ok(pid) = s.trim().parse::<i32>() else { return (false, Value::Null) };
     // signal 0 = liveness probe (no signal sent)
-    unsafe { libc_kill(pid, 0) == 0 }
+    let alive = unsafe { libc_kill(pid, 0) == 0 };
+    if alive { (true, json!(pid)) } else { (false, Value::Null) }
 }
 
 extern "C" {
     #[link_name = "kill"]
     fn libc_kill(pid: i32, sig: i32) -> i32;
+}
+
+/// `ogp --version`, cached for the process lifetime (it's constant).
+fn ogp_version() -> Value {
+    static VERSION_CACHE: Mutex<Option<String>> = Mutex::new(None);
+    if let Ok(guard) = VERSION_CACHE.lock() {
+        if let Some(v) = guard.as_ref() {
+            return json!(v);
+        }
+    }
+    let v = run(None, &["--version"])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let (Some(v), Ok(mut guard)) = (v.clone(), VERSION_CACHE.lock()) {
+        *guard = Some(v);
+    }
+    v.map(Value::String).unwrap_or(Value::Null)
 }
 
 /// Map `tunnel list --json` ({ tools:[{tool,infos:[{live,publicUrl,name,...}]}], reconcile })
@@ -387,4 +408,30 @@ pub fn request(framework: &str, peer_url: &str, alias: Option<String>) -> Result
     let argrefs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let out = run(Some(framework), &argrefs)?;
     Ok(serde_json::from_str(&out).unwrap_or(json!({ "ok": true })))
+}
+
+/// Open Terminal.app with a prompt pre-filled (not executed) for this framework.
+/// `command` is the trailing ogp subcommand, e.g. "status" or "config set-identity";
+/// we prefix `ogp --for <framework>`. The text is typed but left for the user to run.
+pub fn open_terminal(framework: &str, command: &str) -> Result<Value, OgpError> {
+    // Build the shell line the user will see, e.g. `ogp --for openclaw config set-identity`
+    let line = format!("ogp --for {framework} {command}");
+    // AppleScript: open Terminal, new window, type the command (no return — user runs it).
+    // Escape embedded double-quotes and backslashes for the AppleScript string literal.
+    let escaped = line.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!(
+        r#"tell application "Terminal"
+    activate
+    do script "{escaped}"
+end tell"#
+    );
+    let status = Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(&script)
+        .status()
+        .map_err(|e| OgpError(format!("failed to open Terminal: {e}")))?;
+    if !status.success() {
+        return Err(OgpError("osascript exited non-zero".into()));
+    }
+    Ok(json!({ "ok": true, "command": line }))
 }
