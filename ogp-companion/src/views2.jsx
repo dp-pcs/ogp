@@ -172,7 +172,7 @@ function SettingsView({ ctx }) {
   return (
     <PageBody>
       <PageHeader title="Settings" sub={`Configuration for ${framework.displayName}`} />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+      <div className="grid-2" style={{ alignItems: "start" }}>
         <Card pad={20}>
           <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 8 }}>
             <Avatar name={identity.agent} size={40} />
