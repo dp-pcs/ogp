@@ -80,6 +80,22 @@ async fn ogp_open_terminal(framework: String, command: String) -> Result<Value, 
     blocking(move || ogp::open_terminal(&framework, &command)).await
 }
 
+#[tauri::command]
+async fn ogp_set_identity(
+    framework: String,
+    agent_name: Option<String>,
+    human_name: Option<String>,
+    organization: Option<String>,
+) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::set_identity(&framework, agent_name, human_name, organization)).await
+}
+
+#[tauri::command]
+async fn ogp_refresh_frameworks() -> Result<Value, ogp::OgpError> {
+    ogp::clear_framework_cache();
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -94,6 +110,8 @@ pub fn run() {
             ogp_send_message,
             ogp_set_policy,
             ogp_open_terminal,
+            ogp_set_identity,
+            ogp_refresh_frameworks,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
