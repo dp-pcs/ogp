@@ -2,7 +2,17 @@
 const { useState: useStateShell, useRef: useRefShell, useEffect: useEffectShell } = React;
 
 // ── Traffic lights ───────────────────────────────────────────────
+// In the Tauri desktop shell the OS draws real macOS traffic lights (overlay
+// title bar), so the design's faux dots would double up. Render a width-matched
+// spacer there instead so the logo/title still clears the native buttons; show
+// the faux dots only in the browser/mock preview.
+const IN_TAURI = typeof window !== "undefined" && (!!window.__TAURI__ || !!window.__TAURI_INTERNALS__);
+
 function TrafficLights() {
+  if (IN_TAURI) {
+    // reserve room for the native traffic-light cluster (~52px from the edge)
+    return <div style={{ width: 52, flexShrink: 0 }} aria-hidden="true" />;
+  }
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
       {["#ff5f57", "#febc2e", "#28c840"].map((c) => (

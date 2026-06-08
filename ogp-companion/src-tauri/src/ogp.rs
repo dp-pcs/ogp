@@ -99,8 +99,29 @@ fn run_json(framework: Option<&str>, args: &[&str]) -> Result<Value, OgpError> {
     serde_json::from_str(&s).map_err(|e| OgpError(format!("bad JSON from ogp {}: {e}", args.join(" "))))
 }
 
-// ── framework discovery ──────────────────────────────────────────
+// ── framework discovery (cached) ─────────────────────────────────
+// Discovery runs up to two `whoami` subprocesses; frameworks rarely change, so
+// cache the result and reuse it on every poll. The first non-empty result is
+// memoized for the process lifetime.
+use std::sync::Mutex;
+static FRAMEWORK_CACHE: Mutex<Option<Vec<Value>>> = Mutex::new(None);
+
 fn discover_frameworks() -> Vec<Value> {
+    if let Ok(guard) = FRAMEWORK_CACHE.lock() {
+        if let Some(cached) = guard.as_ref() {
+            return cached.clone();
+        }
+    }
+    let discovered = discover_frameworks_uncached();
+    if !discovered.is_empty() {
+        if let Ok(mut guard) = FRAMEWORK_CACHE.lock() {
+            *guard = Some(discovered.clone());
+        }
+    }
+    discovered
+}
+
+fn discover_frameworks_uncached() -> Vec<Value> {
     // Try `ogp --for all whoami --json` (array), else single object.
     if let Ok(Value::Array(rows)) = run_json(Some("all"), &["whoami", "--json"]) {
         let mapped: Vec<Value> = rows.iter().filter_map(framework_from_whoami).collect();
@@ -154,11 +175,12 @@ pub fn snapshot() -> Result<Value, OgpError> {
         let plist = run_json(fwref, &["federation", "list", "--json"]).unwrap_or(json!([]));
         peers.insert(id.clone(), plist);
 
-        // daemon: derive running from whoami + (best-effort) status text
+        // daemon: cheap liveness via the state dir's daemon.pid (no subprocess).
         let port = fw.get("daemonPort").cloned().unwrap_or(json!(18790));
+        let state_dir = fw.get("stateDir").and_then(|v| v.as_str());
         daemon.insert(
             id.clone(),
-            json!({ "running": daemon_running(fwref), "port": port, "version": null, "uptimeMs": 0, "pid": null }),
+            json!({ "running": daemon_running(state_dir), "port": port, "version": null, "uptimeMs": 0, "pid": null }),
         );
 
         // tunnels: tunnel list --json → { active, options }
@@ -175,9 +197,26 @@ pub fn snapshot() -> Result<Value, OgpError> {
     }))
 }
 
-/// Best-effort daemon liveness: `ogp status` exits 0 when the daemon answers.
-fn daemon_running(fw: Option<&str>) -> bool {
-    run(fw, &["status"]).is_ok()
+/// Cheap daemon liveness: read <stateDir>/daemon.pid and probe with kill(pid,0).
+/// Avoids spawning `ogp status` (a node process) on every 5s poll.
+fn daemon_running(state_dir: Option<&str>) -> bool {
+    let Some(dir) = state_dir else { return false };
+    // expand a leading ~ to $HOME
+    let dir = if let Some(rest) = dir.strip_prefix("~") {
+        format!("{}{}", std::env::var("HOME").unwrap_or_default(), rest)
+    } else {
+        dir.to_string()
+    };
+    let pid_path = std::path::Path::new(&dir).join("daemon.pid");
+    let Ok(s) = std::fs::read_to_string(&pid_path) else { return false };
+    let Ok(pid) = s.trim().parse::<i32>() else { return false };
+    // signal 0 = liveness probe (no signal sent)
+    unsafe { libc_kill(pid, 0) == 0 }
+}
+
+extern "C" {
+    #[link_name = "kill"]
+    fn libc_kill(pid: i32, sig: i32) -> i32;
 }
 
 /// Map `tunnel list --json` ({ tools:[{tool,infos:[{live,publicUrl,name,...}]}], reconcile })
