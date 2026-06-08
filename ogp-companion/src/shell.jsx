@@ -42,23 +42,28 @@ function IconBtn({ name, onClick, title, active, spin, size = 18 }) {
 
 // ── Title bar ────────────────────────────────────────────────────
 function TitleBar({ theme, onToggleTheme, onRefresh, refreshing, onAdd, framework }) {
+  // `data-tauri-drag-region` makes the bar a window-drag handle (the custom
+  // titlebar otherwise isn't draggable with titleBarStyle:Overlay — only the
+  // tiny native zone by the traffic lights was). Interactive children (buttons)
+  // keep their own click behavior; dragging works from the inert areas.
+  // No-op in the browser preview.
   return (
-    <div style={{
+    <div data-tauri-drag-region style={{
       height: 54, flexShrink: 0, display: "flex", alignItems: "center", gap: 14,
       padding: "0 14px 0 18px", background: "var(--titlebar)", borderBottom: "1px solid var(--border)",
     }}>
       <TrafficLights />
-      <div style={{ width: 1, height: 22, background: "var(--border)", margin: "0 2px" }} />
-      <img src={theme === "dark" ? "assets/ogp-symbol-white.png" : "assets/ogp-symbol-black.png"}
+      <div data-tauri-drag-region style={{ width: 1, height: 22, background: "var(--border)", margin: "0 2px" }} />
+      <img data-tauri-drag-region src={theme === "dark" ? "assets/ogp-symbol-white.png" : "assets/ogp-symbol-black.png"}
         alt="OGP" style={{ height: 19, width: 19, objectFit: "contain" }} />
-      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.05 }}>
-        <span style={{ fontWeight: 700, fontSize: 14, color: "var(--text)", letterSpacing: "-0.01em" }}>OGP Companion</span>
-        <span style={{ fontSize: 11, color: "var(--text-faint)", fontWeight: 500 }}>{framework.gatewayUrl.replace("https://", "")}</span>
+      <div data-tauri-drag-region style={{ display: "flex", flexDirection: "column", lineHeight: 1.05 }}>
+        <span data-tauri-drag-region style={{ fontWeight: 700, fontSize: 14, color: "var(--text)", letterSpacing: "-0.01em" }}>OGP Companion</span>
+        <span data-tauri-drag-region style={{ fontSize: 11, color: "var(--text-faint)", fontWeight: 500 }}>{framework.gatewayUrl.replace("https://", "")}</span>
       </div>
-      <div style={{ flex: 1 }} />
+      <div data-tauri-drag-region style={{ flex: 1 }} />
       <IconBtn name="refresh" title="Refresh state" onClick={onRefresh} spin={refreshing} />
       <IconBtn name={theme === "dark" ? "sparkle" : "shield"} title="Toggle theme" onClick={onToggleTheme} />
-      <div style={{ width: 1, height: 22, background: "var(--border)", margin: "0 2px" }} />
+      <div data-tauri-drag-region style={{ width: 1, height: 22, background: "var(--border)", margin: "0 2px" }} />
       <Button variant="primary" size="sm" icon="plus" onClick={onAdd}>Add Gateway</Button>
     </div>
   );
