@@ -81,9 +81,17 @@ function LevelDropdown({ value, onChange }) {
 // ── Message composer ─────────────────────────────────────────────
 function MessageComposer({ peer, onClose, onSend }) {
   const canAgent = (peer.grantedScopes?.scopes || []).some((s) => s.intent === "agent-comms");
-  const topics = (peer.grantedScopes?.scopes || []).find((s) => s.intent === "agent-comms")?.topics || ["general"];
+  // The outbound topic (`ogp federation agent <topic>`) is FREE-FORM — your side
+  // doesn't validate it and there's no accept handshake. The peer's doorman may
+  // 403 a topic only if THEY restricted the agent-comms scope they granted you.
+  // So this is a combobox: type any topic, with suggestions drawn from topics
+  // you've already touched for this peer (response-policy rules you've set +
+  // any topics on their granted scope). Suggestions are hints, not a closed set.
+  const scopeTopics = (peer.grantedScopes?.scopes || []).find((s) => s.intent === "agent-comms")?.topics || [];
+  const policyTopics = (peer.commsPolicy?.topics || []).map((t) => t.topic);
+  const topics = Array.from(new Set(["general", ...policyTopics, ...scopeTopics])).filter(Boolean);
   const [mode, setMode] = useStateC(canAgent ? "agent-comms" : "message");
-  const [topic, setTopic] = useStateC(topics[0]);
+  const [topic, setTopic] = useStateC(topics[0] || "general");
   const [priority, setPriority] = useStateC("normal");
   const [wait, setWait] = useStateC(false);
   const [text, setText] = useStateC("");
@@ -123,9 +131,14 @@ function MessageComposer({ peer, onClose, onSend }) {
           <div style={{ display: "flex", gap: 12 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginBottom: 8 }}>Topic</div>
-              <select value={topic} onChange={(e) => setTopic(e.target.value)} style={{ ...cInput, cursor: "pointer" }}>
-                {topics.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <input list="composer-topics" value={topic} onChange={(e) => setTopic(e.target.value)}
+                placeholder="e.g. debugging" style={cInput} />
+              <datalist id="composer-topics">
+                {topics.map((t) => <option key={t} value={t} />)}
+              </datalist>
+              <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 6 }}>
+                Any topic — the peer may reject it if they've restricted their agent-comms scope.
+              </div>
             </div>
             <div style={{ width: 196 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginBottom: 8 }}>Priority</div>
