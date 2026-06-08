@@ -123,4 +123,14 @@ window.OGP_BACKEND = {
     }),
   // Open Terminal.app pre-filled with `ogp --for <fw> <command>`.
   openTerminal: (fw, command) => invoke("ogp_open_terminal", { framework: fw, command }),
+  // Edit identity: ogp config set-identity --agent-name/--human-name/--organization.
+  setIdentity: (fw, fields) =>
+    invoke("ogp_set_identity", {
+      framework: fw,
+      agentName: fields.agent || null,
+      humanName: fields.human || null,
+      organization: fields.org || null,
+    }),
+  // Clear the Rust framework-discovery cache (identity lives there).
+  refreshFrameworks: () => invoke("ogp_refresh_frameworks"),
 };

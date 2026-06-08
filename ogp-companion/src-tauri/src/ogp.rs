@@ -106,6 +106,14 @@ fn run_json(framework: Option<&str>, args: &[&str]) -> Result<Value, OgpError> {
 use std::sync::Mutex;
 static FRAMEWORK_CACHE: Mutex<Option<Vec<Value>>> = Mutex::new(None);
 
+/// Clear the discovery cache so the next snapshot re-reads identity/framework
+/// state (e.g. after an identity edit).
+pub fn clear_framework_cache() {
+    if let Ok(mut guard) = FRAMEWORK_CACHE.lock() {
+        *guard = None;
+    }
+}
+
 fn discover_frameworks() -> Vec<Value> {
     if let Ok(guard) = FRAMEWORK_CACHE.lock() {
         if let Some(cached) = guard.as_ref() {
@@ -408,6 +416,33 @@ pub fn request(framework: &str, peer_url: &str, alias: Option<String>) -> Result
     let argrefs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let out = run(Some(framework), &argrefs)?;
     Ok(serde_json::from_str(&out).unwrap_or(json!({ "ok": true })))
+}
+
+/// Update identity via `ogp config set-identity`. Clears the discovery cache so
+/// the next snapshot reflects the change.
+pub fn set_identity(
+    framework: &str,
+    agent_name: Option<String>,
+    human_name: Option<String>,
+    organization: Option<String>,
+) -> Result<Value, OgpError> {
+    let mut args: Vec<String> = vec!["config".into(), "set-identity".into()];
+    if let Some(a) = agent_name.filter(|s| !s.is_empty()) {
+        args.push("--agent-name".into());
+        args.push(a);
+    }
+    if let Some(h) = human_name.filter(|s| !s.is_empty()) {
+        args.push("--human-name".into());
+        args.push(h);
+    }
+    if let Some(o) = organization.filter(|s| !s.is_empty()) {
+        args.push("--organization".into());
+        args.push(o);
+    }
+    let argrefs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    run(Some(framework), &argrefs)?;
+    clear_framework_cache();
+    Ok(json!({ "ok": true }))
 }
 
 /// Open Terminal.app with a prompt pre-filled (not executed) for this framework.
