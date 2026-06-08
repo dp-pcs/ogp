@@ -152,7 +152,7 @@ function PeerDetail({ p, onClose, onMessage, onRemove, onApprove, onReject, onPo
   const tone = peerTone(p);
   const scopes = p.grantedScopes?.scopes || [];
   return (
-    <div style={{
+    <div className="peer-detail" style={{
       width: 340, flexShrink: 0, background: "var(--panel)", borderLeft: "1px solid var(--border)",
       display: "flex", flexDirection: "column", animation: "ogp-fade-up 180ms ease", height: "100%",
     }}>
