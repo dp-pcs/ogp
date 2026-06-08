@@ -91,7 +91,7 @@ function OverviewView({ ctx }) {
       )}
 
       {/* health strip */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 16 }}>
+      <div className="grid-3" style={{ marginBottom: 16 }}>
         <HealthCard icon="cpu" label="Daemon" tone={daemon.running ? "ok" : "danger"}
           state={daemon.running ? "Running" : "Stopped"}
           detail={daemon.running ? `PID ${daemon.pid} · port ${daemon.port} · up ${fmtUptime(daemon.uptimeMs)}` : "Not running"}
@@ -108,15 +108,15 @@ function OverviewView({ ctx }) {
       </div>
 
       {/* stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 18 }}>
+      <div className="grid-4" style={{ marginBottom: 18 }}>
         <StatTile label="Federated" value={approved.length} unit="peers" icon="users" onClick={() => setRoute("federation")} trend={`${unhealthy.length} need attention`} tone={unhealthy.length ? "danger" : "ok"} />
         <StatTile label="Pending" value={pending.length} unit="requests" icon="inbox" onClick={() => setRoute("federation")} trend={pending.length ? "awaiting review" : "all clear"} tone={pending.length ? "warn" : undefined} />
         <StatTile label="Messages" value={msgsToday} unit="today" icon="activity" onClick={() => setRoute("activity")} trend="across all peers" />
-        <StatTile label="Uptime" value={fmtUptime(daemon.uptimeMs)} icon="clock" trend={`v${daemon.version}`} />
+        <StatTile label="Uptime" value={fmtUptime(daemon.uptimeMs)} icon="clock" trend={daemon.version ? `v${daemon.version}` : undefined} />
       </div>
 
       {/* two-column */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.55fr 1fr", gap: 16 }}>
+      <div className="grid-split">
         <Card pad={0} style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 4px" }}>
             <div>
@@ -180,7 +180,7 @@ function FederationView({ ctx }) {
   const selected = peers.find((p) => p.id === selectedPeerId) || null;
 
   return (
-    <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
       <div className="scroll" style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "22px 26px 28px", minWidth: 0 }}>
         <PageHeader title="Federation" sub={`${approved.length} peers · ${pending.length} pending`}>
           <Segmented value={peerStyle} onChange={setPeerStyle} size="sm" options={[
