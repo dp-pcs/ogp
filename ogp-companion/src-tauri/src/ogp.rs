@@ -179,8 +179,11 @@ pub fn snapshot() -> Result<Value, OgpError> {
         let id = fw.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let fwref = Some(id.as_str());
 
-        // peers: federation list --json (array of PeerJson)
-        let plist = run_json(fwref, &["federation", "list", "--json"]).unwrap_or(json!([]));
+        // peers: federation list --json (array of PeerJson). The CLI's JSON omits
+        // agent-comms response policy, so merge it in from the on-disk peers.json.
+        let mut plist = run_json(fwref, &["federation", "list", "--json"]).unwrap_or(json!([]));
+        let state_dir_for_policy = fw.get("stateDir").and_then(|v| v.as_str());
+        merge_comms_policy(&mut plist, state_dir_for_policy);
         peers.insert(id.clone(), plist);
 
         // daemon: cheap liveness via the state dir's daemon.pid (no subprocess).
@@ -204,6 +207,52 @@ pub fn snapshot() -> Result<Value, OgpError> {
         "daemon": daemon,
         "activity": activity,
     }))
+}
+
+/// Merge each peer's agent-comms response policy (from <stateDir>/peers.json)
+/// into the `federation list --json` array as `commsPolicy`. The CLI JSON omits
+/// it, but the UI's policy editor + message composer need it. Shapes the daemon's
+/// `responsePolicy` ({topic:{level,notes}}) + `defaultLevel` into the UI's
+/// { default, topics:[{topic,level,notes}] }.
+fn merge_comms_policy(plist: &mut Value, state_dir: Option<&str>) {
+    let Some(dir) = state_dir else { return };
+    let dir = if let Some(rest) = dir.strip_prefix("~") {
+        format!("{}{}", std::env::var("HOME").unwrap_or_default(), rest)
+    } else {
+        dir.to_string()
+    };
+    let peers_path = std::path::Path::new(&dir).join("peers.json");
+    let Ok(raw) = std::fs::read_to_string(&peers_path) else { return };
+    let Ok(disk): Result<Value, _> = serde_json::from_str(&raw) else { return };
+    let disk_peers = disk.as_array().cloned().or_else(|| {
+        disk.get("peers").and_then(|v| v.as_array()).cloned()
+    }).unwrap_or_default();
+
+    // index disk peers by publicKey
+    let mut by_key: std::collections::HashMap<String, &Value> = std::collections::HashMap::new();
+    for dp in &disk_peers {
+        if let Some(k) = dp.get("publicKey").and_then(|v| v.as_str()) {
+            by_key.insert(k.to_string(), dp);
+        }
+    }
+
+    let Some(arr) = plist.as_array_mut() else { return };
+    for peer in arr.iter_mut() {
+        let key = peer.get("publicKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let Some(dp) = by_key.get(&key) else { continue };
+        let default = dp.get("defaultLevel").and_then(|v| v.as_str()).unwrap_or("summary");
+        let mut topics = vec![];
+        if let Some(rp) = dp.get("responsePolicy").and_then(|v| v.as_object()) {
+            for (topic, spec) in rp {
+                let level = spec.get("level").and_then(|v| v.as_str()).unwrap_or("summary");
+                let notes = spec.get("notes").and_then(|v| v.as_str()).unwrap_or("");
+                topics.push(json!({ "topic": topic, "level": level, "notes": notes }));
+            }
+        }
+        if let Some(obj) = peer.as_object_mut() {
+            obj.insert("commsPolicy".into(), json!({ "default": default, "topics": topics }));
+        }
+    }
 }
 
 /// Cheap daemon state: read <stateDir>/daemon.pid and probe with kill(pid,0).
