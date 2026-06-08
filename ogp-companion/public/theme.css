@@ -141,6 +141,39 @@ html.tauri, html.tauri body { height: 100vh; overflow: hidden; }
 html.tauri body { display: block; padding: 0; background: var(--bg); }
 html.tauri #root { width: 100vw; height: 100vh; display: block; }
 
+/* ── Responsive grids ─────────────────────────────────────────────
+   The design was authored at a fixed 1180×768 canvas. In the resizable
+   desktop window these grids must collapse as the content area narrows.
+   Container-query-based so they react to the main pane width, not the
+   viewport (the sidebar/detail panel take fixed space). */
+.ogp-main { container-type: inline-size; container-name: ogpmain; }
+
+/* default = design layout */
+.grid-3   { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.grid-4   { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.grid-2   { display: grid; grid-template-columns: 1fr 1fr;        gap: 16px; }
+.grid-split { display: grid; grid-template-columns: 1.55fr 1fr;   gap: 16px; }
+
+@container ogpmain (max-width: 880px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-split { grid-template-columns: 1fr; }
+  .grid-2 { grid-template-columns: 1fr; }
+}
+@container ogpmain (max-width: 620px) {
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: 1fr; }
+}
+
+/* Peer detail: a docked 340px panel normally; on a narrow main pane it floats
+   as a right-anchored overlay so it doesn't crush the peer list/graph. */
+@container ogpmain (max-width: 780px) {
+  .peer-detail {
+    position: absolute; top: 0; right: 0; bottom: 0; z-index: 40;
+    width: min(340px, 92%);
+    box-shadow: var(--shadow-pop);
+  }
+}
+
 /* scrollbars */
 .scroll::-webkit-scrollbar { width: 10px; height: 10px; }
 .scroll::-webkit-scrollbar-thumb {
