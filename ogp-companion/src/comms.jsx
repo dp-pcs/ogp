@@ -78,6 +78,63 @@ function LevelDropdown({ value, onChange }) {
   );
 }
 
+// ── Topic field (free-form input + suggestions) ──────────────────
+// Custom dropdown rather than <datalist>: macOS WKWebView doesn't render native
+// datalist popups, so the suggestions were invisible in the desktop app.
+function TopicField({ value, onChange, suggestions }) {
+  const [open, setOpen] = useStateC(false);
+  const q = (value || "").toLowerCase();
+  // If the value exactly matches a known suggestion (e.g. the default "general"),
+  // the user hasn't started a new query — show ALL other topics. Only filter by
+  // substring once they're actively typing something not in the list.
+  const typing = value && !suggestions.some((t) => t.toLowerCase() === q);
+  const filtered = suggestions.filter((t) =>
+    t !== value && (!typing || t.toLowerCase().includes(q))
+  );
+  return (
+    <div style={{ position: "relative" }}>
+      <div style={{ position: "relative" }}>
+        <input
+          value={value}
+          onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 120)}
+          placeholder="e.g. debugging"
+          style={{ ...cInput, paddingRight: 30 }}
+        />
+        {suggestions.length > 0 && (
+          <button type="button" tabIndex={-1}
+            onMouseDown={(e) => { e.preventDefault(); setOpen((o) => !o); }}
+            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-faint)", padding: 2, display: "grid", placeItems: "center" }}>
+            <Icon name="chevronDown" size={15} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 150ms ease" }} />
+          </button>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30,
+          background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10,
+          boxShadow: "var(--shadow-pop)", padding: 5, maxHeight: 184, overflowY: "auto",
+        }}>
+          {filtered.map((t) => (
+            <button key={t} type="button"
+              onMouseDown={(e) => { e.preventDefault(); onChange(t); setOpen(false); }}
+              style={{
+                width: "100%", textAlign: "left", padding: "7px 9px", border: "none", borderRadius: 7,
+                cursor: "pointer", background: "transparent", color: "var(--text)", fontSize: 13.5,
+                fontFamily: "var(--font-mono)", display: "block",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-2)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+              {t}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Message composer ─────────────────────────────────────────────
 function MessageComposer({ peer, onClose, onSend }) {
   const canAgent = (peer.grantedScopes?.scopes || []).some((s) => s.intent === "agent-comms");
@@ -131,11 +188,7 @@ function MessageComposer({ peer, onClose, onSend }) {
           <div style={{ display: "flex", gap: 12 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginBottom: 8 }}>Topic</div>
-              <input list="composer-topics" value={topic} onChange={(e) => setTopic(e.target.value)}
-                placeholder="e.g. debugging" style={cInput} />
-              <datalist id="composer-topics">
-                {topics.map((t) => <option key={t} value={t} />)}
-              </datalist>
+              <TopicField value={topic} onChange={setTopic} suggestions={topics} />
               <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 6 }}>
                 Any topic — the peer may reject it if they've restricted their agent-comms scope.
               </div>
