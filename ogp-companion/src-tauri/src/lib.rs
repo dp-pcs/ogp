@@ -75,6 +75,11 @@ async fn ogp_set_policy(
     blocking(move || ogp::set_policy(&framework, &peer_id, &default_level, topics)).await
 }
 
+#[tauri::command]
+async fn ogp_open_terminal(framework: String, command: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::open_terminal(&framework, &command)).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -88,6 +93,7 @@ pub fn run() {
             ogp_request,
             ogp_send_message,
             ogp_set_policy,
+            ogp_open_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

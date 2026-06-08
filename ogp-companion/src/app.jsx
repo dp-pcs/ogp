@@ -263,6 +263,24 @@ function App() {
       patch((s) => { s.peers.unshift(peer); });
       showToast(`Federated with ${peer.alias || peer.displayName}`, { icon: "link", tone: "ok" });
     },
+    openTerminal() {
+      if (LIVE) {
+        Promise.resolve(BK.openTerminal(fwId, "status"))
+          .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }));
+        showToast("Opening Terminal…", { icon: "terminal", tone: "ok" });
+      } else {
+        showToast("Opens a terminal in the desktop app", { icon: "terminal", tone: "ok" });
+      }
+    },
+    editIdentity() {
+      if (LIVE) {
+        Promise.resolve(BK.openTerminal(fwId, "config set-identity"))
+          .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }));
+        showToast("Opening identity editor in Terminal…", { icon: "user", tone: "ok" });
+      } else {
+        showToast("Edits identity via the ogp CLI in the desktop app", { icon: "user", tone: "ok" });
+      }
+    },
   };
 
   function refresh() {
