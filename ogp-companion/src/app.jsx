@@ -61,6 +61,7 @@ function App() {
   const [route, setRoute] = useState("overview");
   const [selectedPeerId, setSelected] = useState(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [identityOpen, setIdentityOpen] = useState(false);
   const [composerPeer, setComposerPeer] = useState(null);
   const [policyPeer, setPolicyPeer] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -115,6 +116,15 @@ function App() {
       console.error("OGP backend snapshot failed:", e);
     }
   }, [LIVE]);
+
+  // Identity is part of the Rust-cached framework discovery; after an edit we
+  // must clear that cache before re-hydrating so the new identity shows.
+  const bustFrameworkCacheThenHydrate = useCallback(() => {
+    if (!LIVE) return;
+    Promise.resolve(window.OGP_BACKEND.refreshFrameworks?.())
+      .catch(() => {})
+      .finally(() => hydrate());
+  }, [LIVE, hydrate]);
 
   useEffect(() => {
     hydrate();
@@ -272,14 +282,19 @@ function App() {
         showToast("Opens a terminal in the desktop app", { icon: "terminal", tone: "ok" });
       }
     },
-    editIdentity() {
+    editIdentity() { setIdentityOpen(true); },
+    saveIdentity(fields) {
       if (LIVE) {
-        Promise.resolve(BK.openTerminal(fwId, "config set-identity"))
+        return Promise.resolve(BK.setIdentity(fwId, fields))
+          .then(() => { bustFrameworkCacheThenHydrate(); showToast("Identity updated", { icon: "user", tone: "ok" }); })
           .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }));
-        showToast("Opening identity editor in Terminal…", { icon: "user", tone: "ok" });
-      } else {
-        showToast("Edits identity via the ogp CLI in the desktop app", { icon: "user", tone: "ok" });
       }
+      // mock: reflect locally on the framework identity
+      setFrameworks((fws) => fws.map((f) => f.id === fwId
+        ? { ...f, identity: { agent: fields.agent, human: fields.human || "—", org: fields.org } }
+        : f));
+      showToast("Identity updated", { icon: "user", tone: "ok" });
+      return Promise.resolve();
     },
   };
 
@@ -334,6 +349,7 @@ function App() {
         </div>
 
         {wizardOpen && <AddGatewayModal framework={fw} onClose={() => setWizardOpen(false)} onConnect={actions.addPeer} />}
+        {identityOpen && <EditIdentityModal framework={fw} identity={fw.identity} onClose={() => setIdentityOpen(false)} onSave={actions.saveIdentity} />}
         {composerPeer && <MessageComposer peer={st.peers.find((p) => p.id === composerPeer.id) || composerPeer} onClose={() => setComposerPeer(null)} onSend={actions.sendMessage} />}
         {policyPeer && <AgentCommsModal peer={st.peers.find((p) => p.id === policyPeer.id) || policyPeer} onClose={() => setPolicyPeer(null)} onSave={actions.setPolicy} />}
         <Toast toast={toast} />
