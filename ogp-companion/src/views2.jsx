@@ -168,7 +168,7 @@ function SettingRow({ label, sub, children }) {
 }
 
 function SettingsView({ ctx }) {
-  const { framework, identity, daemon } = ctx;
+  const { framework, identity, daemon, actions } = ctx;
   return (
     <PageBody>
       <PageHeader title="Settings" sub={`Configuration for ${framework.displayName}`} />
@@ -185,7 +185,7 @@ function SettingsView({ ctx }) {
           <SettingRow label="Human operator"><span style={{ fontWeight: 600, fontSize: 13.5, color: "var(--text)" }}>{identity.human}</span></SettingRow>
           <SettingRow label="Organization"><span style={{ fontWeight: 600, fontSize: 13.5, color: "var(--text)" }}>{identity.org}</span></SettingRow>
           <SettingRow label="Gateway URL"><Mono>{framework.gatewayUrl.replace("https://", "")}</Mono></SettingRow>
-          <div style={{ marginTop: 14 }}><Button variant="outline" icon="user" size="sm">Edit identity</Button></div>
+          <div style={{ marginTop: 14 }}><Button variant="outline" icon="user" size="sm" onClick={() => actions.editIdentity?.()}>Edit identity</Button></div>
         </Card>
 
         <Card pad={20}>
@@ -198,7 +198,7 @@ function SettingsView({ ctx }) {
           </div>
           <SettingRow label="Status"><Badge tone={daemon.running ? "ok" : "danger"}>{daemon.running ? "running" : "stopped"}</Badge></SettingRow>
           <SettingRow label="Port"><Mono>{daemon.port}</Mono></SettingRow>
-          <SettingRow label="Version"><Mono>v{daemon.version}</Mono></SettingRow>
+          <SettingRow label="Version"><Mono>{daemon.version ? `v${daemon.version}` : "—"}</Mono></SettingRow>
           <SettingRow label="Launch at login" sub="Start daemon when you log in"><Switch checked={true} onChange={() => {}} /></SettingRow>
           <SettingRow label="Poll interval" sub="How often the companion refreshes"><span style={{ fontWeight: 600, fontSize: 13.5, color: "var(--text)" }}>5s</span></SettingRow>
         </Card>
@@ -210,7 +210,7 @@ function SettingsView({ ctx }) {
               <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>Prefer the CLI?</div>
               <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Every action here maps to an <span style={{ fontFamily: "var(--font-mono)" }}>ogp</span> command. Open a terminal pre-filled with this framework.</div>
             </div>
-            <Button variant="outline" icon="terminal" size="sm">Open in Terminal</Button>
+            <Button variant="outline" icon="terminal" size="sm" onClick={() => actions.openTerminal?.()}>Open in Terminal</Button>
           </div>
         </Card>
       </div>
