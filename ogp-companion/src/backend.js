@@ -9,7 +9,12 @@
 // false and the app falls back to the mock window.OGP_DATA from data.jsx.
 
 function hasTauri() {
-  return typeof window !== "undefined" && !!window.__TAURI__;
+  // Tauri v2 always injects __TAURI_INTERNALS__ into the webview; __TAURI__ is
+  // only present when withGlobalTauri is set. Detect on either.
+  return (
+    typeof window !== "undefined" &&
+    (!!window.__TAURI__ || !!window.__TAURI_INTERNALS__)
+  );
 }
 
 // In the desktop shell, let the OS window be the chrome: drop the centered
@@ -19,12 +24,17 @@ if (hasTauri() && typeof document !== "undefined") {
 }
 
 async function invoke(cmd, args) {
-  // Tauri v2 exposes invoke at window.__TAURI__.core.invoke.
+  // Prefer the global bridge (withGlobalTauri); fall back to the internals
+  // invoke that v2 always exposes.
   const core = window.__TAURI__ && window.__TAURI__.core;
-  if (!core || typeof core.invoke !== "function") {
-    throw new Error("Tauri invoke unavailable");
+  if (core && typeof core.invoke === "function") {
+    return core.invoke(cmd, args);
   }
-  return core.invoke(cmd, args);
+  const internals = window.__TAURI_INTERNALS__;
+  if (internals && typeof internals.invoke === "function") {
+    return internals.invoke(cmd, args);
+  }
+  throw new Error("Tauri invoke unavailable");
 }
 
 // ── shape mappers ────────────────────────────────────────────────
