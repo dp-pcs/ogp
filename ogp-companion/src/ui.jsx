@@ -216,7 +216,7 @@ function Mono({ children, style = {} }) {
 // ── Avatar (monogram) ────────────────────────────────────────────
 function Avatar({ name, size = 36, tone }) {
   const initials = (name || "?").replace(/[^a-zA-Z0-9 ]/g, "").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
-  const palette = ["#802DC8", "#EF50FF", "#2E7DDB", "#149A63", "#D69100", "#7A41F7"];
+  const palette = ["#1E72E0", "#35D6FF", "#2E7DDB", "#149A63", "#D69100", "#5B8DEF"];
   const idx = (name || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0) % palette.length;
   const bg = tone ? `var(--${tone})` : palette[idx];
   return (
