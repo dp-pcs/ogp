@@ -37,6 +37,30 @@ export interface RendezvousConfig {
   publicUrl?: string;
 }
 
+/**
+ * Transport mode — how this daemon is reached by peers (bd-b7em).
+ *  - 'direct' (default): public gatewayUrl via tunnel / public IP / port-forward.
+ *      Exactly today's behavior; zero change for existing users.
+ *  - 'relay': daemon holds a persistent outbound WebSocket to a relay; messages
+ *      route peer→relay→peer. No inbound port / tunnel needed. (Phase 2.)
+ *  - 'iroh': QUIC P2P with relay fallback. Opt-in pilot. (Phase 3.)
+ *
+ * The transport is advertised inside the SIGNED rendezvous registration envelope,
+ * so the rendezvous can't claim a transport the keyholder didn't choose. E2E
+ * Ed25519 signing is preserved in every mode; any relay is untrusted by design.
+ */
+export type TransportMode = 'direct' | 'relay' | 'iroh';
+
+export interface TransportConfig {
+  mode: TransportMode;            // default 'direct'
+  relay?: {
+    url: string;                  // websocket relay endpoint; default wss://<rendezvous>/relay
+  };
+  iroh?: {
+    relayUrl?: string;            // dedicated/self-hosted iroh relay; omit = public dev relays
+  };
+}
+
 export type InboundFederationMode =
   | 'forward'
   | 'summarize'
@@ -303,6 +327,8 @@ export interface OGPConfig {
   agentComms?: AgentCommsConfig;
   // Rendezvous configuration (optional)
   rendezvous?: RendezvousConfig;
+  // Transport mode (bd-b7em). Absent ⇒ 'direct' (today's behavior).
+  transport?: TransportConfig;
   // Legacy: single notification target for all agents (backward compatibility)
   notifyTarget?: string;
   // Per-agent notification targets: { "main": "telegram:...", "scribe": "telegram:..." }
@@ -344,6 +370,14 @@ export interface OGPConfig {
  */
 export function getConfigDir(): string {
   return process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');
+}
+
+/**
+ * Resolve the transport mode for a config. Absent transport block ⇒ 'direct',
+ * preserving today's behavior for every existing user (bd-b7em).
+ */
+export function getTransportMode(config: Pick<OGPConfig, 'transport'>): TransportMode {
+  return config.transport?.mode ?? 'direct';
 }
 
 /**

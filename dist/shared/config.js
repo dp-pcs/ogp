@@ -119,6 +119,13 @@ export function getConfigDir() {
     return process.env.OGP_HOME ?? path.join(os.homedir(), '.ogp');
 }
 /**
+ * Resolve the transport mode for a config. Absent transport block ⇒ 'direct',
+ * preserving today's behavior for every existing user (bd-b7em).
+ */
+export function getTransportMode(config) {
+    return config.transport?.mode ?? 'direct';
+}
+/**
  * Get the config file path (computed dynamically based on OGP_HOME)
  */
 export function getConfigPath() {

@@ -1115,7 +1115,7 @@ export function startServer(config?: OGPConfig, background = false): void {
 
     // Start rendezvous registration (if configured)
     if (cfg.rendezvous?.enabled) {
-      startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort).catch((err: Error) => {
+      startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort, cfg.transport).catch((err: Error) => {
         console.warn(`[OGP] Rendezvous startup error: ${err.message}`);
       });
     }

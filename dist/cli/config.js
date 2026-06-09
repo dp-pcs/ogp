@@ -405,6 +405,46 @@ function setTags(tags) {
     console.log(`✓ Tags set to: ${config.tags.join(', ')}`);
 }
 /**
+ * Transport mode (bd-b7em): how this daemon is reached by peers.
+ * Default 'direct' (today's behavior). 'relay'/'iroh' opt into alternate
+ * reachability that doesn't require a tunnel.
+ */
+const VALID_TRANSPORT_MODES = ['direct', 'relay', 'iroh'];
+function showTransport() {
+    const config = requireConfig();
+    const t = config.transport;
+    const mode = t?.mode ?? 'direct';
+    console.log(`\nTransport mode: ${mode}${mode === 'direct' ? ' (default)' : ''}`);
+    if (t?.relay?.url)
+        console.log(`  relay url: ${t.relay.url}`);
+    if (t?.iroh?.relayUrl)
+        console.log(`  iroh relay url: ${t.iroh.relayUrl}`);
+    if (mode === 'relay' && !t?.relay?.url) {
+        console.log('  relay url: (default — wss://<rendezvous>/relay)');
+    }
+    console.log('');
+}
+function setTransportMode(mode) {
+    if (!VALID_TRANSPORT_MODES.includes(mode)) {
+        console.error(`Error: invalid transport mode '${mode}'. Valid: ${VALID_TRANSPORT_MODES.join(', ')}`);
+        process.exit(1);
+    }
+    const config = requireConfig();
+    config.transport = { ...(config.transport ?? {}), mode: mode };
+    saveConfig(config);
+    console.log(`✓ Transport mode set to: ${mode}`);
+    if (mode !== 'direct') {
+        console.log('  Restart the daemon for the change to take effect.');
+    }
+}
+function setTransportRelayUrl(url) {
+    const config = requireConfig();
+    const existing = config.transport ?? { mode: 'relay' };
+    config.transport = { ...existing, relay: { url } };
+    saveConfig(config);
+    console.log(`✓ Transport relay url set to: ${url}`);
+}
+/**
  * Add a single tag
  */
 function addTag(tag) {
@@ -582,5 +622,29 @@ configCommand
     .argument('<tag>', 'Tag to remove')
     .action((tag) => {
     removeTag(tag);
+});
+// Transport mode (bd-b7em): how this daemon is reached by peers.
+const transportCommand = configCommand
+    .command('transport')
+    .description('Configure how this daemon is reached (direct | relay | iroh)');
+transportCommand
+    .command('show', { isDefault: true })
+    .description('Show the current transport configuration')
+    .action(() => {
+    showTransport();
+});
+transportCommand
+    .command('set-mode')
+    .description('Set the transport mode (direct | relay | iroh)')
+    .argument('<mode>', 'Transport mode: direct, relay, or iroh')
+    .action((mode) => {
+    setTransportMode(mode);
+});
+transportCommand
+    .command('set-relay-url')
+    .description('Set the relay websocket URL (for relay mode)')
+    .argument('<url>', 'Relay endpoint, e.g. wss://relay.example.com/relay')
+    .action((url) => {
+    setTransportRelayUrl(url);
 });
 //# sourceMappingURL=config.js.map
