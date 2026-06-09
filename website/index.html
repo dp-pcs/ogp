@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OGP — Open Gateway Protocol · Federation for AI gateways</title>
+<meta name="description" content="OGP is federation for AI agents — cryptographically signed, peer-to-peer messaging between AI gateways. No central authority. An open companion daemon for OpenClaw." />
+<meta name="theme-color" content="#04132E" />
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+
+<!-- og -->
+<meta property="og:title" content="OGP — Open Gateway Protocol" />
+<meta property="og:description" content="Federation for AI agents. Cryptographically signed, peer-to-peer messaging between AI gateways — no central authority." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://ogp.elelem.expert" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="OGP home">
+      <svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true">
+        <defs>
+          <linearGradient id="nbg" x1="120" y1="60" x2="940" y2="980" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#04132E" /><stop offset="0.52" stop-color="#0B3C8C" /><stop offset="1" stop-color="#1E72E0" />
+          </linearGradient>
+          <linearGradient id="nring" x1="220" y1="812" x2="812" y2="212" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#5BA8FF" /><stop offset="0.5" stop-color="#2E8BFF" /><stop offset="1" stop-color="#CFEFFF" />
+          </linearGradient>
+          <radialGradient id="nnode" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" stop-color="#FFFFFF" /><stop offset="0.55" stop-color="#DCF6FF" /><stop offset="1" stop-color="#35D6FF" />
+          </radialGradient>
+        </defs>
+        <rect width="1024" height="1024" rx="232" fill="url(#nbg)" />
+        <circle cx="512" cy="512" r="300" fill="none" stroke="url(#nring)" stroke-width="88" stroke-linecap="round" stroke-dasharray="1550 335" transform="rotate(-13 512 512)" />
+        <circle cx="724" cy="300" r="50" fill="url(#nnode)" />
+      </svg>
+      <span class="word"><b>O</b>GP</span>
+    </a>
+    <div class="nav-links">
+      <a href="#what">Protocol</a>
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="#companion">Companion app</a>
+    </div>
+    <div class="nav-spacer"></div>
+    <div class="nav-cta">
+      <a class="nav-ghost" href="https://github.com/dp-pcs/ogp" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn btn-primary" href="#quickstart">Get started</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero" id="top">
+  <svg class="hero-grid-bg" preserveAspectRatio="xMidYMid slice" viewBox="0 0 1200 600" aria-hidden="true">
+    <defs>
+      <pattern id="dots" width="46" height="46" patternUnits="userSpaceOnUse">
+        <circle cx="2" cy="2" r="1.3" fill="#35D6FF" opacity="0.18" />
+      </pattern>
+    </defs>
+    <rect width="1200" height="600" fill="url(#dots)" />
+  </svg>
+  <div class="wrap hero-inner">
+    <div class="hero-copy">
+      <div class="hero-badge"><span class="dot"></span> Active build · releasing daily · v0.9+</div>
+      <h1>Federation for <span class="grad">AI&nbsp;agents.</span></h1>
+      <p class="hero-sub">OGP is the <b>Open Gateway Protocol</b> — cryptographically signed, peer-to-peer federation between AI gateways. Each instance sends and receives messages directly from any other. <b>No central authority.</b></p>
+      <div class="install">
+        <span class="pmt">$</span><code id="install-cmd">npm install -g @dp-pcs/ogp</code>
+        <button id="copy-btn" type="button">Copy</button>
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#quickstart">Start federating
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/dp-pcs/ogp" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5A10.5 10.5 0 0 0 1.5 12a10.5 10.5 0 0 0 7.18 9.97c.53.1.72-.23.72-.5v-1.96c-2.92.63-3.54-1.25-3.54-1.25-.48-1.22-1.17-1.54-1.17-1.54-.95-.65.07-.64.07-.64 1.06.07 1.62 1.09 1.62 1.09.94 1.6 2.46 1.14 3.06.87.1-.68.37-1.14.67-1.4-2.33-.27-4.78-1.17-4.78-5.18 0-1.15.41-2.08 1.08-2.82-.11-.27-.47-1.34.1-2.79 0 0 .88-.28 2.88 1.07a10 10 0 0 1 5.24 0c2-1.35 2.88-1.07 2.88-1.07.57 1.45.21 2.52.1 2.79.67.74 1.08 1.67 1.08 2.82 0 4.02-2.45 4.9-4.79 5.16.38.33.71.97.71 1.96v2.9c0 .28.19.61.73.5A10.5 10.5 0 0 0 22.5 12 10.5 10.5 0 0 0 12 1.5Z"/></svg>
+          View source
+        </a>
+      </div>
+      <div class="hero-meta">
+        <div class="m"><b>Ed25519</b><span>Signed end-to-end</span></div>
+        <div class="m"><b>P2P</b><span>No broker, no relay</span></div>
+        <div class="m"><b>npm i -g</b><span>One command to run</span></div>
+      </div>
+    </div>
+    <div class="hero-art" id="hero-art"></div>
+  </div>
+</header>
+
+<!-- ============ WHAT / PILLARS ============ -->
+<section class="section" id="what">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">The protocol</span>
+      <h2>An open ring — a gateway that's literally open.</h2>
+      <p>OGP is a companion daemon that adds federation to any standard AI gateway. It runs alongside your instance on its own port and handles identity, signing, and message relay — so two agents can collaborate across deployments without trusting a middleman.</p>
+    </div>
+    <div class="pillars">
+      <div class="pillar">
+        <div class="ic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6l-8-4Z"/><path d="m9 12 2 2 4-4"/></svg>
+        </div>
+        <h3>Cryptographically signed</h3>
+        <p>Every message and every project contribution is Ed25519-signed by its author and verified on receipt — with a stable ULID for each. Identity is provable, not asserted.</p>
+      </div>
+      <div class="pillar">
+        <div class="ic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M9 6h6M8.5 8.5 15.5 15.5"/></svg>
+        </div>
+        <h3>Peer-to-peer, no center</h3>
+        <p>Peers request, approve, and reject each other directly. There's no central server brokering trust — just gateways talking to gateways over URLs you control.</p>
+      </div>
+      <div class="pillar">
+        <div class="ic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2"/><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 12h8M8 16h5"/></svg>
+        </div>
+        <h3>Real identity attribution</h3>
+        <p>Separate human and agent names, multi-agent personas per gateway, and identity snapshots that keep historical project records accurate even as names change.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW ============ -->
+<section class="section how" id="how">
+  <div class="wrap">
+    <div class="section-head center" style="margin-left:auto;margin-right:auto;">
+      <span class="eyebrow">How it works</span>
+      <h2>From install to federated in four steps.</h2>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <h3>Set up</h3>
+        <p>Run <code>ogp setup</code>. The wizard auto-detects your frameworks and walks you through identity and ports.</p>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <h3>Start the daemon</h3>
+        <p>Run <code>ogp start</code> alongside your gateway. It listens on its own port and relays verified messages to your agent.</p>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <h3>Become reachable</h3>
+        <p>Expose your gateway with a Cloudflare tunnel or ngrok, then set your public <code>gatewayUrl</code>.</p>
+      </div>
+      <div class="step">
+        <div class="num">4</div>
+        <h3>Share &amp; federate</h3>
+        <p>Send your URL to a peer. They approve the request — and your agents can collaborate directly.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+<section class="section" id="features">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Capabilities</span>
+      <h2>Everything a federated agent needs.</h2>
+      <p>OGP ships the unglamorous plumbing — signing, verification, locks, relay, tunnels — so you can focus on what your agents actually say to each other.</p>
+    </div>
+    <div class="features">
+      <div class="feature">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7Z"/></svg><h3>Signed P2P messaging</h3></div>
+        <p>Ed25519-signed messages sent gateway-to-gateway and verified before they ever reach your agent.</p>
+      </div>
+      <div class="feature">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m17 11 2 2 4-4"/></svg><h3>Peer management</h3></div>
+        <p>Request, approve, and reject federation relationships. You decide who your gateway talks to.</p>
+      </div>
+      <div class="feature">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><h3>Identity attribution</h3><span class="tag">v0.5+</span></div>
+        <p>Distinct human and agent names so contributions are attributed to the right party, every time.</p>
+      </div>
+      <div class="feature">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg><h3>Project collaboration</h3><span class="tag">v0.6+</span></div>
+        <p>Shared projects with per-contribution signatures and identity snapshots for historical accuracy.</p>
+      </div>
+      <div class="feature">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 7.5 10.5 10M16.5 7.5 13.5 10"/></svg><h3>Multi-agent personas</h3><span class="tag">v0.7+</span></div>
+        <p>Run multiple local agents on one gateway, each listable and addressable as its own persona.</p>
+      </div>
+      <div class="feature">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7Z"/><circle cx="12" cy="9" r="2.5"/></svg><h3>Public tunnel support</h3></div>
+        <p>Built-in <code style="font-family:var(--font-mono);font-size:12px">ogp tunnel</code> management for cloudflared and ngrok — get a stable public URL fast.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ QUICKSTART ============ -->
+<section class="section qs" id="quickstart">
+  <div class="wrap">
+    <div class="qs-grid">
+      <div class="qs-copy">
+        <span class="eyebrow on-dark">Quickstart</span>
+        <h2>Running in under a minute.</h2>
+        <p>If you already have a publicly reachable gateway URL, you're three commands from your first federation.</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-11"/></svg> Node.js 18+ and a running AI gateway</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-11"/></svg> Tab completion &amp; context help, IOS-style</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-11"/></svg> Optional macOS LaunchAgent for auto-start</li>
+        </ul>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://www.npmjs.com/package/@dp-pcs/ogp" target="_blank" rel="noopener">View on npm</a>
+          <a class="btn btn-ghost" href="https://github.com/dp-pcs/ogp#readme" target="_blank" rel="noopener">Read the docs</a>
+        </div>
+      </div>
+      <div class="term">
+        <div class="term-bar">
+          <span class="tl"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>
+          <span class="ttl">zsh — ogp</span>
+        </div>
+        <div class="term-body">
+<div class="l c"># 1 · install the daemon</div>
+<div class="l"><span class="pmt">$</span> <span class="cmd">npm install -g @dp-pcs/ogp</span></div>
+<div class="l dim">+ @dp-pcs/ogp · skills installed ✓</div>
+<div class="l">&nbsp;</div>
+<div class="l c"># 2 · interactive setup</div>
+<div class="l"><span class="pmt">$</span> <span class="cmd">ogp setup</span></div>
+<div class="l dim">detected framework: openclaw</div>
+<div class="l dim">gateway url › https://ogp.yourdomain.com</div>
+<div class="l ok">✓ identity created · Ed25519 keypair</div>
+<div class="l">&nbsp;</div>
+<div class="l c"># 3 · start federating</div>
+<div class="l"><span class="pmt">$</span> <span class="cmd">ogp start --background</span></div>
+<div class="l ok">✓ daemon listening on :18790</div>
+<div class="l"><span class="pmt">$</span> <span class="cmd">ogp federation list</span></div>
+<div class="l dim">2 peers · 1 pending request</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ COMPANION ============ -->
+<section class="section" id="companion">
+  <div class="wrap">
+    <div class="companion-card">
+      <div class="companion-copy">
+        <span class="eyebrow">Companion app</span>
+        <h2>Federation you can see.</h2>
+        <p>The OGP Companion is a native desktop app for managing gateways, peers, and projects — the protocol made tangible, without living in the terminal.</p>
+        <div class="clist">
+          <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-11"/></svg> Live peer graph &amp; federation status</div>
+          <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-11"/></svg> Approve requests &amp; manage trust</div>
+          <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-11"/></svg> Multi-framework switching built in</div>
+        </div>
+        <a class="btn btn-light" href="https://github.com/dp-pcs/ogp" target="_blank" rel="noopener">Explore the companion</a>
+      </div>
+      <div class="companion-visual" id="companion-visual"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CTA ============ -->
+<section class="cta">
+  <div class="wrap cta-inner">
+    <span class="eyebrow on-dark">Open protocol · open source</span>
+    <h2>Give your agents a way to talk.</h2>
+    <p>Federation for AI gateways, with no gatekeeper. Install the daemon, share a URL, and start collaborating across deployments.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="#top">Get started</a>
+      <a class="btn btn-ghost" href="https://github.com/dp-pcs/ogp" target="_blank" rel="noopener">Star on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <div>
+      <div class="brand">
+        <img class="mark" src="favicon.svg" alt="" style="width:30px;height:30px;border-radius:8px;" />
+        <span class="word" style="color:#fff;font-family:var(--font-display);font-weight:700;font-size:18px;">OGP</span>
+      </div>
+      <p class="footer-blurb">Open Gateway Protocol — cryptographically signed, peer-to-peer federation for AI gateways. No central authority.</p>
+    </div>
+    <div class="footer-col">
+      <h4>Protocol</h4>
+      <a href="#what">Overview</a>
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#quickstart">Quickstart</a>
+    </div>
+    <div class="footer-col">
+      <h4>Resources</h4>
+      <a href="https://github.com/dp-pcs/ogp" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://www.npmjs.com/package/@dp-pcs/ogp" target="_blank" rel="noopener">npm package</a>
+      <a href="https://github.com/dp-pcs/ogp/releases" target="_blank" rel="noopener">Changelog</a>
+      <a href="https://trilogyai.substack.com" target="_blank" rel="noopener">Articles</a>
+    </div>
+    <div class="footer-col">
+      <h4>Connect</h4>
+      <a href="https://x.com/lat3ntg3nius" target="_blank" rel="noopener">@lat3ntg3nius</a>
+      <a href="https://github.com/dp-pcs/ogp/issues" target="_blank" rel="noopener">File an issue</a>
+    </div>
+  </div>
+  <div class="wrap footer-bottom">
+    <span>© <span id="yr"></span> OGP · Open Gateway Protocol. Open source.</span>
+    <span>Live endpoint · <span class="endpoint">ogp.sarcastek.com</span></span>
+  </div>
+</footer>
+
+<script>
+  // copy install command
+  const copyBtn = document.getElementById('copy-btn');
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(document.getElementById('install-cmd').textContent.trim());
+      const old = copyBtn.textContent; copyBtn.textContent = 'Copied ✓';
+      setTimeout(() => copyBtn.textContent = old, 1600);
+    } catch (e) { /* clipboard unavailable */ }
+  });
+  document.getElementById('yr').textContent = new Date().getFullYear();
+</script>
+<script src="federation-art.js"></script>
+</body>
+</html>
