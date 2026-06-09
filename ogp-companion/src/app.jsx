@@ -5,16 +5,16 @@ const D = window.OGP_DATA;
 const WIN_W = 1180, WIN_H = 768;
 
 const ACCENTS = {
-  "#802DC8": { light: ["#802DC8", "#B75EFF"], dark: ["#B75EFF", "#D152FF"] },
-  "#C81E8E": { light: ["#C81E8E", "#EF50FF"], dark: ["#EF50FF", "#FF7BD5"] },
-  "#2563C9": { light: ["#2563C9", "#5B8DEF"], dark: ["#5B8DEF", "#8FB4FF"] },
-  "#0E8C73": { light: ["#0E8C73", "#1FB89A"], dark: ["#27C9A7", "#5BE0C4"] },
+  "#1E72E0": { light: ["#1E72E0", "#35D6FF"], dark: ["#3B8BFF", "#46E0FF"] },  // Deep Ocean
+  "#2563C9": { light: ["#2563C9", "#5B8DEF"], dark: ["#5B8DEF", "#8FB4FF"] },  // Cobalt
+  "#0E8C73": { light: ["#0E8C73", "#1FB89A"], dark: ["#27C9A7", "#5BE0C4"] },  // Teal
+  "#475569": { light: ["#475569", "#7C8AA3"], dark: ["#64748B", "#94A3B8"] },  // Slate
 };
 const DENSITY = { compact: 14, regular: 20, comfy: 26 };
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "theme": "light",
-  "accent": "#802DC8",
+  "accent": "#1E72E0",
   "density": "regular",
   "peerStyle": "graph",
   "tunnelStyle": "control"
@@ -74,7 +74,7 @@ function App() {
   useEffect(() => {
     const root = document.documentElement;
     root.setAttribute("data-theme", t.theme === "dark" ? "dark" : "light");
-    const pair = (ACCENTS[t.accent] || ACCENTS["#802DC8"])[t.theme === "dark" ? "dark" : "light"];
+    const pair = (ACCENTS[t.accent] || ACCENTS["#1E72E0"])[t.theme === "dark" ? "dark" : "light"];
     root.style.setProperty("--accent", pair[0]);
     root.style.setProperty("--accent-2", pair[1]);
     root.style.setProperty("--pad", (DENSITY[t.density] || 20) + "px");
