@@ -41,9 +41,20 @@ function selectFramework(forFlag) {
     // If --for is provided, use it
     if (forFlag) {
         const metaConfig = loadMetaConfig();
-        // No frameworks configured
+        // No frameworks configured in the meta-registry. In server/container
+        // deployments the daemon is launched by setting OGP_HOME directly and the
+        // meta-registry (created by interactive `ogp setup`) is never populated —
+        // possibly because the daemon and CLI run under different $HOME values.
+        // If OGP_HOME is already set, honor it instead of hard-failing, so the CLI
+        // can still talk to the running daemon. See OGP_META_HOME for overriding
+        // the registry location.
         if (!metaConfig.frameworks || metaConfig.frameworks.length === 0) {
-            console.error('Error: No frameworks configured. Run "ogp setup" first.');
+            if (process.env.OGP_HOME) {
+                console.error(`Warning: --for ${forFlag} given but no frameworks are configured; ` +
+                    `using OGP_HOME=${process.env.OGP_HOME}.`);
+                return;
+            }
+            console.error('Error: No frameworks configured. Run "ogp setup" first, or set OGP_HOME.');
             process.exit(1);
         }
         // Resolve alias
