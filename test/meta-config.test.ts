@@ -60,6 +60,33 @@ describe('meta-config', () => {
     });
   });
 
+  describe('OGP_META_HOME override', () => {
+    const originalMetaHome = process.env.OGP_META_HOME;
+
+    afterEach(() => {
+      if (originalMetaHome === undefined) {
+        delete process.env.OGP_META_HOME;
+      } else {
+        process.env.OGP_META_HOME = originalMetaHome;
+      }
+    });
+
+    it('should honor OGP_META_HOME for the meta config dir', () => {
+      process.env.OGP_META_HOME = '/data/ogp-meta';
+      expect(getMetaConfigDir()).toBe('/data/ogp-meta');
+    });
+
+    it('should honor OGP_META_HOME for the meta config file path', () => {
+      process.env.OGP_META_HOME = '/data/ogp-meta';
+      expect(getMetaConfigPath()).toBe(path.join('/data/ogp-meta', 'config.json'));
+    });
+
+    it('should fall back to ~/.ogp-meta when OGP_META_HOME is unset', () => {
+      delete process.env.OGP_META_HOME;
+      expect(getMetaConfigDir()).toBe(expectedMetaConfigDir);
+    });
+  });
+
   describe('ensureMetaConfigDir', () => {
     it('should create directory if it does not exist', () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
