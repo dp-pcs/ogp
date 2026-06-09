@@ -10,6 +10,7 @@ import {
   setDefaultLevel,
   getAllEffectivePolicies,
   readActivityLog,
+  readActivityJsonl,
   clearActivityLog,
   setActivityLogging,
   type AgentCommsConfig
@@ -286,7 +287,15 @@ export function resetPolicy(peerId: string): void {
 /**
  * Show activity log
  */
-export function showActivity(peerId?: string, last?: number): void {
+export function showActivity(peerId?: string, last?: number, asJson?: boolean): void {
+  // JSON mode: emit the structured store (full, untruncated entries) for tools
+  // like the companion app. Always prints valid JSON, even when empty.
+  if (asJson) {
+    const entries = readActivityJsonl({ peerId, last: last || 50 });
+    console.log(JSON.stringify(entries));
+    return;
+  }
+
   const lines = readActivityLog({ peerId, last: last || 50 });
 
   if (lines.length === 0) {

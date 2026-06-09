@@ -14,6 +14,11 @@ const MAX_LOG_LINES = 1000;
 function getActivityLogFile() {
     return path.join(getConfigDir(), 'activity.log');
 }
+// Structured (machine-readable) activity store, written alongside the human
+// text log so UIs (e.g. the companion app) can render full, untruncated entries.
+function getActivityJsonlFile() {
+    return path.join(getConfigDir(), 'activity.jsonl');
+}
 const DEFAULT_AGENT_COMMS_CONFIG = {
     globalPolicy: {
         'general': { level: 'summary' },
@@ -139,8 +144,22 @@ export function logActivity(entry) {
     const logLine = `${fullEntry.timestamp} ${dirSymbol} ${entry.peerName} ${arrow} ${entry.topic}:${levelTag} ${msgPreview}\n`;
     // Append to log file
     fs.appendFileSync(getActivityLogFile(), logLine, 'utf-8');
+    // Also append the full, structured entry to the JSONL store. This keeps the
+    // untruncated message and all fields so UIs can render real activity.
+    // The `truncated` flag only applies to the text preview above, not here.
+    const jsonlEntry = {
+        timestamp: fullEntry.timestamp,
+        direction: entry.direction,
+        peerId: entry.peerId,
+        peerName: entry.peerName,
+        topic: entry.topic,
+        message: entry.message,
+        ...(entry.level ? { level: entry.level } : {})
+    };
+    fs.appendFileSync(getActivityJsonlFile(), JSON.stringify(jsonlEntry) + '\n', 'utf-8');
     // Rotate if too large
     rotateActivityLog();
+    rotateActivityJsonl();
 }
 /**
  * Rotate activity log if it exceeds max lines
@@ -155,6 +174,20 @@ function rotateActivityLog() {
         // Keep only the last MAX_LOG_LINES entries
         const trimmed = lines.slice(-MAX_LOG_LINES).join('\n') + '\n';
         fs.writeFileSync(activityLogFile, trimmed, 'utf-8');
+    }
+}
+/**
+ * Rotate the JSONL activity store if it exceeds max lines
+ */
+function rotateActivityJsonl() {
+    const jsonlFile = getActivityJsonlFile();
+    if (!fs.existsSync(jsonlFile))
+        return;
+    const content = fs.readFileSync(jsonlFile, 'utf-8');
+    const lines = content.split('\n').filter(l => l.trim());
+    if (lines.length > MAX_LOG_LINES) {
+        const trimmed = lines.slice(-MAX_LOG_LINES).join('\n') + '\n';
+        fs.writeFileSync(jsonlFile, trimmed, 'utf-8');
     }
 }
 /**
@@ -176,6 +209,38 @@ export function readActivityLog(options) {
         lines = lines.slice(-options.last);
     }
     return lines;
+}
+/**
+ * Read structured activity entries from the JSONL store.
+ * Mirrors readActivityLog's filter/limit semantics, but returns full
+ * ActivityEntry objects (untruncated). Malformed lines are skipped.
+ */
+export function readActivityJsonl(options) {
+    const jsonlFile = getActivityJsonlFile();
+    if (!fs.existsSync(jsonlFile))
+        return [];
+    const content = fs.readFileSync(jsonlFile, 'utf-8');
+    let entries = [];
+    for (const line of content.split('\n')) {
+        if (!line.trim())
+            continue;
+        try {
+            entries.push(JSON.parse(line));
+        }
+        catch {
+            // Tolerate a malformed/partial line (e.g. interrupted append)
+        }
+    }
+    // Filter by peer if specified (match peerId or peerName)
+    if (options?.peerId) {
+        const needle = options.peerId;
+        entries = entries.filter(e => e.peerId === needle || e.peerName === needle);
+    }
+    // Limit to last N entries
+    if (options?.last && options.last > 0) {
+        entries = entries.slice(-options.last);
+    }
+    return entries;
 }
 /**
  * Clear activity log
