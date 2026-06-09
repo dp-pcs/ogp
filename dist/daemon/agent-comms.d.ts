@@ -66,6 +66,15 @@ export declare function readActivityLog(options?: {
     last?: number;
 }): string[];
 /**
+ * Read structured activity entries from the JSONL store.
+ * Mirrors readActivityLog's filter/limit semantics, but returns full
+ * ActivityEntry objects (untruncated). Malformed lines are skipped.
+ */
+export declare function readActivityJsonl(options?: {
+    peerId?: string;
+    last?: number;
+}): ActivityEntry[];
+/**
  * Clear activity log
  */
 export declare function clearActivityLog(): void;

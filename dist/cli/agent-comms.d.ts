@@ -39,7 +39,7 @@ export declare function resetPolicy(peerId: string): void;
 /**
  * Show activity log
  */
-export declare function showActivity(peerId?: string, last?: number): void;
+export declare function showActivity(peerId?: string, last?: number, asJson?: boolean): void;
 /**
  * Clear activity log
  */
