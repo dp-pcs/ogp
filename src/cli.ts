@@ -992,11 +992,12 @@ agentComms
   .argument('[peer-id]', 'Optional peer ID to filter')
   .option('--last <n>', 'Show last N entries', '50')
   .option('--clear', 'Clear the activity log')
+  .option('--json', 'Output structured activity entries as JSON')
   .action((peerId, options) => {
     if (options.clear) {
       clearActivity();
     } else {
-      showActivity(peerId, parseInt(options.last, 10));
+      showActivity(peerId, parseInt(options.last, 10), options.json);
     }
   });
 

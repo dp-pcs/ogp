@@ -173,7 +173,7 @@ pub fn snapshot() -> Result<Value, OgpError> {
     let mut peers = Map::new();
     let mut tunnels = Map::new();
     let mut daemon = Map::new();
-    let activity = Map::new();
+    let mut activity = Map::new();
 
     for fw in &frameworks {
         let id = fw.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -198,6 +198,13 @@ pub fn snapshot() -> Result<Value, OgpError> {
         // tunnels: tunnel list --json → { active, options }
         let traw = run_json(fwref, &["tunnel", "list", "--json"]).unwrap_or(json!({}));
         tunnels.insert(id.clone(), map_tunnels(&traw));
+
+        // activity: agent-comms activity --json (structured ActivityEntry array).
+        // Maps the daemon's entry shape to the UI's activity-entry shape. Newest
+        // last in the store, so reverse to newest-first for the UI feed.
+        let araw = run_json(fwref, &["agent-comms", "activity", "--json", "--last", "100"])
+            .unwrap_or(json!([]));
+        activity.insert(id.clone(), map_activity(&araw));
     }
 
     Ok(json!({
@@ -341,6 +348,39 @@ fn map_tunnels(raw: &Value) -> Value {
         }
     }
     json!({ "active": active, "options": options })
+}
+
+/// Map the daemon's `agent-comms activity --json` entries (ActivityEntry) to the
+/// UI's activity-entry shape. Entries arrive oldest-first; the UI feed wants
+/// newest-first, so we reverse.
+fn map_activity(raw: &Value) -> Value {
+    let mut out = vec![];
+    if let Some(entries) = raw.as_array() {
+        for (i, e) in entries.iter().enumerate() {
+            let timestamp = e.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+            let direction = e.get("direction").and_then(|v| v.as_str()).unwrap_or("in");
+            let peer_name = e.get("peerName").and_then(|v| v.as_str());
+            let peer_id = e.get("peerId").and_then(|v| v.as_str());
+            let peer = peer_name.or(peer_id).unwrap_or("unknown");
+            let topic = e.get("topic").and_then(|v| v.as_str());
+            let level = e.get("level").and_then(|v| v.as_str());
+            let text = e.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            // Stable-ish id from timestamp+peer+index (no nonce in the store).
+            let id = format!("{timestamp}-{peer}-{i}");
+            out.push(json!({
+                "id": id,
+                "t": timestamp,
+                "kind": "agent",
+                "dir": direction,
+                "peer": peer,
+                "topic": topic,
+                "level": level,
+                "text": text,
+            }));
+        }
+    }
+    out.reverse();
+    Value::Array(out)
 }
 
 // ── actions ──────────────────────────────────────────────────────
