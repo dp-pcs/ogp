@@ -54,7 +54,7 @@ function TitleBar({ theme, onToggleTheme, onRefresh, refreshing, onAdd, framewor
     }}>
       <TrafficLights />
       <div data-tauri-drag-region style={{ width: 1, height: 22, background: "var(--border)", margin: "0 2px" }} />
-      <img data-tauri-drag-region src={theme === "dark" ? "assets/ogp-symbol-white.png" : "assets/ogp-symbol-black.png"}
+      <img data-tauri-drag-region src="assets/ogp-symbol-ocean.svg"
         alt="OGP" style={{ height: 19, width: 19, objectFit: "contain" }} />
       <div data-tauri-drag-region style={{ display: "flex", flexDirection: "column", lineHeight: 1.05 }}>
         <span data-tauri-drag-region style={{ fontWeight: 700, fontSize: 14, color: "var(--text)", letterSpacing: "-0.01em" }}>OGP Companion</span>
