@@ -10,13 +10,13 @@
   --ok:     #16A36B;   /* healthy / running */
   --warn:   #D69100;   /* pending / degraded */
   --danger: #E23B45;   /* down / unhealthy (brand red family) */
-  --pink:   #EF50FF;   /* brand accent / live pulse */
+  --pink:   #16A6D6;   /* live signal accent (was brand pink) */
 
   /* accent (overridden by JS tweak) */
-  --accent:      #802DC8;
-  --accent-2:    #B75EFF;
-  --accent-soft: #F1EBFE;
-  --accent-ink:  #36069D;
+  --accent:      #1E72E0;
+  --accent-2:    #35D6FF;
+  --accent-soft: #E2F1FF;
+  --accent-ink:  #0A3A7A;
 
   /* density (overridden by JS tweak) */
   --row-h: 56px;
@@ -36,9 +36,9 @@
 
 /* ---------------- LIGHT ---------------- */
 :root[data-theme="light"] {
-  --desktop: radial-gradient(120% 120% at 80% -10%, #ECE1F0 0%, #F5F5FA 38%, #EEF0F6 100%);
+  --desktop: radial-gradient(120% 120% at 80% -10%, #D7E8FF 0%, #EEF3FA 38%, #EAEEF4 100%);
   --window-border: rgba(0,0,0,0.10);
-  --window-shadow: 0 0 0 1px rgba(20,12,40,0.06), 0 32px 80px -24px rgba(36,6,80,0.34);
+  --window-shadow: 0 0 0 1px rgba(12,28,56,0.06), 0 32px 80px -24px rgba(6,32,72,0.34);
 
   --bg:        #F4F3F9;   /* content canvas */
   --panel:     #FFFFFF;   /* cards */
@@ -53,7 +53,7 @@
 
   --border:      #E8E3F2;
   --border-soft: #F0ECF8;
-  --hairline:    rgba(128,45,200,0.22);
+  --hairline:    rgba(30,114,224,0.22);
 
   --ok:     #149A63;
   --warn:   #BD8200;
@@ -64,10 +64,10 @@
   --danger-soft: #FCE5E7;
 
   --shadow-card: 0 1px 2px rgba(20,12,40,0.04), 0 8px 24px -12px rgba(20,12,40,0.10);
-  --shadow-pop:  0 12px 40px -8px rgba(20,12,40,0.22), 0 0 0 1px rgba(20,12,40,0.06);
+  --shadow-pop:  0 12px 40px -8px rgba(12,28,56,0.22), 0 0 0 1px rgba(12,28,56,0.06);
 
-  --accent:      #802DC8;
-  --accent-2:    #B75EFF;
+  --accent:      #1E72E0;
+  --accent-2:    #35D6FF;
   --accent-soft: color-mix(in srgb, var(--accent) 11%, var(--panel));
   --accent-ink:  color-mix(in srgb, var(--accent) 78%, #000);
 
@@ -76,7 +76,7 @@
 
 /* ---------------- DARK ---------------- */
 :root[data-theme="dark"] {
-  --desktop: radial-gradient(120% 120% at 82% -12%, #3a1466 0%, #0a1b38 42%, #02101f 100%);
+  --desktop: radial-gradient(120% 120% at 82% -12%, #103a6e 0%, #08203f 42%, #02101f 100%);
   --window-border: rgba(255,255,255,0.10);
   --window-shadow: 0 0 0 1px rgba(0,0,0,0.55), 0 40px 90px -28px rgba(0,0,0,0.75);
 
@@ -93,10 +93,10 @@
 
   --border:      rgba(255,255,255,0.09);
   --border-soft: rgba(255,255,255,0.05);
-  --hairline:    rgba(183,94,255,0.30);
+  --hairline:    rgba(53,214,255,0.30);
 
-  --accent:      #B75EFF;
-  --accent-2:    #D152FF;
+  --accent:      #3B8BFF;
+  --accent-2:    #46E0FF;
   --accent-soft: color-mix(in srgb, var(--accent) 20%, transparent);
   --accent-ink:  color-mix(in srgb, var(--accent) 50%, #fff);
 
