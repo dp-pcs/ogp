@@ -78,9 +78,10 @@ function FederationGraph({ peers, identity, onSelect, selectedId, theme }) {
           <animate attributeName="r" values="40;52;40" dur="3.2s" repeatCount="indefinite" />
           <animate attributeName="opacity" values="0.4;0;0.4" dur="3.2s" repeatCount="indefinite" />
         </circle>
-        {/* white mark sits on the ocean-accent core (g-core) — reads on both themes */}
-        <image href="assets/ogp-symbol-white.png"
-          x={cx - 19} y={cy - 22} width="38" height="38" opacity="0.96" />
+        {/* white ring on transparent bg, sits on the ocean-accent core (g-core).
+            Uses the .svg (not the black-bg .png) so no dark square shows. */}
+        <image href="assets/ogp-symbol-white.svg"
+          x={cx - 20} y={cy - 20} width="40" height="40" opacity="0.96" />
         <text x={cx} y={cy + 60} textAnchor="middle" style={{ fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 700, fill: "var(--text)" }}>Your Gateway</text>
         <text x={cx} y={cy + 77} textAnchor="middle" style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fill: "var(--text-faint)" }}>{identity.agent}</text>
       </g>

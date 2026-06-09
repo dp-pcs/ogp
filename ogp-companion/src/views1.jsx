@@ -121,16 +121,16 @@ function OverviewView({ ctx }) {
       </div>
 
       {/* two-column */}
-      <div className="grid-split">
-        <Card pad={0} style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 4px" }}>
+      <div className="grid-split" style={{ alignItems: "start" }}>
+        <Card pad={0} style={{ overflow: "hidden", display: "flex", flexDirection: "column", height: 400 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 4px", flexShrink: 0 }}>
             <div>
               <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--text)" }}>Federation map</div>
               <div style={{ fontSize: 12, color: "var(--text-faint)" }}>{approved.length} connected · {unhealthy.length} unhealthy</div>
             </div>
             <Button variant="ghost" size="sm" iconRight="chevronRight" onClick={() => setRoute("federation")}>Open</Button>
           </div>
-          <div style={{ height: 320 }}>
+          <div style={{ flex: 1, minHeight: 0 }}>
             <FederationGraph peers={peers} identity={identity} theme={ctx.theme} selectedId={null}
               onSelect={(id) => { setSelected(id); setRoute("federation"); }} />
           </div>
