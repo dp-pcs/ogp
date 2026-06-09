@@ -62,11 +62,16 @@ function StatTile({ label, value, unit, trend, icon, tone, onClick }) {
 
 // ── OVERVIEW ─────────────────────────────────────────────────────
 function OverviewView({ ctx }) {
-  const { daemon, tunnel, peers, identity, gatewayUp, framework, actions, busy, setRoute, setSelected } = ctx;
+  const { daemon, tunnel, peers, activity, identity, gatewayUp, framework, actions, busy, setRoute, setSelected } = ctx;
   const approved = peers.filter((p) => p.status === "approved");
   const pending = peers.filter((p) => p.status === "pending");
   const unhealthy = approved.filter((p) => p.healthy === false);
-  const msgsToday = approved.reduce((a, p) => a + (p.msgTrend?.slice(-3).reduce((x, y) => x + y, 0) || 0), 0);
+  // Received messages = inbound message/agent activity in the last 24h (real feed).
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const received = (activity || []).filter(
+    (a) => a.dir === "in" && (a.kind === "agent" || a.kind === "message") && new Date(a.t).getTime() >= dayAgo
+  );
+  const msgsToday = received.length;
 
   return (
     <PageBody>
@@ -111,7 +116,7 @@ function OverviewView({ ctx }) {
       <div className="grid-4" style={{ marginBottom: 18 }}>
         <StatTile label="Federated" value={approved.length} unit="peers" icon="users" onClick={() => setRoute("federation")} trend={`${unhealthy.length} need attention`} tone={unhealthy.length ? "danger" : "ok"} />
         <StatTile label="Pending" value={pending.length} unit="requests" icon="inbox" onClick={() => setRoute("federation")} trend={pending.length ? "awaiting review" : "all clear"} tone={pending.length ? "warn" : undefined} />
-        <StatTile label="Messages" value={msgsToday} unit="today" icon="activity" onClick={() => setRoute("activity")} trend="across all peers" />
+        <StatTile label="Received" value={msgsToday} unit="today" icon="activity" onClick={() => setRoute("activity")} trend={msgsToday ? "view in activity" : "across all peers"} tone={msgsToday ? "ok" : undefined} />
         <StatTile label="Uptime" value={fmtUptime(daemon.uptimeMs)} icon="clock" trend={daemon.version ? `v${daemon.version}` : undefined} />
       </div>
 
