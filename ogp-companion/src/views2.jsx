@@ -10,10 +10,18 @@ const ACT_META = {
   tunnel:  { icon: "tunnel", tone: "danger" },
 };
 
-function ActivityLine({ a, compact }) {
+function ActivityLine({ a, compact, onReply }) {
   const m = ACT_META[a.kind] || ACT_META.message;
+  // Inbound agent/message lines are repliable when a reply handler is wired.
+  const canReply = !!onReply && a.dir === "in" && (a.kind === "agent" || a.kind === "message");
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 11, padding: compact ? "7px 6px" : "11px 10px", borderRadius: 9 }}>
+    <div
+      onClick={canReply ? () => onReply(a) : undefined}
+      title={canReply ? "Reply to this message" : undefined}
+      style={{ display: "flex", alignItems: "center", gap: 11, padding: compact ? "7px 6px" : "11px 10px", borderRadius: 9, cursor: canReply ? "pointer" : "default" }}
+      onMouseEnter={canReply ? (e) => (e.currentTarget.style.background = "var(--panel-2)") : undefined}
+      onMouseLeave={canReply ? (e) => (e.currentTarget.style.background = "transparent") : undefined}
+    >
       <div style={{ width: compact ? 28 : 34, height: compact ? 28 : 34, borderRadius: 9, flexShrink: 0, background: `var(--${m.tone}-soft, var(--accent-soft))`, color: `var(--${m.tone}, var(--accent))`, display: "grid", placeItems: "center" }}>
         <Icon name={m.icon} size={compact ? 14 : 16} />
       </div>
@@ -30,6 +38,9 @@ function ActivityLine({ a, compact }) {
           </div>
         )}
       </div>
+      {canReply && !compact && (
+        <Icon name="reply" size={15} style={{ color: "var(--accent)", flexShrink: 0, opacity: 0.7 }} />
+      )}
       <span style={{ fontSize: 11.5, color: "var(--text-faint)", flexShrink: 0 }}>{relTime(a.t)}</span>
     </div>
   );
@@ -137,6 +148,16 @@ function TunnelsView({ ctx }) {
 function ActivityView({ ctx }) {
   const [filter, setFilter] = useStateV2("all");
   const items = ctx.activity.filter((a) => filter === "all" ? true : filter === "messages" ? (a.kind === "message" || a.kind === "agent") : filter === "requests" ? a.kind === "request" : a.kind === "error" || a.kind === "tunnel");
+
+  // Reply to an inbound message: resolve its peer (activity stores the display
+  // name / alias) to a peer object, then open the composer pre-targeted.
+  function onReply(a) {
+    const peer = (ctx.peers || []).find(
+      (p) => p.displayName === a.peer || p.alias === a.peer || p.agentName === a.peer
+    );
+    if (peer) ctx.actions.message?.({ ...peer, replyTopic: a.topic || undefined });
+  }
+
   return (
     <PageBody>
       <PageHeader title="Activity" sub="Federation events, agent-comms, and gateway changes.">
@@ -148,7 +169,7 @@ function ActivityView({ ctx }) {
       <Card pad={8}>
         {items.length === 0
           ? <Empty icon="activity" title="Nothing here yet" sub="Activity will appear as peers exchange messages." />
-          : items.map((a) => <ActivityLine key={a.id} a={a} />)}
+          : items.map((a) => <ActivityLine key={a.id} a={a} onReply={onReply} />)}
       </Card>
     </PageBody>
   );

@@ -148,7 +148,8 @@ function MessageComposer({ peer, onClose, onSend }) {
   const policyTopics = (peer.commsPolicy?.topics || []).map((t) => t.topic);
   const topics = Array.from(new Set(["general", ...policyTopics, ...scopeTopics])).filter(Boolean);
   const [mode, setMode] = useStateC(canAgent ? "agent-comms" : "message");
-  const [topic, setTopic] = useStateC(topics[0] || "general");
+  // When opened as a reply, pre-fill the topic from the message we're replying to.
+  const [topic, setTopic] = useStateC(peer.replyTopic || topics[0] || "general");
   const [priority, setPriority] = useStateC("normal");
   const [wait, setWait] = useStateC(false);
   const [text, setText] = useStateC("");
