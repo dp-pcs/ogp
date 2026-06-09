@@ -1,0 +1,78 @@
+name: Release companion app
+
+# Builds, signs, and notarizes the OGP Companion desktop app (Tauri) and
+# attaches a universal macOS .dmg to a GitHub Release.
+#
+# Triggers:
+#   - push of a tag matching companion-v* (e.g. companion-v0.1.0)
+#   - manual workflow_dispatch (builds, uploads to a draft release)
+#
+# Signing: Developer ID Application cert (direct-download distribution).
+# Notarization: App Store Connect API key.
+# All Apple creds come from repo secrets (Apple signing can't use OIDC).
+
+on:
+  push:
+    tags:
+      - 'companion-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create releases + upload assets
+
+jobs:
+  release:
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust (universal targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Cache cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ogp-companion/src-tauri
+
+      - name: Install frontend deps
+        working-directory: ogp-companion
+        run: npm ci
+
+      - name: Write App Store Connect API key
+        env:
+          API_KEY_B64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: |
+          echo "$API_KEY_B64" | base64 --decode > "${{ github.workspace }}/api_key.p8"
+
+      - name: Build, sign, notarize, and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Code signing (Developer ID Application)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Notarization (App Store Connect API key)
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ github.workspace }}/api_key.p8
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # GitHub release upload
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: ogp-companion
+          args: --target universal-apple-darwin
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('companion-v{0}', github.run_number) }}
+          releaseName: 'OGP Companion ${{ github.ref_type == ''tag'' && github.ref_name || ''(dev build)'' }}'
+          releaseBody: 'Universal macOS build (Intel + Apple Silicon), signed & notarized. Drag OGP Companion to Applications.'
+          releaseDraft: true
+          prerelease: false
