@@ -1,26 +1,39 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-const DEFAULT_META_CONFIG_DIR = path.join(os.homedir(), '.ogp-meta');
-const META_CONFIG_FILE = path.join(DEFAULT_META_CONFIG_DIR, 'config.json');
+/**
+ * Resolve the meta config directory.
+ *
+ * Computed dynamically (not frozen at import time) so deployments can override
+ * the location via OGP_META_HOME. This mirrors how OGP_HOME overrides the
+ * per-framework config dir in config.ts. The default is ~/.ogp-meta.
+ *
+ * Override matters for server/container deployments (e.g. ECS) where $HOME may
+ * differ between the process that ran `ogp setup` and the process that runs the
+ * CLI — without an override the registry silently "doesn't exist".
+ */
+function resolveMetaConfigDir() {
+    return process.env.OGP_META_HOME ?? path.join(os.homedir(), '.ogp-meta');
+}
 /**
  * Get the path to the meta config file
  */
 export function getMetaConfigPath() {
-    return META_CONFIG_FILE;
+    return path.join(resolveMetaConfigDir(), 'config.json');
 }
 /**
  * Get the meta config directory path
  */
 export function getMetaConfigDir() {
-    return DEFAULT_META_CONFIG_DIR;
+    return resolveMetaConfigDir();
 }
 /**
  * Ensure the meta config directory exists
  */
 export function ensureMetaConfigDir() {
-    if (!fs.existsSync(DEFAULT_META_CONFIG_DIR)) {
-        fs.mkdirSync(DEFAULT_META_CONFIG_DIR, { recursive: true });
+    const dir = resolveMetaConfigDir();
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
     }
 }
 /**
@@ -28,15 +41,16 @@ export function ensureMetaConfigDir() {
  * Returns sensible defaults if the file doesn't exist
  */
 export function loadMetaConfig() {
+    const metaConfigFile = getMetaConfigPath();
     try {
-        if (!fs.existsSync(META_CONFIG_FILE)) {
+        if (!fs.existsSync(metaConfigFile)) {
             // Return default configuration
             return {
                 version: '1.0.0',
                 frameworks: [],
             };
         }
-        const data = fs.readFileSync(META_CONFIG_FILE, 'utf-8');
+        const data = fs.readFileSync(metaConfigFile, 'utf-8');
         const config = JSON.parse(data);
         // Validate schema
         if (!config.version) {
@@ -84,6 +98,6 @@ export function saveMetaConfig(config) {
     if (!Array.isArray(config.frameworks)) {
         throw new Error('Cannot save meta config: frameworks must be an array');
     }
-    fs.writeFileSync(META_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+    fs.writeFileSync(getMetaConfigPath(), JSON.stringify(config, null, 2), 'utf-8');
 }
 //# sourceMappingURL=meta-config.js.map
