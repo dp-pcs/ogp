@@ -42,6 +42,7 @@ const ICON_PATHS = {
   inbox: '<path d="M3 13h5l1.5 3h5L21 13M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>',
   arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   arrowDown: '<path d="M12 5v14M6 13l6 6 6-6"/>',
+  reply: '<path d="M9 17l-5-5 5-5M4 12h11a5 5 0 0 1 5 5v1"/>',
   dot: '<circle cx="12" cy="12" r="4"/>',
   sparkle: '<path d="M12 3l1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6z"/>',
   terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>',
