@@ -48,6 +48,20 @@ export function buildTransportDescriptor(
   return undefined; // direct
 }
 
+/**
+ * Resolve the relay WebSocket URL for THIS daemon's own receiver socket
+ * (bd-b7em Phase 2). Uses an explicitly configured relay.url, else derives
+ * wss://<rendezvous-host>/relay. Returns undefined when relay can't be resolved.
+ */
+export function resolveOwnRelayUrl(
+  transport: TransportConfig | undefined,
+  rendezvousUrl: string | undefined
+): string | undefined {
+  if (transport?.relay?.url) return transport.relay.url;
+  if (rendezvousUrl) return defaultRelayUrl(rendezvousUrl);
+  return undefined;
+}
+
 /** Derive the default relay endpoint from the rendezvous URL (wss://<host>/relay). */
 function defaultRelayUrl(rendezvousUrl: string): string | undefined {
   try {

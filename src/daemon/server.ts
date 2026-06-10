@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 
 const _require = createRequire(import.meta.url);
 const OGP_VERSION: string = _require('../../package.json').version;
-import { requireConfig, loadConfig, type OGPConfig, getConfigDir, synthesizePersonas, type AgentPersona } from '../shared/config.js';
+import { requireConfig, loadConfig, type OGPConfig, getConfigDir, synthesizePersonas, type AgentPersona, getTransportMode } from '../shared/config.js';
 import { getPublicKey, getPrivateKey } from './keypair.js';
 import {
   addPeer,
@@ -28,7 +28,8 @@ import { signObject, verify } from '../shared/signing.js';
 import { notifyOpenClaw } from './notify.js';
 import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
 import { startReplyCleanup, stopReplyCleanup, getPendingReply, deletePendingReply, storePendingReply, type ReplyPayload } from './reply-handler.js';
-import { startRendezvous, stopRendezvous } from './rendezvous.js';
+import { startRendezvous, stopRendezvous, resolveOwnRelayUrl } from './rendezvous.js';
+import { startRelayClient, stopRelayClient } from './relay-client.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { connectBridge, disconnectBridge } from './openclaw-bridge.js';
 import type { ScopeBundle } from './scopes.js';
@@ -285,6 +286,7 @@ interface ShutdownDeps {
   stopDoormanCleanup: () => void;
   stopReplyCleanup: () => void;
   stopRendezvous: () => Promise<void>;
+  stopRelayClient: () => Promise<void>;
   stopHeartbeat: () => void;
   getServer: () => { close: (cb: (error?: Error) => void) => void } | null;
   exit: (code: number) => never;
@@ -305,6 +307,7 @@ export function createGracefulShutdownHandler(deps: ShutdownDeps) {
     deps.stopReplyCleanup();
     deps.stopHeartbeat();
     await deps.stopRendezvous().catch(() => {});
+    await deps.stopRelayClient().catch(() => {});
 
     const activeServer = deps.getServer();
     if (!activeServer) {
@@ -1119,6 +1122,20 @@ export function startServer(config?: OGPConfig, background = false): void {
         console.warn(`[OGP] Rendezvous startup error: ${err.message}`);
       });
     }
+
+    // bd-b7em Phase 2: when running in relay mode, hold a persistent receiver
+    // socket so peers can reach us with no inbound port. Default 'direct' is a
+    // no-op here — nothing about direct delivery changes.
+    if (getTransportMode(cfg) === 'relay') {
+      const relayUrl = resolveOwnRelayUrl(cfg.transport, cfg.rendezvous?.url);
+      if (relayUrl) {
+        startRelayClient(relayUrl).catch((err: Error) => {
+          console.warn(`[OGP] Relay client startup error: ${err.message}`);
+        });
+      } else {
+        console.warn('[OGP] Transport mode is relay but no relay URL could be resolved — staying reachable only via direct.');
+      }
+    }
   });
 
   // Handle graceful shutdown — deregister from rendezvous, stop timers, and
@@ -1128,6 +1145,7 @@ export function startServer(config?: OGPConfig, background = false): void {
     stopDoormanCleanup,
     stopReplyCleanup,
     stopRendezvous,
+    stopRelayClient,
     stopHeartbeat,
     getServer: () => server,
     exit: (code: number) => { stateDirLock?.release(); stateDirLock = null; process.exit(code); },
@@ -1144,8 +1162,9 @@ export function stopServer(): void {
   // Stop cleanup timers
   stopDoormanCleanup();
   stopReplyCleanup();
-  // Deregister from rendezvous (fire-and-forget)
+  // Deregister from rendezvous + tear down relay socket (fire-and-forget)
   stopRendezvous().catch(() => {});
+  stopRelayClient().catch(() => {});
 
   const pidFile = getDaemonPidFile();
 
