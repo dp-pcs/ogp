@@ -4,7 +4,11 @@
 const { useState: useStateG } = React;
 
 function FederationGraph({ peers, identity, onSelect, selectedId, theme }) {
-  const W = 620, H = 460, cx = W / 2, cy = H / 2 + 6;
+  // H/cy give the radial nodes room: the bottom peer's two labels render at
+  // cy+R+56 (~+59 with descenders). With the old H=460/cy=236 that reached y≈467
+  // and clipped the bottom node's status line. Taller viewBox + a slight upward cy
+  // keeps top and bottom padding balanced (~28px each at the widest ring R=172).
+  const W = 620, H = 486, cx = W / 2, cy = H / 2 - 15;
   const shown = peers.filter((p) => p.status === "approved" || p.status === "pending");
   const n = shown.length;
   const R = n <= 1 ? 150 : n <= 3 ? 158 : 172;
