@@ -343,7 +343,7 @@ function App() {
           <Sidebar route={route} setRoute={(r) => { setRoute(r); }} frameworks={frameworks} framework={fw}
             setFramework={switchFw} daemons={daemons} pendingCount={pendingCount} identity={fw.identity} gatewayUp={gatewayUp} />
 
-          <main className="ogp-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, background: "var(--bg)" }}>
+          <main className="ogp-main" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, background: "var(--bg)" }}>
             <View ctx={ctx} />
           </main>
         </div>
