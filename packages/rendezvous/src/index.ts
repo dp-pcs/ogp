@@ -1,5 +1,9 @@
 import express, { Request, Response } from 'express';
+import http from 'node:http';
+import crypto from 'node:crypto';
+import { WebSocketServer, type WebSocket } from 'ws';
 import { verifyCanonical, type VerifyResult } from './verify.js';
+import { RelayCore, type RelayWS } from './relay-core.js';
 
 const app = express();
 app.use(express.json());
@@ -352,7 +356,43 @@ app.get('/invite/:token', (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 // Start server
 // ─────────────────────────────────────────────
-app.listen(PORT, () => {
+// bd-b7em Phase 2: mount the relay routing core on a WebSocket upgrade at /relay,
+// alongside the existing HTTP routes (which are completely untouched — register/
+// peer/invite stay byte-identical). The relay is UNTRUSTED: it forwards opaque,
+// end-to-end-signed envelopes by recipient pubkey and authenticates sockets with
+// the SAME Ed25519 proof (verifyCanonical) used by /register. Single-process
+// in-memory routing table — fine for one Fargate task; multi-task scale-out needs
+// a shared table (Redis pub/sub), deferred per docs/TRANSPORT-MODES-DESIGN.md.
+const relay = new RelayCore({
+  verifyCanonical,
+  now: () => Date.now(),
+  randomId: () => crypto.randomUUID(),
+  randomNonce: () => crypto.randomBytes(32).toString('hex'),
+  log: (msg) => console.log(`[relay] ${msg}`),
+});
+
+const server = http.createServer(app);
+const wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
+
+let nextSocketId = 1;
+server.on('upgrade', (req, socket, head) => {
+  if (req.url !== '/relay') { socket.destroy(); return; }
+  wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
+    const id = nextSocketId++;
+    const r: RelayWS = {
+      id,
+      send: (data: string) => { try { ws.send(data); } catch { /* ignore */ } },
+      close: (code?: number) => { try { ws.close(code); } catch { /* ignore */ } },
+    };
+    relay.onConnection(r);
+    ws.on('message', (data) => relay.onMessage(r, data.toString()));
+    ws.on('close', () => relay.onClose(r));
+    ws.on('error', () => relay.onClose(r));
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`[rendezvous] OGP Rendezvous Server listening on port ${PORT}`);
   console.log(`[rendezvous] Peer TTL: ${TTL_MS / 1000}s | Invite TTL: ${INVITE_TTL_MS / 1000}s | Cleanup interval: ${CLEANUP_INTERVAL_MS / 1000}s`);
+  console.log(`[rendezvous] Relay WebSocket endpoint: /relay`);
 });
