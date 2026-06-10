@@ -1,6 +1,7 @@
 import { listPeers, loadPeers, savePeers, getPeer, getPeerByUrl, getPeerByPublicKey, approvePeer, rejectPeer, updatePeer, updatePeerGrantedScopes, type Peer } from '../daemon/peers.js';
 import { requireConfig, loadConfig, type OGPConfig } from '../shared/config.js';
-import { lookupPeer } from '../daemon/rendezvous.js';
+import { lookupPeer, lookupPeerTransport } from '../daemon/rendezvous.js';
+import { deliverViaRelay } from '../daemon/relay-client.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject, sign } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
@@ -1083,6 +1084,75 @@ export async function federationRemove(peerId: string): Promise<void> {
   console.log(`✓ Removed peer: ${peerId} (${peer.displayName})`);
 }
 
+/**
+ * Deliver an already-signed federation envelope to a peer, branching on the
+ * peer's advertised transport (bd-b7em Phase 2).
+ *
+ * - DIRECT (default, and the fallback for everything): byte-identical to the
+ *   original behavior — POST {message, messageStr, signature} to
+ *   `${peer.gatewayUrl}/federation/message`. A flaky/disabled rendezvous lookup
+ *   MUST fall through to direct so it can never break the default path.
+ * - RELAY: route the same opaque frame over a WebSocket to the relay, which
+ *   forwards it to the peer's persistent socket and returns their response.
+ *
+ * Returns a normalized shape so callers can keep their existing response
+ * handling: { ok, status?, result }. `result` is the peer's MessageResponse
+ * (or a synthesized failure for relay errors).
+ */
+export async function deliverFederationMessage(
+  peer: Peer,
+  frame: { message: unknown; messageStr: string; signature: string },
+  opts: { timeoutMs?: number; config: OGPConfig }
+): Promise<{ ok: boolean; status?: number; result: any }> {
+  // Resolve transport. Any failure (rendezvous disabled, lookup throws/null,
+  // direct, or iroh) ⇒ direct. Relay never preempts the default unless the peer
+  // explicitly advertised a relay descriptor inside their signed registration.
+  let relayUrl: string | null = null;
+  if (opts.config.rendezvous?.enabled && peer.publicKey) {
+    try {
+      const resolved = await lookupPeerTransport(opts.config.rendezvous, peer.publicKey);
+      if (resolved && resolved.mode === 'relay') relayUrl = resolved.relayUrl;
+    } catch {
+      // fall through to direct — a flaky rendezvous must not break direct sends
+    }
+  }
+
+  if (relayUrl) {
+    try {
+      const result = await deliverViaRelay(relayUrl, peer.publicKey as string, frame, opts.timeoutMs);
+      const r = result as { success?: boolean; statusCode?: number };
+      return { ok: r?.success !== false, status: r?.statusCode, result };
+    } catch (err) {
+      return {
+        ok: false,
+        result: { success: false, error: `peer not connected via relay: ${(err as Error).message}` }
+      };
+    }
+  }
+
+  // DIRECT PATH — unchanged wire behavior.
+  const controller = new AbortController();
+  const timeoutId = opts.timeoutMs ? setTimeout(() => controller.abort(), opts.timeoutMs) : null;
+  try {
+    const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: frame.message,
+        messageStr: frame.messageStr,  // raw signed string for exact verification
+        signature: frame.signature
+      }),
+      signal: controller.signal
+    });
+    if (timeoutId) clearTimeout(timeoutId);
+    let result: any = null;
+    try { result = await response.json(); } catch { result = null; }
+    return { ok: response.ok, status: response.status, result };
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 export async function federationSend(
   peerId: string,
   intent: string,
@@ -1143,40 +1213,23 @@ export async function federationSend(
   const { payload: signedPayload, payloadStr, signature } = signObject(message, getPrivateKey());
 
   try {
-    const controller = new AbortController();
-    const timeoutId = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    const { ok, status, result } = await deliverFederationMessage(
+      peer,
+      { message: signedPayload, messageStr: payloadStr, signature },
+      { timeoutMs, config }
+    );
 
-    const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: signedPayload,
-        messageStr: payloadStr,  // raw signed string for exact verification
-        signature
-      }),
-      signal: controller.signal
-    });
-
-    if (timeoutId) clearTimeout(timeoutId);
-
-    let result: any = null;
-    try {
-      result = await response.json();
-    } catch {
-      result = null;
-    }
-
-    if (!response.ok) {
+    if (!ok) {
       if (result?.error) {
-        console.error(`Send failed: ${response.status} ${response.statusText} - ${result.error}`);
+        console.error(`Send failed: ${status ? `${status} ` : ''}${result.error}`);
         return result;
       }
 
-      console.error(`Send failed: ${response.status} ${response.statusText}`);
+      console.error(`Send failed${status ? `: ${status}` : ''}`);
       return {
         success: false,
-        error: `Send failed: ${response.status} ${response.statusText}`,
-        statusCode: response.status
+        error: `Send failed${status ? `: ${status}` : ''}`,
+        statusCode: status
       };
     }
 
@@ -1547,30 +1600,26 @@ export async function federationSendAgentComms(
   const { payload: signedPayload, payloadStr, signature } = signObject(message, getPrivateKey());
 
   try {
-    const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: signedPayload,
-        messageStr: payloadStr,  // raw signed string for exact verification
-        signature
-      })
-    });
+    const { ok, status, result: delivered } = await deliverFederationMessage(
+      peer,
+      { message: signedPayload, messageStr: payloadStr, signature },
+      { config }
+    );
 
-    if (!response.ok) {
-      const body = await response.text();
-      if (response.status === 403) {
+    if (!ok) {
+      const body = delivered?.error ? String(delivered.error) : (delivered ? JSON.stringify(delivered) : '');
+      if (status === 403) {
         console.error(`Access denied: ${body}`);
         console.log('Hint: Peer may not have granted you agent-comms scope for this topic.');
-      } else if (response.status === 429) {
+      } else if (status === 429) {
         console.error(`Rate limited: ${body}`);
       } else {
-        console.error(`Send failed: ${response.status} ${response.statusText}`);
+        console.error(`Send failed${status ? `: ${status}` : ''}${body ? ` - ${body}` : ''}`);
       }
       return;
     }
 
-    const result = await response.json() as { received?: boolean; replyEndpoint?: string };
+    const result = (delivered ?? {}) as { received?: boolean; replyEndpoint?: string };
 
     logActivity({
       direction: 'out',

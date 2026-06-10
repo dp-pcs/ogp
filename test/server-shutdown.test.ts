@@ -16,6 +16,7 @@ describe('graceful shutdown handler', () => {
     const stopReplyCleanup = vi.fn();
     const stopHeartbeat = vi.fn();
     const stopRendezvous = vi.fn().mockResolvedValue(undefined);
+    const stopRelayClient = vi.fn().mockResolvedValue(undefined);
     const clearTimer = vi.fn();
     const exit = vi.fn() as unknown as (code: number) => never;
     const logError = vi.fn();
@@ -28,6 +29,7 @@ describe('graceful shutdown handler', () => {
       stopReplyCleanup,
       stopHeartbeat,
       stopRendezvous,
+      stopRelayClient,
       getServer: () => ({ close }),
       exit,
       setTimer,
@@ -42,6 +44,7 @@ describe('graceful shutdown handler', () => {
     expect(stopReplyCleanup).toHaveBeenCalledOnce();
     expect(stopHeartbeat).toHaveBeenCalledOnce();
     expect(stopRendezvous).toHaveBeenCalledOnce();
+    expect(stopRelayClient).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledOnce();
     expect(clearTimer).toHaveBeenCalledOnce();
     expect(exit).toHaveBeenCalledWith(0);
@@ -61,6 +64,7 @@ describe('graceful shutdown handler', () => {
       stopReplyCleanup: vi.fn(),
       stopHeartbeat: vi.fn(),
       stopRendezvous: vi.fn().mockResolvedValue(undefined),
+      stopRelayClient: vi.fn().mockResolvedValue(undefined),
       getServer: () => ({
         close: (cb: (error?: Error) => void) => cb(closeError)
       }),
