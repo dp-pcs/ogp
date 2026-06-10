@@ -14,6 +14,42 @@ const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const TTL_MS = 90_000; // 90 seconds
 const CLEANUP_INTERVAL_MS = 60_000; // cleanup every 60 seconds
 const INVITE_TTL_MS = 600_000; // 10 minutes
+/**
+ * Validate an optional transport descriptor parsed from an already-signature-
+ * verified payload. Returns the normalized descriptor, `undefined` if absent
+ * (⇒ direct), or an error string if malformed.
+ */
+export function validateTransportDescriptor(raw) {
+    if (raw === undefined || raw === null)
+        return { ok: true }; // absent ⇒ direct
+    if (typeof raw !== 'object') {
+        return { ok: false, error: 'transport must be an object' };
+    }
+    const t = raw;
+    const mode = t.transport;
+    if (mode === 'direct') {
+        if (t.gatewayUrl !== undefined && typeof t.gatewayUrl !== 'string') {
+            return { ok: false, error: 'transport.gatewayUrl must be a string' };
+        }
+        return { ok: true, descriptor: { transport: 'direct', ...(typeof t.gatewayUrl === 'string' ? { gatewayUrl: t.gatewayUrl } : {}) } };
+    }
+    if (mode === 'relay') {
+        if (typeof t.relayUrl !== 'string' || !t.relayUrl) {
+            return { ok: false, error: 'transport.relayUrl is required for relay mode' };
+        }
+        return { ok: true, descriptor: { transport: 'relay', relayUrl: t.relayUrl } };
+    }
+    if (mode === 'iroh') {
+        if (typeof t.nodeId !== 'string' || !t.nodeId) {
+            return { ok: false, error: 'transport.nodeId is required for iroh mode' };
+        }
+        if (t.relayUrl !== undefined && typeof t.relayUrl !== 'string') {
+            return { ok: false, error: 'transport.relayUrl must be a string' };
+        }
+        return { ok: true, descriptor: { transport: 'iroh', nodeId: t.nodeId, ...(typeof t.relayUrl === 'string' ? { relayUrl: t.relayUrl } : {}) } };
+    }
+    return { ok: false, error: `unknown transport mode: ${String(mode)}` };
+}
 const peers = new Map();
 const invites = new Map();
 /** Generate a random 6-char alphanumeric token */
@@ -84,11 +120,19 @@ export function validateSignedRegistration(body, verifyImpl = verifyCanonical) {
     if (!verifyResult.ok) {
         return { ok: false, status: 401, error: `Signature verification failed: ${verifyResult.reason}` };
     }
+    // Transport descriptor (bd-b7em): parsed ONLY from the now-verified inner
+    // payload. A `transport` field outside payloadStr is never read, so the
+    // rendezvous can't be tricked into advertising an unsigned transport.
+    const transportResult = validateTransportDescriptor(parsed.transport);
+    if (!transportResult.ok) {
+        return { ok: false, status: 400, error: transportResult.error };
+    }
     return {
         ok: true,
         pubkey,
         port,
-        ...(typeof publicUrl === 'string' && publicUrl ? { publicUrl } : {})
+        ...(typeof publicUrl === 'string' && publicUrl ? { publicUrl } : {}),
+        ...(transportResult.descriptor ? { transport: transportResult.descriptor } : {})
     };
 }
 // ─────────────────────────────────────────────
@@ -108,11 +152,12 @@ app.post('/register', (req, res) => {
         res.status(validation.status).json({ error: validation.error });
         return;
     }
-    const { pubkey, port } = validation;
+    const { pubkey, port, transport } = validation;
     const ip = getCallerIp(req);
     const now = Date.now();
-    peers.set(pubkey, { pubkey, ip, port, lastSeen: now });
-    console.log(`[rendezvous] Registered ${pubkey.slice(0, 8)}... from ${ip}:${port}`);
+    peers.set(pubkey, { pubkey, ip, port, lastSeen: now, ...(transport ? { transport } : {}) });
+    const transportLabel = transport ? transport.transport : 'direct';
+    console.log(`[rendezvous] Registered ${pubkey.slice(0, 8)}... from ${ip}:${port} (transport: ${transportLabel})`);
     res.json({ ok: true, yourIp: ip });
 });
 // ─────────────────────────────────────────────
@@ -136,6 +181,7 @@ app.get('/peer/:pubkey', (req, res) => {
         ip: peer.ip,
         port: peer.port,
         lastSeen: peer.lastSeen,
+        ...(peer.transport ? { transport: peer.transport } : {}),
     });
 });
 // ─────────────────────────────────────────────
