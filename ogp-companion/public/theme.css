@@ -148,20 +148,25 @@ html.tauri #root { width: 100vw; height: 100vh; display: block; }
    viewport (the sidebar/detail panel take fixed space). */
 .ogp-main { container-type: inline-size; container-name: ogpmain; }
 
-/* default = design layout */
-.grid-3   { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.grid-4   { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.grid-2   { display: grid; grid-template-columns: 1fr 1fr;        gap: 16px; }
-.grid-split { display: grid; grid-template-columns: 1.55fr 1fr;   gap: 16px; }
+/* default = design layout.
+   minmax(0, …) is load-bearing: an `fr` track's implicit minimum is min-content,
+   so an unbreakable string in one cell (e.g. a long URL in Recent activity) would
+   otherwise pin that track to its min-content width and crush the sibling track to
+   ~0 — that's what made the Federation map vanish until the pane was ~1900px wide
+   (bd-1r4s). minmax(0, …) lets tracks shrink below content so text can ellipsize. */
+.grid-3   { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.grid-4   { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.grid-2   { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.grid-split { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 16px; }
 
 @container ogpmain (max-width: 880px) {
-  .grid-4 { grid-template-columns: repeat(2, 1fr); }
-  .grid-split { grid-template-columns: 1fr; }
-  .grid-2 { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-split { grid-template-columns: minmax(0, 1fr); }
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
 }
 @container ogpmain (max-width: 620px) {
-  .grid-3 { grid-template-columns: 1fr; }
-  .grid-4 { grid-template-columns: 1fr; }
+  .grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .grid-4 { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Peer detail: a docked 340px panel normally; on a narrow main pane it floats
