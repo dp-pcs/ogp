@@ -29,6 +29,9 @@ coverage/
 .vitest/
 CURRENT_WORK.md
 
+# Patent disclosures — keep OUT of this public repo (sensitive IP)
+patent-disclosures/
+
 # Local-only security working docs
 # (the published security_best_practices_report.md is intentionally tracked;
 # the implementation plan stays local until the fixes ship — see B0033-B0037)
