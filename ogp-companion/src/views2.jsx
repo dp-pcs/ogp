@@ -26,9 +26,9 @@ function ActivityLine({ a, compact, onReply }) {
         <Icon name={m.icon} size={compact ? 14 : 16} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          {a.dir && <Icon name={a.dir === "in" ? "arrowDown" : "arrowUp"} size={12} stroke={2.4} style={{ color: a.dir === "in" ? "var(--ok)" : "var(--accent)" }} />}
-          <span style={{ fontSize: compact ? 12.5 : 13.5, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.text}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+          {a.dir && <Icon name={a.dir === "in" ? "arrowDown" : "arrowUp"} size={12} stroke={2.4} style={{ color: a.dir === "in" ? "var(--ok)" : "var(--accent)", flexShrink: 0 }} />}
+          <span style={{ flex: 1, minWidth: 0, fontSize: compact ? 12.5 : 13.5, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.text}</span>
         </div>
         {!compact && (
           <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 2 }}>
