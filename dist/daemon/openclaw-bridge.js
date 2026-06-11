@@ -15,6 +15,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { requireConfig } from '../shared/config.js';
 import { shouldRelaxTls } from '../shared/tls.js';
+import { resolveOpenClawBin } from '../shared/openclaw-bin.js';
 const execFileAsync = promisify(execFile);
 function extractJsonObject(output) {
     const start = output.indexOf('{');
@@ -97,9 +98,13 @@ function isAllowedHookSessionKey(sessionKey, allowedPrefixes) {
 }
 async function callGatewayMethod(params) {
     const candidates = buildGatewayWsUrls(params.gatewayUrl);
+    // bd-bq1: resolve `openclaw` explicitly instead of relying on PATH. The
+    // LaunchAgent-spawned daemon has a minimal PATH without /opt/homebrew/bin,
+    // which made every `spawn openclaw` fail with ENOENT (100% sessions.send loss).
+    const openclawBin = resolveOpenClawBin();
     for (const candidate of candidates) {
         try {
-            const { stdout, stderr } = await execFileAsync('openclaw', [
+            const { stdout, stderr } = await execFileAsync(openclawBin, [
                 'gateway',
                 'call',
                 '--token',
