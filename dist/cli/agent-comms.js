@@ -1,7 +1,7 @@
 /**
  * CLI commands for agent-comms configuration
  */
-import { loadAgentCommsConfig, setGlobalTopicPolicy, setDefaultLevel, getAllEffectivePolicies, readActivityLog, clearActivityLog, setActivityLogging } from '../daemon/agent-comms.js';
+import { loadAgentCommsConfig, setGlobalTopicPolicy, setDefaultLevel, getAllEffectivePolicies, readActivityLog, readActivityJsonl, clearActivityLog, setActivityLogging } from '../daemon/agent-comms.js';
 import { listPeers, getPeer, setPeerTopicPolicy, removePeerTopicPolicy, clearPeerResponsePolicy, setPeerDefaultLevel } from '../daemon/peers.js';
 /**
  * Show all policies (global + per-peer)
@@ -223,7 +223,14 @@ export function resetPolicy(peerId) {
 /**
  * Show activity log
  */
-export function showActivity(peerId, last) {
+export function showActivity(peerId, last, asJson) {
+    // JSON mode: emit the structured store (full, untruncated entries) for tools
+    // like the companion app. Always prints valid JSON, even when empty.
+    if (asJson) {
+        const entries = readActivityJsonl({ peerId, last: last || 50 });
+        console.log(JSON.stringify(entries));
+        return;
+    }
     const lines = readActivityLog({ peerId, last: last || 50 });
     if (lines.length === 0) {
         console.log('\nNo activity logged yet.\n');

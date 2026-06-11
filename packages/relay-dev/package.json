@@ -1,0 +1,26 @@
+{
+  "name": "@dp-pcs/ogp-relay-dev",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OGP relay routing core + standalone local server (bd-b7em Phase 2). Non-deploying: lets the relay loop be dogfooded on localhost before the rendezvous mount.",
+  "type": "module",
+  "main": "./dist/relay-core.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsc --watch"
+  },
+  "author": "David Proctor",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

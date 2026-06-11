@@ -1,6 +1,7 @@
 import { listPeers, loadPeers, getPeer, approvePeer, rejectPeer, updatePeer, updatePeerGrantedScopes } from '../daemon/peers.js';
 import { requireConfig, loadConfig } from '../shared/config.js';
-import { lookupPeer } from '../daemon/rendezvous.js';
+import { lookupPeer, lookupPeerTransport } from '../daemon/rendezvous.js';
+import { deliverViaRelay } from '../daemon/relay-client.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject, sign } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
@@ -144,7 +145,24 @@ function resolvePeerId(identifier) {
     }
     return null;
 }
-export async function federationList(status, filterTag) {
+/** Pure projection of peers to the stable `--json` wire shape. */
+export function peersToJson(peers) {
+    return peers.map(p => ({
+        id: p.id,
+        alias: p.alias,
+        displayName: p.displayName,
+        status: p.status,
+        gatewayUrl: p.gatewayUrl,
+        publicKey: p.publicKey,
+        healthState: p.healthState,
+        healthy: p.healthy,
+        grantedScopes: p.grantedScopes,
+        offeredIntents: p.offeredIntents,
+        lastSeenAt: p.lastSeenAt,
+        tags: p.tags,
+    }));
+}
+export async function federationList(status, filterTag, json = false) {
     // Check if --for all was specified
     if (process.env.OGP_FOR_ALL === 'true') {
         const metaConfig = loadMetaConfig();
@@ -153,10 +171,14 @@ export async function federationList(status, filterTag) {
             console.error('Error: No enabled frameworks found. Run "ogp setup" first.');
             process.exit(1);
         }
+        // Accumulator for --json output (per-framework peers).
+        const perFramework = [];
         // Print header
-        console.log('\n═══════════════════════════════════════════════════════════════');
-        console.log(`Federation Peers (All Frameworks)`);
-        console.log('═══════════════════════════════════════════════════════════════\n');
+        if (!json) {
+            console.log('\n═══════════════════════════════════════════════════════════════');
+            console.log(`Federation Peers (All Frameworks)`);
+            console.log('═══════════════════════════════════════════════════════════════\n');
+        }
         let totalPeers = 0;
         // Iterate through each framework
         for (const framework of enabledFrameworks) {
@@ -165,15 +187,25 @@ export async function federationList(status, filterTag) {
             try {
                 const config = loadConfig();
                 if (!config) {
-                    console.log(`${framework.name} (${framework.displayName || framework.id})`);
-                    console.log('───────────────────────────────────────────────────────────────');
-                    console.log('  No config found - run setup');
-                    console.log('');
+                    if (json) {
+                        perFramework.push({ framework: framework.id, peers: [] });
+                    }
+                    else {
+                        console.log(`${framework.name} (${framework.displayName || framework.id})`);
+                        console.log('───────────────────────────────────────────────────────────────');
+                        console.log('  No config found - run setup');
+                        console.log('');
+                    }
                     continue;
                 }
                 // Load peers for this framework
                 const allPeers = loadPeers();
                 const peers = status ? allPeers.filter(p => p.status === status) : allPeers.filter(p => p.status !== 'removed');
+                if (json) {
+                    totalPeers += peers.length;
+                    perFramework.push({ framework: framework.id, peers: peersToJson(peers) });
+                    continue;
+                }
                 // Print framework header
                 console.log(`${framework.name} (${framework.displayName || framework.id})`);
                 console.log('───────────────────────────────────────────────────────────────');
@@ -211,10 +243,15 @@ export async function federationList(status, filterTag) {
                 console.log('');
             }
             catch (error) {
-                console.log(`${framework.name} (${framework.displayName || framework.id})`);
-                console.log('───────────────────────────────────────────────────────────────');
-                console.log(`  Error: ${error.message}`);
-                console.log('');
+                if (json) {
+                    perFramework.push({ framework: framework.id, peers: [] });
+                }
+                else {
+                    console.log(`${framework.name} (${framework.displayName || framework.id})`);
+                    console.log('───────────────────────────────────────────────────────────────');
+                    console.log(`  Error: ${error.message}`);
+                    console.log('');
+                }
             }
             finally {
                 // Restore original OGP_HOME
@@ -226,6 +263,10 @@ export async function federationList(status, filterTag) {
                 }
             }
         }
+        if (json) {
+            console.log(JSON.stringify(perFramework, null, 2));
+            return;
+        }
         console.log(`Total: ${totalPeers} peer${totalPeers !== 1 ? 's' : ''} across ${enabledFrameworks.length} framework${enabledFrameworks.length !== 1 ? 's' : ''}`);
         return;
     }
@@ -236,6 +277,10 @@ export async function federationList(status, filterTag) {
     // Filter by tag if specified
     if (filterTag) {
         peers = peers.filter(p => p.tags && p.tags.includes(filterTag));
+    }
+    if (json) {
+        console.log(JSON.stringify(peersToJson(peers), null, 2));
+        return;
     }
     if (peers.length === 0) {
         console.log('No peers found.');
@@ -300,7 +345,7 @@ export async function federationList(status, filterTag) {
         console.log('');
     });
 }
-export async function federationStatus() {
+export async function federationStatus(json = false) {
     // Check if --for all was specified
     if (process.env.OGP_FOR_ALL === 'true') {
         const metaConfig = loadMetaConfig();
@@ -308,6 +353,42 @@ export async function federationStatus() {
         if (enabledFrameworks.length === 0) {
             console.error('Error: No enabled frameworks found. Run "ogp setup" first.');
             process.exit(1);
+        }
+        // --json across all frameworks: emit a per-framework array (mirrors federationList).
+        if (json) {
+            const perFramework = [];
+            for (const framework of enabledFrameworks) {
+                const originalOgpHome = process.env.OGP_HOME;
+                process.env.OGP_HOME = expandTilde(framework.configDir);
+                try {
+                    const config = loadConfig();
+                    if (!config) {
+                        perFramework.push({ framework: framework.id, total: 0, approved: [], pending: [], rejected: [] });
+                        continue;
+                    }
+                    const fwPeers = listPeers();
+                    perFramework.push({
+                        framework: framework.id,
+                        total: fwPeers.length,
+                        approved: peersToJson(fwPeers.filter(p => p.status === 'approved')),
+                        pending: peersToJson(fwPeers.filter(p => p.status === 'pending')),
+                        rejected: peersToJson(fwPeers.filter(p => p.status === 'rejected')),
+                    });
+                }
+                catch {
+                    perFramework.push({ framework: framework.id, total: 0, approved: [], pending: [], rejected: [] });
+                }
+                finally {
+                    if (originalOgpHome) {
+                        process.env.OGP_HOME = originalOgpHome;
+                    }
+                    else {
+                        delete process.env.OGP_HOME;
+                    }
+                }
+            }
+            console.log(JSON.stringify(perFramework, null, 2));
+            return;
         }
         // Print header
         console.log('\n═══════════════════════════════════════════════════════════════');
@@ -404,6 +485,15 @@ export async function federationStatus() {
     const pendingPeers = peers.filter(p => p.status === 'pending');
     const rejectedPeers = peers.filter(p => p.status === 'rejected');
     const removedPeers = peers.filter(p => p.status === 'removed');
+    if (json) {
+        console.log(JSON.stringify({
+            total: peers.length,
+            approved: peersToJson(approvedPeers),
+            pending: peersToJson(pendingPeers),
+            rejected: peersToJson(rejectedPeers),
+        }, null, 2));
+        return;
+    }
     // Health statistics for approved peers (Issue #3: directional)
     const stateCounts = {
         established: 0,
@@ -485,10 +575,12 @@ export async function federationStatus() {
         }
     }
 }
-export async function federationRequest(peerUrl, peerId, alias) {
+export async function federationRequest(peerUrl, peerId, alias, json = false) {
     const config = requireConfig();
     const keypair = loadOrGenerateKeyPair();
     if (!await ensureLocalGatewayReachable(config, 'send federation requests')) {
+        if (json)
+            console.log(JSON.stringify({ ok: false, peerUrl, peerId, status: 'failed', error: 'local gateway not reachable' }));
         return false;
     }
     // BUILD-111: Use public key prefix as peer ID (port-agnostic identity)
@@ -501,7 +593,12 @@ export async function federationRequest(peerUrl, peerId, alias) {
         peerCard = resolved.card;
     }
     catch (error) {
-        console.error(error.message);
+        if (json) {
+            console.log(JSON.stringify({ ok: false, peerUrl, peerId, status: 'failed', error: error.message }));
+        }
+        else {
+            console.error(error.message);
+        }
         return false;
     }
     // Build our peer info
@@ -536,13 +633,20 @@ export async function federationRequest(peerUrl, peerId, alias) {
             body: JSON.stringify(requestBody)
         });
         if (!response.ok) {
-            console.error(`Request failed: ${response.status} ${response.statusText}`);
+            if (json) {
+                console.log(JSON.stringify({ ok: false, peerUrl: resolvedPeerUrl, peerId, status: 'failed', error: `${response.status} ${response.statusText}` }));
+            }
+            else {
+                console.error(`Request failed: ${response.status} ${response.statusText}`);
+            }
             return false;
         }
         const result = await response.json();
-        console.log('✓ Federation request sent');
-        console.log(`  Status: ${result.status}`);
-        console.log(`  Message: ${result.message}`);
+        if (!json) {
+            console.log('✓ Federation request sent');
+            console.log(`  Status: ${result.status}`);
+            console.log(`  Message: ${result.message}`);
+        }
         // Fetch their federation card to get their actual identity
         // Store them as a pending peer so we can send intents when approved
         try {
@@ -570,10 +674,18 @@ export async function federationRequest(peerUrl, peerId, alias) {
             }
         }
         catch { /* non-fatal */ }
+        if (json) {
+            console.log(JSON.stringify({ ok: true, peerUrl: resolvedPeerUrl, peerId, status: result.status ?? 'requested', message: result.message }));
+        }
         return true;
     }
     catch (error) {
-        console.error('Failed to send request:', error);
+        if (json) {
+            console.log(JSON.stringify({ ok: false, peerUrl: resolvedPeerUrl, peerId, status: 'failed', error: error instanceof Error ? error.message : String(error) }));
+        }
+        else {
+            console.error('Failed to send request:', error);
+        }
         return false;
     }
 }
@@ -831,6 +943,79 @@ export async function federationRemove(peerId) {
     removePeer(peerId);
     console.log(`✓ Removed peer: ${peerId} (${peer.displayName})`);
 }
+/**
+ * Deliver an already-signed federation envelope to a peer, branching on the
+ * peer's advertised transport (bd-b7em Phase 2).
+ *
+ * - DIRECT (default, and the fallback for everything): byte-identical to the
+ *   original behavior — POST {message, messageStr, signature} to
+ *   `${peer.gatewayUrl}/federation/message`. A flaky/disabled rendezvous lookup
+ *   MUST fall through to direct so it can never break the default path.
+ * - RELAY: route the same opaque frame over a WebSocket to the relay, which
+ *   forwards it to the peer's persistent socket and returns their response.
+ *
+ * Returns a normalized shape so callers can keep their existing response
+ * handling: { ok, status?, result }. `result` is the peer's MessageResponse
+ * (or a synthesized failure for relay errors).
+ */
+export async function deliverFederationMessage(peer, frame, opts) {
+    // Resolve transport. Any failure (rendezvous disabled, lookup throws/null,
+    // direct, or iroh) ⇒ direct. Relay never preempts the default unless the peer
+    // explicitly advertised a relay descriptor inside their signed registration.
+    let relayUrl = null;
+    if (opts.config.rendezvous?.enabled && peer.publicKey) {
+        try {
+            const resolved = await lookupPeerTransport(opts.config.rendezvous, peer.publicKey);
+            if (resolved && resolved.mode === 'relay')
+                relayUrl = resolved.relayUrl;
+        }
+        catch {
+            // fall through to direct — a flaky rendezvous must not break direct sends
+        }
+    }
+    if (relayUrl) {
+        try {
+            const result = await deliverViaRelay(relayUrl, peer.publicKey, frame, opts.timeoutMs);
+            const r = result;
+            return { ok: r?.success !== false, status: r?.statusCode, result };
+        }
+        catch (err) {
+            return {
+                ok: false,
+                result: { success: false, error: `peer not connected via relay: ${err.message}` }
+            };
+        }
+    }
+    // DIRECT PATH — unchanged wire behavior.
+    const controller = new AbortController();
+    const timeoutId = opts.timeoutMs ? setTimeout(() => controller.abort(), opts.timeoutMs) : null;
+    try {
+        const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: frame.message,
+                messageStr: frame.messageStr, // raw signed string for exact verification
+                signature: frame.signature
+            }),
+            signal: controller.signal
+        });
+        if (timeoutId)
+            clearTimeout(timeoutId);
+        let result = null;
+        try {
+            result = await response.json();
+        }
+        catch {
+            result = null;
+        }
+        return { ok: response.ok, status: response.status, result };
+    }
+    finally {
+        if (timeoutId)
+            clearTimeout(timeoutId);
+    }
+}
 export async function federationSend(peerId, intent, payloadJson, timeoutMs, toAgent) {
     const config = requireConfig();
     // Resolve peer identifier (alias, ID, or public key)
@@ -872,37 +1057,17 @@ export async function federationSend(peerId, intent, payloadJson, timeoutMs, toA
     };
     const { payload: signedPayload, payloadStr, signature } = signObject(message, getPrivateKey());
     try {
-        const controller = new AbortController();
-        const timeoutId = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
-        const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: signedPayload,
-                messageStr: payloadStr, // raw signed string for exact verification
-                signature
-            }),
-            signal: controller.signal
-        });
-        if (timeoutId)
-            clearTimeout(timeoutId);
-        let result = null;
-        try {
-            result = await response.json();
-        }
-        catch {
-            result = null;
-        }
-        if (!response.ok) {
+        const { ok, status, result } = await deliverFederationMessage(peer, { message: signedPayload, messageStr: payloadStr, signature }, { timeoutMs, config });
+        if (!ok) {
             if (result?.error) {
-                console.error(`Send failed: ${response.status} ${response.statusText} - ${result.error}`);
+                console.error(`Send failed: ${status ? `${status} ` : ''}${result.error}`);
                 return result;
             }
-            console.error(`Send failed: ${response.status} ${response.statusText}`);
+            console.error(`Send failed${status ? `: ${status}` : ''}`);
             return {
                 success: false,
-                error: `Send failed: ${response.status} ${response.statusText}`,
-                statusCode: response.status
+                error: `Send failed${status ? `: ${status}` : ''}`,
+                statusCode: status
             };
         }
         return result;
@@ -1214,30 +1379,22 @@ export async function federationSendAgentComms(peerId, topic, messageText, optio
     };
     const { payload: signedPayload, payloadStr, signature } = signObject(message, getPrivateKey());
     try {
-        const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: signedPayload,
-                messageStr: payloadStr, // raw signed string for exact verification
-                signature
-            })
-        });
-        if (!response.ok) {
-            const body = await response.text();
-            if (response.status === 403) {
+        const { ok, status, result: delivered } = await deliverFederationMessage(peer, { message: signedPayload, messageStr: payloadStr, signature }, { config });
+        if (!ok) {
+            const body = delivered?.error ? String(delivered.error) : (delivered ? JSON.stringify(delivered) : '');
+            if (status === 403) {
                 console.error(`Access denied: ${body}`);
                 console.log('Hint: Peer may not have granted you agent-comms scope for this topic.');
             }
-            else if (response.status === 429) {
+            else if (status === 429) {
                 console.error(`Rate limited: ${body}`);
             }
             else {
-                console.error(`Send failed: ${response.status} ${response.statusText}`);
+                console.error(`Send failed${status ? `: ${status}` : ''}${body ? ` - ${body}` : ''}`);
             }
             return;
         }
-        const result = await response.json();
+        const result = (delivered ?? {});
         logActivity({
             direction: 'out',
             peerId,

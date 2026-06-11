@@ -4,7 +4,7 @@ import { getIntent } from './intent-registry.js';
 import { notifyOpenClaw } from './notify.js';
 import { checkAccess } from './doorman.js';
 import { logActivity, getEffectivePolicy } from './agent-comms.js';
-import { getProject, joinProject, isProjectMember, contributeToProject, getTopicContributions, getAuthorContributions, getProjectStatus, ensureProjectTopic, createProject, addProject } from './projects.js';
+import { getProject, joinProject, isProjectMember, upsertContribution, getTopicContributions, getAuthorContributions, getProjectStatus, ensureProjectTopic, createProject, addProject, setProjectCreation, addOwnerGrant } from './projects.js';
 import { loadConfig, requireConfig, synthesizePersonas, resolveTargetPersona, effectiveHookAgentId } from '../shared/config.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -411,6 +411,10 @@ function formatNotification(message, displayName) {
             return `[OGP Project] ${displayName} wants to join project '${payload.projectName}' (${payload.projectId})`;
         case 'project.contribute':
             return `[OGP Project] ${displayName} contributed to project '${payload.projectId}' entry type '${payload.entryType || payload.topic}': ${payload.summary}`;
+        case 'project.grant-owner':
+            return `[OGP Project] ${displayName} granted ownership on project '${payload.projectId}'`;
+        case 'project.create':
+            return `[OGP Project] ${displayName} created/claimed project '${payload.projectId}'`;
         case 'project.query':
             return `[OGP Project] ${displayName} queried project '${payload.projectId}'`;
         case 'project.status':
@@ -505,6 +509,10 @@ async function handleProjectIntent(message, displayName, hookAgentId // B0032 P3
                 return await handleProjectJoin(message, displayName, payload, hookAgentId);
             case 'project.contribute':
                 return await handleProjectContribute(message, displayName, payload, hookAgentId);
+            case 'project.grant-owner':
+                return await handleProjectGrantOwner(message, displayName, payload, hookAgentId);
+            case 'project.create':
+                return await handleProjectCreate(message, displayName, payload, hookAgentId);
             case 'project.query':
                 return await handleProjectQuery(message, displayName, payload, hookAgentId);
             case 'project.status':
@@ -615,6 +623,7 @@ async function handleProjectContribute(message, displayName, payload, hookAgentI
             statusCode: 404
         };
     }
+    // Member check stays: you cannot contribute to a project you are not in.
     if (!isProjectMember(projectId, message.from)) {
         return {
             success: false,
@@ -623,27 +632,49 @@ async function handleProjectContribute(message, displayName, payload, hookAgentI
             statusCode: 403
         };
     }
-    // Keep the existing topic bucket structure on disk; user-facing terminology is "entry type".
-    ensureProjectTopic(projectId, entryType);
-    // Build authorIdentity with 3-tier fallback: payload → peer lookup → undefined
+    // Signed-contribution gate (bd-6twb). No grace window: unsigned live
+    // contributions are rejected.
+    const contribution = payload.contribution;
+    if (!contribution || !contribution.payloadStr || !contribution.signature) {
+        return {
+            success: false, nonce: message.nonce,
+            error: 'Missing signed contribution envelope (id/payloadStr/signature)',
+            statusCode: 400
+        };
+    }
+    const { verifySignedContribution } = await import('./contribution-signing.js');
+    const verdict = verifySignedContribution(contribution, message.from, projectId);
+    if (!verdict.ok || !verdict.record) {
+        return {
+            success: false, nonce: message.nonce,
+            error: `Contribution signature rejected: ${verdict.reason ?? 'unknown'}`,
+            statusCode: 401
+        };
+    }
+    // Identity snapshot (payload → peer fallback) WITHOUT mutating signed fields.
     let identity = authorIdentity;
     if (!identity) {
-        // Fall back to peer lookup
         const peer = getPeer(message.from);
         if (peer) {
             identity = {
-                displayName: peer.displayName,
-                humanName: peer.humanName,
-                agentName: peer.agentName,
-                organization: peer.organization,
-                tags: peer.tags
+                displayName: peer.displayName, humanName: peer.humanName,
+                agentName: peer.agentName, organization: peer.organization, tags: peer.tags
             };
         }
     }
-    // Add the contribution
-    const contributionId = contributeToProject(projectId, entryType, message.from, summary, metadata, identity);
+    const record = { ...verdict.record, authorIdentity: identity };
+    ensureProjectTopic(projectId, record.entryType || entryType);
+    const upsert = upsertContribution(projectId, record);
+    if (upsert === 'rejected' || upsert === 'not-found') {
+        return {
+            success: false, nonce: message.nonce,
+            error: `Contribution not stored: ${upsert}`, statusCode: 422
+        };
+    }
+    const contributionId = record.id; // 'inserted' or 'duplicate' both succeed (idempotent)
     if (contributionId) {
-        const notificationText = `[OGP Project] ${displayName} contributed to '${project.name}' entry type '${entryType}': ${summary}`;
+        const signedEntryType = record.entryType ?? record.topic;
+        const notificationText = `[OGP Project] ${displayName} contributed to '${project.name}' entry type '${signedEntryType}': ${record.summary}`;
         await notifyOpenClaw({
             text: notificationText,
             hookAgentId,
@@ -653,9 +684,9 @@ async function handleProjectContribute(message, displayName, payload, hookAgentI
                     intent: 'project.contribute',
                     nonce: message.nonce,
                     projectId,
-                    entryType,
-                    topic: entryType,
-                    summary,
+                    entryType: signedEntryType,
+                    topic: signedEntryType,
+                    summary: record.summary,
                     contributionId,
                     payload: message.payload
                 }
@@ -667,8 +698,8 @@ async function handleProjectContribute(message, displayName, payload, hookAgentI
             response: {
                 contributed: true,
                 projectId,
-                entryType,
-                topic: entryType,
+                entryType: signedEntryType,
+                topic: signedEntryType,
                 contributionId,
                 timestamp: new Date().toISOString()
             }
@@ -682,6 +713,70 @@ async function handleProjectContribute(message, displayName, payload, hookAgentI
             statusCode: 500
         };
     }
+}
+/**
+ * Handle project.grant-owner intent — store a signed owner grant.
+ */
+async function handleProjectGrantOwner(message, displayName, payload, hookAgentId // B0032 P3
+) {
+    const { projectId, grant } = payload;
+    if (!projectId || !grant) {
+        return { success: false, nonce: message.nonce, error: 'Missing projectId or grant', statusCode: 400 };
+    }
+    if (!getProject(projectId)) {
+        return { success: false, nonce: message.nonce, error: `Project '${projectId}' not found`, statusCode: 404 };
+    }
+    const result = addOwnerGrant(projectId, grant);
+    if (result === 'rejected') {
+        return { success: false, nonce: message.nonce, error: 'Owner grant rejected (bad signature or grantor not an owner)', statusCode: 403 };
+    }
+    if (result === 'not-found') {
+        return { success: false, nonce: message.nonce, error: 'Project not found', statusCode: 404 };
+    }
+    // 'added' | 'duplicate' | 'pending' succeed
+    return { success: true, nonce: message.nonce, response: { projectId, grantState: result, timestamp: new Date().toISOString() } };
+}
+/**
+ * Membership check that tolerates 32-char canonical ids, full keys, or
+ * mixed-form members. (isProjectMember does an exact match; members may be
+ * stored as 32-char ids OR full keys OR emails — email members simply won't
+ * match a key, which is expected.)
+ */
+function claimantIsMember(projectId, creatorKey) {
+    const proj = getProject(projectId);
+    if (!proj)
+        return false;
+    const full = creatorKey;
+    const short = creatorKey.substring(0, 32);
+    return proj.members.some(m => m === full || m === short || (m.length >= 32 && m.substring(0, 32) === short));
+}
+/**
+ * Handle project.create intent — record a signed creation (original or
+ * legacy-claim). Legacy claims must come from an existing project member.
+ */
+async function handleProjectCreate(message, displayName, payload, hookAgentId // B0032 P3
+) {
+    const { projectId, projectName, creation } = payload;
+    if (!projectId || !creation) {
+        return { success: false, nonce: message.nonce, error: 'Missing projectId or creation', statusCode: 400 };
+    }
+    let project = getProject(projectId);
+    if (!project) {
+        project = createProject(projectId, projectName || projectId);
+        addProject(project);
+    }
+    if (creation.provenance === 'legacy-claim' && !claimantIsMember(projectId, creation.creatorKey)) {
+        return { success: false, nonce: message.nonce, error: 'Legacy ownership claim requires project membership', statusCode: 403 };
+    }
+    const result = setProjectCreation(projectId, creation);
+    if (result === 'rejected') {
+        return { success: false, nonce: message.nonce, error: 'Creation rejected (bad signature)', statusCode: 403 };
+    }
+    if (result === 'exists-original') {
+        return { success: false, nonce: message.nonce, error: 'Project already has an owner; cannot supersede', statusCode: 409 };
+    }
+    // 'set' | 'duplicate' succeed (idempotent re-delivery must not error)
+    return { success: true, nonce: message.nonce, response: { projectId, creationState: result, timestamp: new Date().toISOString() } };
 }
 /**
  * Handle project.query intent

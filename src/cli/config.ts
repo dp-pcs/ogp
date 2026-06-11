@@ -1,8 +1,34 @@
 import { Command } from 'commander';
 import { loadMetaConfig, saveMetaConfig } from '../shared/meta-config.js';
 import { detectFrameworks } from '../shared/framework-detection.js';
-import { loadConfig, saveConfig, requireConfig, type OGPConfig } from '../shared/config.js';
+import {
+  loadConfig,
+  saveConfig,
+  requireConfig,
+  synthesizePersonas,
+  effectiveHookAgentId,
+  type OGPConfig,
+  type TransportMode
+} from '../shared/config.js';
 import { loadHealthCheckConfig, getHeartbeatConfig } from '../daemon/heartbeat.js';
+
+function printPersonas(config: OGPConfig): void {
+  const personas = synthesizePersonas(config);
+  if (personas.length === 0) {
+    console.log('Personas:      (none)');
+    console.log('');
+    return;
+  }
+
+  console.log('Personas:');
+  personas.forEach((persona) => {
+    const marker = persona.role === 'primary' ? '*' : '-';
+    console.log(
+      `  ${marker} ${persona.id.padEnd(12)} ${persona.displayName.padEnd(16)} ${persona.role.padEnd(10)} -> hookAgentId: ${effectiveHookAgentId(persona)}`
+    );
+  });
+  console.log('');
+}
 
 /**
  * Show all configured frameworks and default
@@ -211,7 +237,12 @@ function showHealthCheckConfig(): void {
   console.log(`Check interval:           ${active.intervalMs / 1000}s (${active.intervalMs}ms)`);
   console.log(`Check timeout:            ${active.timeoutMs / 1000}s (${active.timeoutMs}ms)`);
   console.log(`Max consecutive failures: ${active.maxConsecutiveFailures}`);
-  console.log(`Heartbeat status:         ${active.isRunning ? 'Running' : 'Stopped'}`);
+  // NOTE: this is a configuration view running in a short-lived CLI process, where the
+  // heartbeat timer is never started, so active.isRunning would always read 'Stopped'
+  // even while the daemon's heartbeat is actively running (bd-d1l). Do not present a
+  // misleading live run-state here; point operators at `ogp status` for the
+  // authoritative daemon heartbeat state.
+  console.log(`Heartbeat status:         (run "ogp status" for live daemon heartbeat state)`);
   console.log('');
 
   // Show config file values if different from active
@@ -300,14 +331,32 @@ function showIdentity(): void {
   console.log(`Display name:  ${config.displayName}`);
   console.log(`Email:         ${config.email}`);
   console.log('');
+  printPersonas(config);
 }
 
 /**
  * Show comprehensive identity and configuration ("whoami")
  */
-export function whoami(): void {
+export function whoami(json = false): void {
   const config = requireConfig();
   const meta = loadMetaConfig();
+
+  const currentFrameworkForJson = meta.frameworks.find(f => f.configDir === config.stateDir);
+  if (json) {
+    console.log(JSON.stringify({
+      framework: currentFrameworkForJson?.id ?? meta.default ?? null,
+      displayName: config.displayName,
+      humanName: config.humanName ?? null,
+      agentName: config.agentName ?? null,
+      organization: config.organization ?? null,
+      email: config.email,
+      stateDir: currentFrameworkForJson?.configDir ?? config.stateDir,
+      gatewayUrl: config.gatewayUrl ?? null,
+      daemonPort: config.daemonPort,
+      platform: config.platform ?? null,
+    }, null, 2));
+    return;
+  }
 
   console.log('\nWho Am I?');
   console.log('━'.repeat(44));
@@ -354,6 +403,25 @@ export function whoami(): void {
   }
 
   console.log('');
+  printPersonas(config);
+}
+
+/**
+ * List local personas configured for the active framework.
+ */
+export function listAgents(quiet: boolean = false): void {
+  const config = requireConfig();
+  const personas = synthesizePersonas(config);
+
+  if (quiet) {
+    personas.forEach((persona) => console.log(persona.id));
+    return;
+  }
+
+  console.log('\nLocal personas');
+  console.log('━'.repeat(44));
+  console.log('');
+  printPersonas(config);
 }
 
 /**
@@ -408,6 +476,48 @@ function setTags(tags: string[]): void {
   saveConfig(config);
 
   console.log(`✓ Tags set to: ${config.tags.join(', ')}`);
+}
+
+/**
+ * Transport mode (bd-b7em): how this daemon is reached by peers.
+ * Default 'direct' (today's behavior). 'relay'/'iroh' opt into alternate
+ * reachability that doesn't require a tunnel.
+ */
+const VALID_TRANSPORT_MODES = ['direct', 'relay', 'iroh'] as const;
+
+function showTransport(): void {
+  const config = requireConfig();
+  const t = config.transport;
+  const mode = t?.mode ?? 'direct';
+  console.log(`\nTransport mode: ${mode}${mode === 'direct' ? ' (default)' : ''}`);
+  if (t?.relay?.url) console.log(`  relay url: ${t.relay.url}`);
+  if (t?.iroh?.relayUrl) console.log(`  iroh relay url: ${t.iroh.relayUrl}`);
+  if (mode === 'relay' && !t?.relay?.url) {
+    console.log('  relay url: (default — wss://<rendezvous>/relay)');
+  }
+  console.log('');
+}
+
+function setTransportMode(mode: string): void {
+  if (!(VALID_TRANSPORT_MODES as readonly string[]).includes(mode)) {
+    console.error(`Error: invalid transport mode '${mode}'. Valid: ${VALID_TRANSPORT_MODES.join(', ')}`);
+    process.exit(1);
+  }
+  const config = requireConfig();
+  config.transport = { ...(config.transport ?? {}), mode: mode as TransportMode };
+  saveConfig(config);
+  console.log(`✓ Transport mode set to: ${mode}`);
+  if (mode !== 'direct') {
+    console.log('  Restart the daemon for the change to take effect.');
+  }
+}
+
+function setTransportRelayUrl(url: string): void {
+  const config = requireConfig();
+  const existing = config.transport ?? { mode: 'relay' as TransportMode };
+  config.transport = { ...existing, relay: { url } };
+  saveConfig(config);
+  console.log(`✓ Transport relay url set to: ${url}`);
 }
 
 /**
@@ -579,6 +689,14 @@ configCommand
   });
 
 configCommand
+  .command('list-agents')
+  .description('List local personas for the active framework')
+  .option('-q, --quiet', 'Output persona IDs only (for completion)')
+  .action((options) => {
+    listAgents(options.quiet);
+  });
+
+configCommand
   .command('set-identity')
   .description('Update identity information')
   .option('--human-name <name>', 'Human operator name')
@@ -610,4 +728,32 @@ configCommand
   .argument('<tag>', 'Tag to remove')
   .action((tag) => {
     removeTag(tag);
+  });
+
+// Transport mode (bd-b7em): how this daemon is reached by peers.
+const transportCommand = configCommand
+  .command('transport')
+  .description('Configure how this daemon is reached (direct | relay | iroh)');
+
+transportCommand
+  .command('show', { isDefault: true })
+  .description('Show the current transport configuration')
+  .action(() => {
+    showTransport();
+  });
+
+transportCommand
+  .command('set-mode')
+  .description('Set the transport mode (direct | relay | iroh)')
+  .argument('<mode>', 'Transport mode: direct, relay, or iroh')
+  .action((mode) => {
+    setTransportMode(mode);
+  });
+
+transportCommand
+  .command('set-relay-url')
+  .description('Set the relay websocket URL (for relay mode)')
+  .argument('<url>', 'Relay endpoint, e.g. wss://relay.example.com/relay')
+  .action((url) => {
+    setTransportRelayUrl(url);
   });

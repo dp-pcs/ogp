@@ -50,7 +50,13 @@ export interface TunnelPane {
 export declare function renderTunnels(panes: TunnelPane[], reconcile: ReconcileResult | null): string;
 export declare function listCloudflaredTunnels(): Promise<TunnelPane>;
 export declare function listNgrokTunnels(): Promise<TunnelPane>;
-export declare function tunnelList(tool?: TunnelTool): Promise<void>;
+export interface TunnelJson {
+    tools: TunnelPane[];
+    reconcile: ReconcileResult | null;
+}
+/** Pure shaping for `ogp tunnel list --json`. */
+export declare function buildTunnelJson(panes: TunnelPane[], reconcile: ReconcileResult | null): TunnelJson;
+export declare function tunnelList(tool?: TunnelTool, json?: boolean): Promise<void>;
 /**
  * Start a quick tunnel for the given tool. Idempotent: if an ogp-managed tunnel is
  * already alive (or, for ngrok, a local agent is already serving), prints current

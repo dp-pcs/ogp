@@ -1,0 +1,88 @@
+name: Deploy website
+
+# Syncs website/ to the ogp-elelem-expert S3 bucket and invalidates the
+# CloudFront distribution serving https://ogp.elelem.expert.
+#
+# Triggers:
+#   - push to main when website/ or this workflow file changes
+#   - manual workflow_dispatch
+#
+# Auth: GitHub OIDC -> IAM role github-actions-ogp-website-deploy
+# (least privilege: this bucket + this one distribution only).
+# No long-lived AWS access keys are stored in this repo.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/website-deploy.yml'
+  workflow_dispatch:
+
+# Required for OIDC token exchange
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: website-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: ogp-elelem-expert
+  CLOUDFRONT_DISTRIBUTION_ID: E2AFGQF8OVTGSE
+  SITE_URL: https://ogp.elelem.expert
+  IAM_ROLE_ARN: arn:aws:iam::913524910742:role/github-actions-ogp-website-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync static assets (long cache)
+        # Everything except index.html gets a long immutable cache.
+        run: |
+          aws s3 sync website/ "s3://${S3_BUCKET}/" \
+            --delete \
+            --exclude ".DS_Store" \
+            --exclude "index.html" \
+            --cache-control "public,max-age=31536000,immutable"
+
+      - name: Sync index.html (no cache)
+        # The HTML entry point must always be fresh so content changes show up.
+        run: |
+          aws s3 cp website/index.html "s3://${S3_BUCKET}/index.html" \
+            --cache-control "public,max-age=0,must-revalidate" \
+            --content-type "text/html"
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --paths "/*"
+
+      - name: Smoke test
+        run: |
+          echo "Waiting for ${SITE_URL} ..."
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "${SITE_URL}/" || true)
+            if [ "$code" = "200" ]; then
+              echo "OK: ${SITE_URL} returned 200"
+              curl -sf "${SITE_URL}/" | grep -q "Open Gateway Protocol" \
+                && echo "Content check passed." && exit 0
+            fi
+            echo "  attempt $i: HTTP $code — retrying in 15s"
+            sleep 15
+          done
+          echo "Site did not return 200 in time"; exit 1

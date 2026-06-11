@@ -1,3 +1,4 @@
+import { type ProjectCreation, type OwnerGrant } from './project-ownership.js';
 export interface AuthorIdentity {
     displayName?: string;
     humanName?: string;
@@ -14,6 +15,9 @@ export interface ProjectContribution {
     topic?: string;
     summary: string;
     metadata?: Record<string, any>;
+    signature?: string;
+    verified?: boolean;
+    legacy?: boolean;
 }
 export interface ProjectTopic {
     name: string;
@@ -30,12 +34,19 @@ export interface Project {
     members: string[];
     topics: ProjectTopic[];
     metadata?: Record<string, any>;
+    creation?: ProjectCreation;
+    ownerGrants?: OwnerGrant[];
+    pendingGrants?: OwnerGrant[];
 }
 export declare function getContributionEntryType(contribution: Partial<ProjectContribution> | null | undefined): string;
 export declare function loadProjects(): Project[];
 export declare function saveProjects(projects: Project[]): void;
 export declare function createProject(id: string, name: string, description?: string, metadata?: Record<string, any>): Project;
 export declare function addProject(project: Project): void;
+export declare function setProjectCreation(projectId: string, creation: ProjectCreation): 'set' | 'exists-original' | 'duplicate' | 'not-found' | 'rejected';
+export declare function addOwnerGrant(projectId: string, grant: OwnerGrant): 'added' | 'duplicate' | 'pending' | 'rejected' | 'not-found';
+export declare function resolvePendingGrants(projectId: string): number;
+export declare function isOwner(projectId: string, key: string): boolean;
 export declare function getProject(projectId: string): Project | null;
 export declare function listProjects(): Project[];
 export declare function listProjectsForPeer(peerId: string, projects?: Project[]): Project[];
@@ -60,6 +71,23 @@ export declare function ensureProjectTopic(projectId: string, topicName: string,
  * Add a contribution to a project entry type
  */
 export declare function contributeToProject(projectId: string, entryTypeName: string, authorId: string, summary: string, metadata?: Record<string, any>, authorIdentity?: AuthorIdentity): string | null;
+export type UpsertResult = 'inserted' | 'duplicate' | 'rejected' | 'not-found';
+/**
+ * Merge a fully-formed contribution into a project by id. Idempotent: a record
+ * whose id already exists is a no-op ('duplicate'). A signed record is verified
+ * before insert. Unlike contributeToProject, this does NOT require the author to
+ * be a project member — a verified signature is sufficient provenance, which is
+ * what lets bd-53c (Story B) merge relayed contributions. Records lacking a
+ * signature are rejected here (only the migration path may store unsigned/legacy).
+ */
+export declare function upsertContribution(projectId: string, record: ProjectContribution): UpsertResult;
+/**
+ * One-time, idempotent migration: tag every contribution lacking a signature as
+ * verified:false, legacy:true. Original ids are preserved (never re-minted).
+ * Returns the count of records changed (0 when already migrated). Safe to run on
+ * every daemon start.
+ */
+export declare function migrateLegacyContributions(): number;
 /**
  * Get contributions for a specific entry type across all projects
  */

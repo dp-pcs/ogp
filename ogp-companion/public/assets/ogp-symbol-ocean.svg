@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="glow" cx="0.69" cy="0.31" r="0.55">
+      <stop offset="0" stop-color="#35D6FF" stop-opacity="0.45"></stop>
+      <stop offset="0.5" stop-color="#35D6FF" stop-opacity="0.08"></stop>
+      <stop offset="1" stop-color="#35D6FF" stop-opacity="0"></stop>
+    </radialGradient>
+    <linearGradient id="ring" x1="240" y1="784" x2="784" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5BA8FF"></stop>
+      <stop offset="0.5" stop-color="#2E8BFF"></stop>
+      <stop offset="1" stop-color="#7FD4FF"></stop>
+    </linearGradient>
+    <radialGradient id="node" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFFFFF"></stop>
+      <stop offset="0.55" stop-color="#DCF6FF"></stop>
+      <stop offset="1" stop-color="#35D6FF"></stop>
+    </radialGradient>
+    <radialGradient id="nodeGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#35D6FF" stop-opacity="0.85"></stop>
+      <stop offset="1" stop-color="#35D6FF" stop-opacity="0"></stop>
+    </radialGradient>
+  </defs>
+  <circle cx="512" cy="512" r="272" fill="none" stroke="url(#ring)" stroke-width="80" stroke-linecap="round" stroke-dasharray="1405 304" transform="rotate(-13 512 512)"></circle>
+  <circle cx="704" cy="320" r="120" fill="url(#nodeGlow)"></circle>
+  <circle cx="704" cy="320" r="46" fill="url(#node)"></circle>
+</svg>

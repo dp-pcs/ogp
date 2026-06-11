@@ -28,6 +28,28 @@ export interface RendezvousConfig {
     url: string;
     publicUrl?: string;
 }
+/**
+ * Transport mode — how this daemon is reached by peers (bd-b7em).
+ *  - 'direct' (default): public gatewayUrl via tunnel / public IP / port-forward.
+ *      Exactly today's behavior; zero change for existing users.
+ *  - 'relay': daemon holds a persistent outbound WebSocket to a relay; messages
+ *      route peer→relay→peer. No inbound port / tunnel needed. (Phase 2.)
+ *  - 'iroh': QUIC P2P with relay fallback. Opt-in pilot. (Phase 3.)
+ *
+ * The transport is advertised inside the SIGNED rendezvous registration envelope,
+ * so the rendezvous can't claim a transport the keyholder didn't choose. E2E
+ * Ed25519 signing is preserved in every mode; any relay is untrusted by design.
+ */
+export type TransportMode = 'direct' | 'relay' | 'iroh';
+export interface TransportConfig {
+    mode: TransportMode;
+    relay?: {
+        url: string;
+    };
+    iroh?: {
+        relayUrl?: string;
+    };
+}
 export type InboundFederationMode = 'forward' | 'summarize' | 'autonomous' | 'approval-required';
 export interface InboundFederationPolicy {
     mode: InboundFederationMode;
@@ -186,6 +208,7 @@ export interface OGPConfig {
     stateDir: string;
     agentComms?: AgentCommsConfig;
     rendezvous?: RendezvousConfig;
+    transport?: TransportConfig;
     notifyTarget?: string;
     notifyTargets?: Record<string, string>;
     humanDeliveryTarget?: string;
@@ -203,6 +226,11 @@ export interface OGPConfig {
  * Get the config directory (computed dynamically based on OGP_HOME)
  */
 export declare function getConfigDir(): string;
+/**
+ * Resolve the transport mode for a config. Absent transport block ⇒ 'direct',
+ * preserving today's behavior for every existing user (bd-b7em).
+ */
+export declare function getTransportMode(config: Pick<OGPConfig, 'transport'>): TransportMode;
 /**
  * Get the config file path (computed dynamically based on OGP_HOME)
  */

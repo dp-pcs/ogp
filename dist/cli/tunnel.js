@@ -229,7 +229,11 @@ export async function listNgrokTunnels() {
     }
     return { tool: 'ngrok', infos: [], note: 'No local ngrok agent running on :4040.' };
 }
-export async function tunnelList(tool) {
+/** Pure shaping for `ogp tunnel list --json`. */
+export function buildTunnelJson(panes, reconcile) {
+    return { tools: panes, reconcile };
+}
+export async function tunnelList(tool, json = false) {
     const panes = [];
     if (!tool || tool === 'cloudflared')
         panes.push(await listCloudflaredTunnels());
@@ -259,6 +263,10 @@ export async function tunnelList(tool) {
     }
     const config = loadConfig();
     const reconcile = config ? reconcileGatewayUrl(liveHosts, config.gatewayUrl) : null;
+    if (json) {
+        console.log(JSON.stringify(buildTunnelJson(panes, reconcile), null, 2));
+        return;
+    }
     console.log(renderTunnels(panes, reconcile));
 }
 function getTunnelPidFile() {
@@ -383,13 +391,14 @@ tunnelCommand
     .alias('show')
     .description('List running tunnels (cloudflared, ngrok, or both)')
     .argument('[tool]', 'Limit to one tool: cloudflared | ngrok')
-    .action(async (tool) => {
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (tool, options) => {
     if (tool && tool !== 'cloudflared' && tool !== 'ngrok') {
         console.error(`Unknown tool '${tool}'. Use 'cloudflared' or 'ngrok'.`);
         process.exitCode = 1;
         return;
     }
-    await tunnelList(tool);
+    await tunnelList(tool, options.json ?? false);
 });
 tunnelCommand
     .command('start')

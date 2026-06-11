@@ -13,6 +13,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import JSON5 from 'json5';
 import { requireConfig } from '../shared/config.js';
 import { shouldRelaxTls } from '../shared/tls.js';
 import { resolveOpenClawBin } from '../shared/openclaw-bin.js';
@@ -67,24 +68,38 @@ function buildHookBaseUrls(url) {
 function resolveOpenClawConfigPath() {
     return process.env.OPENCLAW_CONFIG_PATH || path.join(os.homedir(), '.openclaw', 'openclaw.json');
 }
+export function parseOpenClawHooksConfigText(configText) {
+    let raw;
+    try {
+        raw = JSON.parse(configText);
+    }
+    catch {
+        try {
+            raw = JSON5.parse(configText);
+        }
+        catch {
+            return undefined;
+        }
+    }
+    const token = raw.hooks?.token?.trim();
+    const allowedSessionKeyPrefixes = Array.isArray(raw.hooks?.allowedSessionKeyPrefixes)
+        ? raw.hooks.allowedSessionKeyPrefixes
+            .map(prefix => typeof prefix === 'string' ? prefix.trim() : '')
+            .filter(Boolean)
+        : undefined;
+    return {
+        token: token || undefined,
+        allowRequestSessionKey: raw.hooks?.allowRequestSessionKey === true,
+        allowedSessionKeyPrefixes: allowedSessionKeyPrefixes?.length ? allowedSessionKeyPrefixes : undefined
+    };
+}
 function loadHooksConfigFromOpenClawConfig() {
     try {
         const configPath = resolveOpenClawConfigPath();
         if (!fs.existsSync(configPath)) {
             return undefined;
         }
-        const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        const token = raw.hooks?.token?.trim();
-        const allowedSessionKeyPrefixes = Array.isArray(raw.hooks?.allowedSessionKeyPrefixes)
-            ? raw.hooks.allowedSessionKeyPrefixes
-                .map(prefix => typeof prefix === 'string' ? prefix.trim() : '')
-                .filter(Boolean)
-            : undefined;
-        return {
-            token: token || undefined,
-            allowRequestSessionKey: raw.hooks?.allowRequestSessionKey === true,
-            allowedSessionKeyPrefixes: allowedSessionKeyPrefixes?.length ? allowedSessionKeyPrefixes : undefined
-        };
+        return parseOpenClawHooksConfigText(fs.readFileSync(configPath, 'utf-8'));
     }
     catch {
         return undefined;

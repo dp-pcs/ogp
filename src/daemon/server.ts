@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 
 const _require = createRequire(import.meta.url);
 const OGP_VERSION: string = _require('../../package.json').version;
-import { requireConfig, loadConfig, type OGPConfig, getConfigDir, synthesizePersonas, type AgentPersona } from '../shared/config.js';
+import { requireConfig, loadConfig, type OGPConfig, getConfigDir, synthesizePersonas, type AgentPersona, getTransportMode } from '../shared/config.js';
 import { getPublicKey, getPrivateKey } from './keypair.js';
 import {
   addPeer,
@@ -22,20 +22,55 @@ import {
   updatePeerReceivedScopes,
   updatePeer
 } from './peers.js';
-import { listProjectsForPeer } from './projects.js';
+import { listProjectsForPeer, migrateLegacyContributions } from './projects.js';
 import { handleMessage, type FederationMessage } from './message-handler.js';
 import { signObject, verify } from '../shared/signing.js';
 import { notifyOpenClaw } from './notify.js';
 import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
 import { startReplyCleanup, stopReplyCleanup, getPendingReply, deletePendingReply, storePendingReply, type ReplyPayload } from './reply-handler.js';
-import { startRendezvous, stopRendezvous } from './rendezvous.js';
+import { startRendezvous, stopRendezvous, resolveOwnRelayUrl } from './rendezvous.js';
+import { startRelayClient, stopRelayClient } from './relay-client.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { connectBridge, disconnectBridge } from './openclaw-bridge.js';
 import type { ScopeBundle } from './scopes.js';
 import { loadIntents } from './intent-registry.js';
+import { acquireStateDirLock, StateDirLockedError, type StateDirLockHandle } from './state-lock.js';
 
 let server: any = null;
 let shutdownInProgress = false;
+let stateDirLock: StateDirLockHandle | null = null;
+
+/**
+ * bd-ffl readiness handshake (child -> background parent).
+ *
+ * When `ogp start` runs in background mode it forks this process with
+ * OGP_LOCK_HANDSHAKE=1 and a pipe on fd 3. After this (foreground/long-lived)
+ * process acquires the stateDir lock it calls signalLockHandshake(true) to write
+ * OGP_LOCK_OK; on a lock-acquire failure it calls signalLockHandshake(false),
+ * which closes fd 3 without the token so the parent exits non-zero. This makes
+ * the CHILD the sole lock acquirer and removes the parent's old
+ * acquire-then-release pre-check TOCTOU window.
+ *
+ * No-op when not spawned via the background handshake (e.g. a direct foreground
+ * `ogp start` in a terminal, or tests) — fd 3 simply isn't a handshake pipe.
+ */
+let lockHandshakeSignalled = false;
+function signalLockHandshake(ok: boolean, reason?: string): void {
+  if (lockHandshakeSignalled) return;
+  if (process.env.OGP_LOCK_HANDSHAKE !== '1') return;
+  lockHandshakeSignalled = true;
+  const HANDSHAKE_FD = 3;
+  try {
+    if (ok) {
+      fs.writeSync(HANDSHAKE_FD, 'OGP_LOCK_OK\n');
+    } else if (reason) {
+      // Surface the refusal reason to the waiting parent so it can show the user
+      // a precise message (e.g. the live holder PID) instead of a generic error.
+      fs.writeSync(HANDSHAKE_FD, `OGP_LOCK_FAIL ${reason.replace(/\n/g, ' ')}\n`);
+    }
+  } catch { /* parent may have detached; best effort */ }
+  try { fs.closeSync(HANDSHAKE_FD); } catch { /* best effort */ }
+}
 
 /**
  * Validate an inbound /federation/approve body. Pure function, exported for tests.
@@ -283,6 +318,7 @@ interface ShutdownDeps {
   stopDoormanCleanup: () => void;
   stopReplyCleanup: () => void;
   stopRendezvous: () => Promise<void>;
+  stopRelayClient: () => Promise<void>;
   stopHeartbeat: () => void;
   getServer: () => { close: (cb: (error?: Error) => void) => void } | null;
   exit: (code: number) => never;
@@ -303,6 +339,7 @@ export function createGracefulShutdownHandler(deps: ShutdownDeps) {
     deps.stopReplyCleanup();
     deps.stopHeartbeat();
     await deps.stopRendezvous().catch(() => {});
+    await deps.stopRelayClient().catch(() => {});
 
     const activeServer = deps.getServer();
     if (!activeServer) {
@@ -349,21 +386,106 @@ export function startServer(config?: OGPConfig, background = false): void {
   shutdownInProgress = false;
   const cfg = config || requireConfig();
 
+  // bd-ffl: refuse a second daemon on the same stateDir BEFORE doing any work.
+  // The lock keys on the stateDir — NOT the port — because a dup can fall back
+  // to a different port (EADDRINUSE) and still race projects.json/peers.json.
+  //
+  // bd-ffl TOCTOU FIX: the background parent must NOT acquire-then-release the
+  // lock as a pre-check. That earlier design (acquire().release() in the parent,
+  // then fork a child that re-acquires) opened a non-atomic window: the parent
+  // unlinks daemon.lock, then the detached child re-creates it, and a *concurrent*
+  // `ogp start` could slip into that gap — letting a newcomer grab the lock+port
+  // while a live incumbent got orphaned onto the EADDRINUSE fallback port (18793).
+  // Observed live 3× (2026-05-31, 06-03, 06-09).
+  //
+  // New design: the forked CHILD is the SOLE acquirer. The parent does NOT touch
+  // the lock at all. The parent BLOCKS on a readiness handshake (fd 3) until the
+  // child confirms the lock is held; if the child instead hits a live holder it
+  // exits non-zero, the handshake pipe closes without OGP_LOCK_OK, and the parent
+  // propagates a non-zero exit. The lockfile is therefore created exactly once,
+  // by the long-lived process, and never unlink-then-recreated across the fork.
+  const stateDir = getConfigDir();
+
   // If background mode requested, fork and exit parent
   if (background) {
     const logStream = fs.openSync(getDaemonLogFile(), 'a');
+    // stdio fd 3 = readiness handshake pipe (child -> parent). The child writes
+    // OGP_LOCK_OK on it once it owns the stateDir lock.
     const child = spawn(process.execPath, [process.argv[1], 'start'], {
       detached: true,
-      stdio: ['ignore', logStream, logStream],
-      env: { ...process.env }
+      stdio: ['ignore', logStream, logStream, 'pipe'],
+      env: { ...process.env, OGP_LOCK_HANDSHAKE: '1' }
     });
 
-    child.unref();
-    fs.writeFileSync(getDaemonPidFile(), child.pid!.toString(), 'utf-8');
-    console.log(`OGP daemon started (PID: ${child.pid})`);
-    console.log(`Logs: ${getDaemonLogFile()}`);
-    process.exit(0);
+    let readyResolved = false;
+    const finishParent = (ok: boolean, holderMessage?: string): void => {
+      if (readyResolved) return;
+      readyResolved = true;
+      if (ok) {
+        fs.writeFileSync(getDaemonPidFile(), child.pid!.toString(), 'utf-8');
+        console.log(`OGP daemon started (PID: ${child.pid})`);
+        console.log(`Logs: ${getDaemonLogFile()}`);
+        child.unref();
+        process.exit(0);
+      } else {
+        if (holderMessage) console.error(`✗ ${holderMessage}`);
+        else console.error('✗ OGP daemon failed to acquire the stateDir lock (see daemon log).');
+        process.exit(1);
+      }
+    };
+
+    // Read the handshake. A single OGP_LOCK_OK line => the child holds the lock.
+    const handshake = child.stdio[3] as NodeJS.ReadableStream | null;
+    let handshakeBuf = '';
+    let handshakeFailMsg: string | undefined;
+    if (handshake) {
+      handshake.setEncoding('utf-8');
+      handshake.on('data', (chunk: string) => {
+        handshakeBuf += chunk;
+        if (handshakeBuf.includes('OGP_LOCK_OK')) { finishParent(true); return; }
+        const failIdx = handshakeBuf.indexOf('OGP_LOCK_FAIL');
+        if (failIdx !== -1) {
+          const line = handshakeBuf.slice(failIdx).split('\n')[0] ?? '';
+          handshakeFailMsg = line.replace('OGP_LOCK_FAIL', '').trim() || undefined;
+          finishParent(false, handshakeFailMsg);
+        }
+      });
+    }
+    // If the child exits before signalling readiness, it failed to acquire the
+    // lock (StateDirLockedError -> exit 1) — propagate a non-zero parent exit.
+    child.on('exit', () => {
+      finishParent(false, handshakeFailMsg);
+    });
+    child.on('error', () => finishParent(false));
+    // Safety timeout: if neither readiness nor exit arrives, don't hang forever.
+    const readyTimeout = setTimeout(() => finishParent(false), 15000);
+    readyTimeout.unref?.();
+    return;
   }
+
+  // Foreground (long-lived) process: acquire and HOLD the stateDir lock for the
+  // lifetime of the daemon. This is the SOLE acquisition point (bd-ffl TOCTOU
+  // fix) — the background parent never touches the lock. Released on graceful
+  // shutdown / process exit.
+  try {
+    stateDirLock = acquireStateDirLock(stateDir);
+  } catch (err) {
+    if (err instanceof StateDirLockedError) {
+      console.error(`✗ ${err.message}`);
+      // Signal failure to a waiting background parent (if any) over the handshake
+      // pipe with the holder message, then exit non-zero. (The parent only sees
+      // the daemon log otherwise, so pass the reason so it can show the user.)
+      signalLockHandshake(false, err.message);
+      process.exit(1);
+    }
+    throw err;
+  }
+  process.once('exit', () => { stateDirLock?.release(); stateDirLock = null; });
+
+  // bd-ffl: tell a waiting background parent the lock is held, so it can record
+  // the pidfile + exit 0. Done immediately after acquisition (before the slower
+  // server bring-up) so `ogp start` returns promptly on success.
+  signalLockHandshake(true);
 
   const app: Express = express();
 
@@ -1057,6 +1179,13 @@ export function startServer(config?: OGPConfig, background = false): void {
     res.json({ received: true });
   });
 
+  try {
+    const migrated = migrateLegacyContributions();
+    if (migrated > 0) console.log(`[OGP] Tagged ${migrated} legacy (unsigned) contribution(s)`);
+  } catch (err) {
+    console.error('[OGP] Legacy contribution migration failed (non-fatal):', err);
+  }
+
   server = app.listen(cfg.daemonPort, () => {
     console.log(`[OGP] Daemon listening on port ${cfg.daemonPort}`);
     console.log(`[OGP] Public key: ${getPublicKey()}`);
@@ -1075,9 +1204,23 @@ export function startServer(config?: OGPConfig, background = false): void {
 
     // Start rendezvous registration (if configured)
     if (cfg.rendezvous?.enabled) {
-      startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort).catch((err: Error) => {
+      startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort, cfg.transport).catch((err: Error) => {
         console.warn(`[OGP] Rendezvous startup error: ${err.message}`);
       });
+    }
+
+    // bd-b7em Phase 2: when running in relay mode, hold a persistent receiver
+    // socket so peers can reach us with no inbound port. Default 'direct' is a
+    // no-op here — nothing about direct delivery changes.
+    if (getTransportMode(cfg) === 'relay') {
+      const relayUrl = resolveOwnRelayUrl(cfg.transport, cfg.rendezvous?.url);
+      if (relayUrl) {
+        startRelayClient(relayUrl).catch((err: Error) => {
+          console.warn(`[OGP] Relay client startup error: ${err.message}`);
+        });
+      } else {
+        console.warn('[OGP] Transport mode is relay but no relay URL could be resolved — staying reachable only via direct.');
+      }
     }
   });
 
@@ -1088,9 +1231,10 @@ export function startServer(config?: OGPConfig, background = false): void {
     stopDoormanCleanup,
     stopReplyCleanup,
     stopRendezvous,
+    stopRelayClient,
     stopHeartbeat,
     getServer: () => server,
-    exit: (code: number) => process.exit(code),
+    exit: (code: number) => { stateDirLock?.release(); stateDirLock = null; process.exit(code); },
     setTimer: setTimeout,
     clearTimer: clearTimeout,
     logError: console.error
@@ -1104,8 +1248,9 @@ export function stopServer(): void {
   // Stop cleanup timers
   stopDoormanCleanup();
   stopReplyCleanup();
-  // Deregister from rendezvous (fire-and-forget)
+  // Deregister from rendezvous + tear down relay socket (fire-and-forget)
   stopRendezvous().catch(() => {});
+  stopRelayClient().catch(() => {});
 
   const pidFile = getDaemonPidFile();
 

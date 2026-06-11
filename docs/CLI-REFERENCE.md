@@ -5,6 +5,7 @@ Complete command-line reference for OGP (Open Gateway Protocol).
 ## Table of Contents
 
 - [Global Options](#global-options)
+- [Environment Variables](#environment-variables)
 - [Setup and Configuration](#setup-and-configuration)
 - [Daemon Management](#daemon-management)
 - [Federation Commands](#federation-commands)
@@ -49,6 +50,10 @@ ogp --for all status
 - If multiple frameworks are configured and no default is set, prompts interactively
 - If a default framework is set, uses default (can override with `--for`)
 - `--for all` runs command on all enabled frameworks and aggregates output
+- If the meta-registry is empty (no `ogp setup` was run) but `OGP_HOME` is set,
+  `--for <framework>` honors `OGP_HOME` and prints a warning instead of failing.
+  This is the common case in server/container deployments where the daemon is
+  launched by setting `OGP_HOME` directly. See [Environment Variables](#environment-variables).
 
 ### --help, -h
 
@@ -69,6 +74,39 @@ Shows OGP version.
 ```bash
 ogp --version
 ```
+
+## Environment Variables
+
+OGP does **not** hardcode its storage location. The default is `~/.ogp`, but
+every path is resolved at runtime and can be overridden via environment
+variables. This is the supported way to run OGP in containers, on servers
+(ECS/nginx), or anywhere `$HOME` is not where you want config to live — no code
+changes or recompilation required.
+
+| Variable | Overrides | Default |
+| --- | --- | --- |
+| `OGP_HOME` | Per-framework data dir: `config.json`, `peers.json`, identity, keychain. **The daemon only needs this.** | `~/.ogp` |
+| `OGP_META_HOME` | The multi-framework meta-registry (`config.json` listing frameworks for `--for`). | `~/.ogp-meta` |
+
+**Server / container deployment (recommended):**
+```bash
+# Point both the daemon and the CLI at the same writable location.
+export OGP_HOME=/data/ogp        # or e.g. /home/node/.openclaw/.ogp
+ogp start --background
+ogp peers list                   # CLI inherits OGP_HOME, talks to the daemon
+```
+
+**Common pitfall:** If the daemon is launched with `OGP_HOME` set but you then
+run `ogp --for openclaw ...`, the CLI looks up `openclaw` in the meta-registry
+(`OGP_META_HOME`), which was never populated by an interactive `ogp setup`.
+As of this version, `--for` falls back to `OGP_HOME` with a warning instead of
+erroring. The clean fix is to **not pass `--for` on a single-home server** — just
+export `OGP_HOME` and let every `ogp` invocation inherit it.
+
+**$HOME mismatch:** If the daemon and CLI run under different users/`$HOME`
+values (common in containers), the meta-registry can silently "not exist" for
+one of them. Set `OGP_META_HOME` (and `OGP_HOME`) explicitly so both processes
+resolve the same paths.
 
 ## Setup and Configuration
 

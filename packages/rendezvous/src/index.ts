@@ -1,5 +1,9 @@
 import express, { Request, Response } from 'express';
+import http from 'node:http';
+import crypto from 'node:crypto';
+import { WebSocketServer, type WebSocket } from 'ws';
 import { verifyCanonical, type VerifyResult } from './verify.js';
+import { RelayCore, type RelayWS } from './relay-core.js';
 
 const app = express();
 app.use(express.json());
@@ -19,11 +23,66 @@ const TTL_MS = 90_000; // 90 seconds
 const CLEANUP_INTERVAL_MS = 60_000; // cleanup every 60 seconds
 const INVITE_TTL_MS = 600_000; // 10 minutes
 
+/**
+ * Transport descriptor (bd-b7em) — how a peer wants to be reached. Carried
+ * INSIDE the signed registration payload, so it inherits the same proof-of-key
+ * guarantee as pubkey/port: the rendezvous cannot advertise a transport the
+ * keyholder did not sign. Absent ⇒ treated as 'direct' (backward compatible).
+ *
+ * Phase 1 stores + returns the descriptor; no delivery path consumes relay/iroh
+ * yet (that's Phase 2/3). 'iroh' fields are carried but unused for now.
+ */
+export type TransportDescriptor =
+  | { transport: 'direct'; gatewayUrl?: string }
+  | { transport: 'relay'; relayUrl: string }
+  | { transport: 'iroh'; nodeId: string; relayUrl?: string };
+
+/**
+ * Validate an optional transport descriptor parsed from an already-signature-
+ * verified payload. Returns the normalized descriptor, `undefined` if absent
+ * (⇒ direct), or an error string if malformed.
+ */
+export function validateTransportDescriptor(
+  raw: unknown
+): { ok: true; descriptor?: TransportDescriptor } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true }; // absent ⇒ direct
+
+  if (typeof raw !== 'object') {
+    return { ok: false, error: 'transport must be an object' };
+  }
+  const t = raw as Record<string, unknown>;
+  const mode = t.transport;
+
+  if (mode === 'direct') {
+    if (t.gatewayUrl !== undefined && typeof t.gatewayUrl !== 'string') {
+      return { ok: false, error: 'transport.gatewayUrl must be a string' };
+    }
+    return { ok: true, descriptor: { transport: 'direct', ...(typeof t.gatewayUrl === 'string' ? { gatewayUrl: t.gatewayUrl } : {}) } };
+  }
+  if (mode === 'relay') {
+    if (typeof t.relayUrl !== 'string' || !t.relayUrl) {
+      return { ok: false, error: 'transport.relayUrl is required for relay mode' };
+    }
+    return { ok: true, descriptor: { transport: 'relay', relayUrl: t.relayUrl } };
+  }
+  if (mode === 'iroh') {
+    if (typeof t.nodeId !== 'string' || !t.nodeId) {
+      return { ok: false, error: 'transport.nodeId is required for iroh mode' };
+    }
+    if (t.relayUrl !== undefined && typeof t.relayUrl !== 'string') {
+      return { ok: false, error: 'transport.relayUrl must be a string' };
+    }
+    return { ok: true, descriptor: { transport: 'iroh', nodeId: t.nodeId, ...(typeof t.relayUrl === 'string' ? { relayUrl: t.relayUrl } : {}) } };
+  }
+  return { ok: false, error: `unknown transport mode: ${String(mode)}` };
+}
+
 interface PeerRecord {
   pubkey: string;
   ip: string;
   port: number;
   lastSeen: number; // unix timestamp ms
+  transport?: TransportDescriptor;
 }
 
 interface InviteRecord {
@@ -105,6 +164,8 @@ export interface RegistrationValidationOk {
   port: number;
   /** Optional public URL the peer wants other peers to use to reach them. */
   publicUrl?: string;
+  /** Optional transport descriptor (bd-b7em). Absent ⇒ direct. */
+  transport?: TransportDescriptor;
 }
 export interface RegistrationValidationErr {
   ok: false;
@@ -143,11 +204,20 @@ export function validateSignedRegistration(
     return { ok: false, status: 401, error: `Signature verification failed: ${verifyResult.reason}` };
   }
 
+  // Transport descriptor (bd-b7em): parsed ONLY from the now-verified inner
+  // payload. A `transport` field outside payloadStr is never read, so the
+  // rendezvous can't be tricked into advertising an unsigned transport.
+  const transportResult = validateTransportDescriptor(parsed.transport);
+  if (!transportResult.ok) {
+    return { ok: false, status: 400, error: transportResult.error };
+  }
+
   return {
     ok: true,
     pubkey,
     port,
-    ...(typeof publicUrl === 'string' && publicUrl ? { publicUrl } : {})
+    ...(typeof publicUrl === 'string' && publicUrl ? { publicUrl } : {}),
+    ...(transportResult.descriptor ? { transport: transportResult.descriptor } : {})
   };
 }
 
@@ -170,13 +240,14 @@ app.post('/register', (req: Request, res: Response) => {
     return;
   }
 
-  const { pubkey, port } = validation;
+  const { pubkey, port, transport } = validation;
   const ip = getCallerIp(req);
   const now = Date.now();
 
-  peers.set(pubkey, { pubkey, ip, port, lastSeen: now });
+  peers.set(pubkey, { pubkey, ip, port, lastSeen: now, ...(transport ? { transport } : {}) });
 
-  console.log(`[rendezvous] Registered ${pubkey.slice(0, 8)}... from ${ip}:${port}`);
+  const transportLabel = transport ? transport.transport : 'direct';
+  console.log(`[rendezvous] Registered ${pubkey.slice(0, 8)}... from ${ip}:${port} (transport: ${transportLabel})`);
 
   res.json({ ok: true, yourIp: ip });
 });
@@ -205,6 +276,7 @@ app.get('/peer/:pubkey', (req: Request, res: Response) => {
     ip: peer.ip,
     port: peer.port,
     lastSeen: peer.lastSeen,
+    ...(peer.transport ? { transport: peer.transport } : {}),
   });
 });
 
@@ -284,7 +356,43 @@ app.get('/invite/:token', (req: Request, res: Response) => {
 // ─────────────────────────────────────────────
 // Start server
 // ─────────────────────────────────────────────
-app.listen(PORT, () => {
+// bd-b7em Phase 2: mount the relay routing core on a WebSocket upgrade at /relay,
+// alongside the existing HTTP routes (which are completely untouched — register/
+// peer/invite stay byte-identical). The relay is UNTRUSTED: it forwards opaque,
+// end-to-end-signed envelopes by recipient pubkey and authenticates sockets with
+// the SAME Ed25519 proof (verifyCanonical) used by /register. Single-process
+// in-memory routing table — fine for one Fargate task; multi-task scale-out needs
+// a shared table (Redis pub/sub), deferred per docs/TRANSPORT-MODES-DESIGN.md.
+const relay = new RelayCore({
+  verifyCanonical,
+  now: () => Date.now(),
+  randomId: () => crypto.randomUUID(),
+  randomNonce: () => crypto.randomBytes(32).toString('hex'),
+  log: (msg) => console.log(`[relay] ${msg}`),
+});
+
+const server = http.createServer(app);
+const wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
+
+let nextSocketId = 1;
+server.on('upgrade', (req, socket, head) => {
+  if (req.url !== '/relay') { socket.destroy(); return; }
+  wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
+    const id = nextSocketId++;
+    const r: RelayWS = {
+      id,
+      send: (data: string) => { try { ws.send(data); } catch { /* ignore */ } },
+      close: (code?: number) => { try { ws.close(code); } catch { /* ignore */ } },
+    };
+    relay.onConnection(r);
+    ws.on('message', (data) => relay.onMessage(r, data.toString()));
+    ws.on('close', () => relay.onClose(r));
+    ws.on('error', () => relay.onClose(r));
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`[rendezvous] OGP Rendezvous Server listening on port ${PORT}`);
   console.log(`[rendezvous] Peer TTL: ${TTL_MS / 1000}s | Invite TTL: ${INVITE_TTL_MS / 1000}s | Cleanup interval: ${CLEANUP_INTERVAL_MS / 1000}s`);
+  console.log(`[rendezvous] Relay WebSocket endpoint: /relay`);
 });

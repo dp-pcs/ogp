@@ -30,7 +30,7 @@ _ogp_completion() {
 
   # Top-level commands
   if [ $COMP_CWORD -eq 1 ]; then
-    opts="setup start stop status whoami federation agent-comms config expose expose-stop shutdown install uninstall intent project completion"
+    opts="setup start stop status whoami federation agent-comms config tunnel shutdown install uninstall keychain intent project completion"
     COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
     return 0
   fi
@@ -61,7 +61,7 @@ _ogp_completion() {
   # agent-comms subcommands
   if [ "$cmd" = "agent-comms" ]; then
     if [ $COMP_CWORD -eq 2 ]; then
-      opts="policies configure add-topic set-topic set-default remove-topic reset activity default logging"
+      opts="send policies configure add-topic set-topic set-default remove-topic reset activity default logging"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
     fi
@@ -71,7 +71,7 @@ _ogp_completion() {
   # config subcommands
   if [ "$cmd" = "config" ]; then
     if [ $COMP_CWORD -eq 2 ]; then
-      opts="show set-default list enable disable frameworks health-check show-identity set-identity set-tags add-tag remove-tag"
+      opts="show set-default list enable disable frameworks health-check show-identity list-agents set-identity set-tags add-tag remove-tag"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
     fi
@@ -116,7 +116,7 @@ _ogp_completion() {
   # project subcommands
   if [ "$cmd" = "project" ]; then
     if [ $COMP_CWORD -eq 2 ]; then
-      opts="create join list remove contribute query status request-join send-contribution query-peer status-peer delete"
+      opts="create join list remove contribute query status request-join send-contribution query-peer status-peer delete add-owner claim-ownership owners"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
     fi
@@ -147,10 +147,29 @@ _ogp_completion() {
     return 0
   fi
 
-  # expose subcommands
-  if [ "$cmd" = "expose" ]; then
-    if [ "$prev" = "-m" ] || [ "$prev" = "--method" ]; then
-      opts="cloudflared ngrok"
+  # tunnel subcommands
+  if [ "$cmd" = "tunnel" ]; then
+    if [ $COMP_CWORD -eq 2 ]; then
+      opts="list start stop"
+      COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+      return 0
+    fi
+    if [[ "$subcmd" == "start" ]]; then
+      if [ "$prev" = "-m" ] || [ "$prev" = "--method" ]; then
+        opts="cloudflared ngrok"
+      else
+        opts="--method"
+      fi
+      COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+      return 0
+    fi
+    return 0
+  fi
+
+  # keychain subcommands
+  if [ "$cmd" = "keychain" ]; then
+    if [ $COMP_CWORD -eq 2 ]; then
+      opts="init unlock lock status"
       COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
       return 0
     fi

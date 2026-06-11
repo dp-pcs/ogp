@@ -1,3 +1,4 @@
+import { type Peer } from '../daemon/peers.js';
 import { type OGPConfig } from '../shared/config.js';
 type FederationCard = {
     displayName?: string;
@@ -11,9 +12,25 @@ export declare function fetchFederationCard(gatewayUrl: string, fetchImpl?: type
     card: FederationCard;
 }>;
 export declare function ensureLocalGatewayReachable(config: Pick<OGPConfig, 'gatewayUrl'>, actionLabel: string, fetchImpl?: typeof fetch): Promise<boolean>;
-export declare function federationList(status?: 'pending' | 'approved' | 'rejected' | 'removed', filterTag?: string): Promise<void>;
-export declare function federationStatus(): Promise<void>;
-export declare function federationRequest(peerUrl: string, peerId: string, alias?: string): Promise<boolean>;
+export interface PeerJson {
+    id: string;
+    alias?: string;
+    displayName: string;
+    status: Peer['status'];
+    gatewayUrl: string;
+    publicKey: string;
+    healthState?: Peer['healthState'];
+    healthy?: boolean;
+    grantedScopes?: Peer['grantedScopes'];
+    offeredIntents?: string[];
+    lastSeenAt?: string;
+    tags?: string[];
+}
+/** Pure projection of peers to the stable `--json` wire shape. */
+export declare function peersToJson(peers: Peer[]): PeerJson[];
+export declare function federationList(status?: 'pending' | 'approved' | 'rejected' | 'removed', filterTag?: string, json?: boolean): Promise<void>;
+export declare function federationStatus(json?: boolean): Promise<void>;
+export declare function federationRequest(peerUrl: string, peerId: string, alias?: string, json?: boolean): Promise<boolean>;
 export interface ApproveOptions {
     intents?: string[];
     rate?: string;
@@ -22,6 +39,33 @@ export interface ApproveOptions {
 export declare function federationApprove(peerId: string, options?: ApproveOptions): Promise<void>;
 export declare function federationReject(peerId: string): Promise<void>;
 export declare function federationRemove(peerId: string): Promise<void>;
+/**
+ * Deliver an already-signed federation envelope to a peer, branching on the
+ * peer's advertised transport (bd-b7em Phase 2).
+ *
+ * - DIRECT (default, and the fallback for everything): byte-identical to the
+ *   original behavior — POST {message, messageStr, signature} to
+ *   `${peer.gatewayUrl}/federation/message`. A flaky/disabled rendezvous lookup
+ *   MUST fall through to direct so it can never break the default path.
+ * - RELAY: route the same opaque frame over a WebSocket to the relay, which
+ *   forwards it to the peer's persistent socket and returns their response.
+ *
+ * Returns a normalized shape so callers can keep their existing response
+ * handling: { ok, status?, result }. `result` is the peer's MessageResponse
+ * (or a synthesized failure for relay errors).
+ */
+export declare function deliverFederationMessage(peer: Peer, frame: {
+    message: unknown;
+    messageStr: string;
+    signature: string;
+}, opts: {
+    timeoutMs?: number;
+    config: OGPConfig;
+}): Promise<{
+    ok: boolean;
+    status?: number;
+    result: any;
+}>;
 export declare function federationSend(peerId: string, intent: string, payloadJson: string, timeoutMs?: number, toAgent?: string): Promise<any | null>;
 /**
  * Show scope grants for a peer

@@ -1,7 +1,10 @@
-import { createProject, addProject, getProject, listProjects, listProjectsForPeer, joinProject, isProjectMember, contributeToProject, getTopicContributions, getAuthorContributions, searchContributions, getProjectStatus, ensureProjectTopic, getContributionEntryType } from '../daemon/projects.js';
+import { createProject, addProject, getProject, listProjects, listProjectsForPeer, joinProject, isProjectMember, upsertContribution, getTopicContributions, getAuthorContributions, searchContributions, getProjectStatus, ensureProjectTopic, getContributionEntryType, setProjectCreation, addOwnerGrant, isOwner } from '../daemon/projects.js';
 import { loadConfig } from '../shared/config.js';
 import { getPeer } from '../daemon/peers.js';
 import { federationSend } from './federation.js';
+import { getPrivateKey, getPublicKey } from '../daemon/keypair.js';
+import { buildSignedContribution } from '../daemon/contribution-signing.js';
+import { buildSignedCreation, buildSignedGrant } from '../daemon/project-ownership.js';
 /**
  * Format author display with 3-tier fallback:
  * 1. Use authorIdentity if available (humanName + agentName)
@@ -51,6 +54,36 @@ function formatAuthorDisplay(contribution) {
     // Tier 3: Raw authorId
     return contribution.authorId;
 }
+/** Normalize any parseable timestamp to ISO 8601; pass through if unparseable. */
+function toIsoTimestamp(value) {
+    if (typeof value !== 'string' && typeof value !== 'number') {
+        return String(value ?? '');
+    }
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? String(value) : d.toISOString();
+}
+/**
+ * Pure projection of peer-query response contributions into the structured
+ * wire shape. Exported for tests (bd-2n3) and reuse by the `--json` path.
+ */
+export function buildPeerQueryJson(projectId, contributions) {
+    return (contributions ?? []).map((c) => {
+        const entryType = c.entryType ?? c.topic;
+        const out = {
+            id: c.id,
+            projectId,
+            authorId: c.authorId,
+            entryType,
+            topic: entryType,
+            summary: c.summary,
+            timestamp: toIsoTimestamp(c.timestamp),
+        };
+        if (c.metadata !== undefined) {
+            out.metadata = c.metadata;
+        }
+        return out;
+    });
+}
 /**
  * Create a new project locally
  */
@@ -68,12 +101,22 @@ export async function projectCreate(projectId, projectName, options = {}) {
     if (config?.email) {
         project.members.push(config.email);
     }
-    addProject(project);
+    // bd-hy3o: the creator is the root owner. Add the creator's public key as a
+    // member (so ownership + membership align — currently only config.email is added)
+    // and persist BEFORE minting the creation record (setProjectCreation reads from disk).
+    const myKey = getPublicKey();
+    if (!project.members.includes(myKey))
+        project.members.push(myKey);
+    addProject(project); // addProject upserts by id, so the mutated member array is persisted.
+    // Sign and store an 'original' creation record rooting ownership in the creator.
+    const creation = buildSignedCreation({ projectId, creatorKey: myKey, provenance: 'original' }, getPrivateKey());
+    setProjectCreation(projectId, creation);
     console.log(`✓ Created project: ${projectName} (${projectId})`);
     if (options.description) {
         console.log(`  Description: ${options.description}`);
     }
     console.log(`  Members: ${project.members.join(', ')}`);
+    console.log(`  Owner: you (${myKey.substring(0, 32)}…)`);
     // BUILD-102: Auto-register project ID as agent-comms topic for all approved peers
     const { listPeers, setPeerTopicPolicy } = await import('../daemon/peers.js');
     const memberPeers = listPeers('approved').filter(peer => listProjectsForPeer(peer.id, [project]).length > 0);
@@ -206,8 +249,10 @@ export async function projectContribute(projectId, entryType, summary, options =
         organization: config.organization,
         tags: config.tags
     };
-    // Add the contribution
-    const contributionId = contributeToProject(projectId, entryType, config.email, summary, metadata, authorIdentity);
+    // Build the signed contribution ONCE; reuse for local store AND every peer (shared id+sig).
+    const { record, wire } = buildSignedContribution({ projectId, authorId: getPublicKey(), entryType, summary, metadata, authorIdentity }, getPrivateKey());
+    const upsert = upsertContribution(projectId, record);
+    const contributionId = (upsert === 'inserted' || upsert === 'duplicate') ? record.id : null;
     if (contributionId) {
         console.log(`✓ Contributed to project '${project.name}' [${entryType}]`);
         console.log(`  Summary: ${summary}`);
@@ -231,23 +276,46 @@ export async function projectContribute(projectId, entryType, summary, options =
                 topic: entryType,
                 summary,
                 authorIdentity,
-                ...(metadata && { metadata })
+                ...(metadata && { metadata }),
+                contribution: wire // SAME envelope as the local record — identical id+signature
             });
-            let pushed = 0;
+            let acked = 0; // peer confirmed the write
+            let unconfirmed = 0; // sent, but no ack (timeout / unreachable) — write may still have landed
+            let rejected = 0; // peer explicitly rejected the write
             for (const peer of peers) {
                 try {
                     // B0032 P4: --to-agent applies uniformly to all auto-push targets.
                     // If a peer doesn't support multi-agent-personas, federationSend logs
                     // and skips that peer (returns null) without aborting the whole loop.
-                    await federationSend(peer.id, 'project.contribute', payload, 5000, options.toAgent);
-                    pushed++;
+                    // bd-egmt: 30000ms (was 5000) — cross-gateway acks routinely run 5-10s,
+                    // matching the bd-ogwd query-peer timeout. federationSend returns null on
+                    // timeout (it does not throw), so classify the return rather than assume success.
+                    const result = await federationSend(peer.id, 'project.contribute', payload, 30000, options.toAgent);
+                    if (result && result.success === false) {
+                        rejected++;
+                    }
+                    else if (result) {
+                        acked++;
+                    }
+                    else {
+                        // null: no ack (timeout or peer unreachable). The write may have landed —
+                        // do NOT claim a confirmed sync.
+                        unconfirmed++;
+                    }
                 }
                 catch {
-                    // Peer unreachable — skip silently, contribution saved locally
+                    // Unexpected throw — treat as unconfirmed (contribution saved locally regardless).
+                    unconfirmed++;
                 }
             }
-            if (pushed > 0) {
-                console.log(`  ↗ Synced to ${pushed} peer${pushed > 1 ? 's' : ''}`);
+            if (acked > 0) {
+                console.log(`  ↗ Synced to ${acked} peer${acked > 1 ? 's' : ''}`);
+            }
+            if (unconfirmed > 0) {
+                console.log(`  ↗ Sent to ${unconfirmed} peer${unconfirmed > 1 ? 's' : ''} — ack unconfirmed (in-flight; the write may have landed, re-query to confirm)`);
+            }
+            if (rejected > 0) {
+                console.log(`  ✗ Rejected by ${rejected} peer${rejected > 1 ? 's' : ''} (see error above)`);
             }
         }
     }
@@ -267,17 +335,20 @@ export async function projectQuery(projectId, options = {}) {
     if (options.search) {
         // Search by text
         contributions = searchContributions(projectId, options.search, limit);
-        console.log(`Search results for "${options.search}" in project '${project.name}':`);
+        if (!options.json)
+            console.log(`Search results for "${options.search}" in project '${project.name}':`);
     }
     else if (entryType) {
         // Query by entry type
         contributions = getTopicContributions(projectId, entryType, limit);
-        console.log(`Contributions [${entryType}] in project '${project.name}':`);
+        if (!options.json)
+            console.log(`Contributions [${entryType}] in project '${project.name}':`);
     }
     else if (options.author) {
         // Query by author
         contributions = getAuthorContributions(projectId, options.author, limit);
-        console.log(`Contributions by '${options.author}' in project '${project.name}':`);
+        if (!options.json)
+            console.log(`Contributions by '${options.author}' in project '${project.name}':`);
     }
     else {
         // Get all recent contributions - handle both data formats
@@ -295,7 +366,14 @@ export async function projectQuery(projectId, options = {}) {
         }
         contributions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         contributions = contributions.slice(0, limit);
-        console.log(`Recent contributions in project '${project.name}':`);
+        if (!options.json) {
+            console.log(`Recent contributions in project '${project.name}':`);
+        }
+    }
+    // bd-2n3: machine-readable output mirrors query-peer for consistent consumers.
+    if (options.json) {
+        console.log(JSON.stringify(buildPeerQueryJson(projectId, contributions ?? []), null, 2));
+        return;
     }
     if (contributions.length === 0) {
         console.log('No contributions found');
@@ -456,13 +534,11 @@ export async function projectSendContribution(peerId, projectId, entryType, summ
         organization: config.organization,
         tags: config.tags
     };
+    const { wire } = buildSignedContribution({ projectId, authorId: getPublicKey(), entryType, summary, metadata, authorIdentity }, getPrivateKey());
     const payload = {
-        projectId,
-        entryType,
-        topic: entryType,
-        summary,
-        authorIdentity,
-        ...(metadata && { metadata })
+        projectId, entryType, topic: entryType, summary, authorIdentity,
+        ...(metadata && { metadata }),
+        contribution: wire
     };
     console.log(`Sending contribution to project '${projectId}' [${entryType}] to peer '${peerId}'...`);
     try {
@@ -506,7 +582,9 @@ export async function projectQueryPeer(peerId, projectId, options = {}) {
         payload.authorId = options.author;
     if (options.limit)
         payload.limit = options.limit;
-    console.log(`Querying project '${projectId}' from peer '${peerId}'...`);
+    if (!options.json) {
+        console.log(`Querying project '${projectId}' from peer '${peerId}'...`);
+    }
     try {
         const response = await federationSend(peerId, 'project.query', JSON.stringify(payload), options.timeout);
         if (!response) {
@@ -519,11 +597,19 @@ export async function projectQueryPeer(peerId, projectId, options = {}) {
         }
         // Format and display the response
         const { projectName, contributions } = response.response;
+        // bd-2n3: machine-readable output. Emit the structured contributions
+        // (with stable id + ISO timestamps) so consumers can union-merge by id.
+        if (options.json) {
+            console.log(JSON.stringify(buildPeerQueryJson(projectId, contributions ?? []), null, 2));
+            return;
+        }
         if (contributions && contributions.length > 0) {
             console.log(`\n✓ Found ${contributions.length} contributions in project '${projectName}':\n`);
             contributions.forEach((contribution, index) => {
                 const timestamp = new Date(contribution.timestamp).toLocaleString();
                 console.log(`${index + 1}. [${getContributionEntryType(contribution)}] by ${formatAuthorDisplay(contribution)} (${timestamp})`);
+                // bd-2n3: surface the stable contribution id in human output too.
+                console.log(`   id: ${contribution.id}`);
                 console.log(`   ${contribution.summary}`);
                 if (contribution.metadata) {
                     console.log(`   Metadata: ${JSON.stringify(contribution.metadata, null, 2)}`);
@@ -576,6 +662,103 @@ export async function projectStatusPeer(peerId, projectId) {
     catch (err) {
         console.error('Error sending status request:', err);
         process.exit(1);
+    }
+}
+/**
+ * bd-hy3o: Grant ownership of a project to a peer key (owners only).
+ */
+export async function projectAddOwner(projectId, granteeKey) {
+    const config = loadConfig();
+    if (!config) {
+        console.error('Error: Not configured. Run "ogp setup" first.');
+        process.exit(1);
+    }
+    const project = getProject(projectId);
+    if (!project) {
+        console.error(`Error: Project '${projectId}' not found`);
+        process.exit(1);
+    }
+    if (!isOwner(projectId, getPublicKey())) {
+        console.error(`Error: You are not an owner of '${projectId}'`);
+        process.exit(1);
+    }
+    const grant = buildSignedGrant({ projectId, grantee: granteeKey, grantedBy: getPublicKey() }, getPrivateKey());
+    addOwnerGrant(projectId, grant); // store locally
+    const { listPeers } = await import('../daemon/peers.js');
+    const peers = listPeers('approved').filter(p => listProjectsForPeer(p.id, [project]).length > 0);
+    let acked = 0;
+    for (const peer of peers) {
+        try {
+            const r = await federationSend(peer.id, 'project.grant-owner', JSON.stringify({ projectId, grant }), 30000);
+            if (r && r.success !== false)
+                acked++;
+        }
+        catch { /* peer unreachable; grant saved locally */ }
+    }
+    console.log(`✓ Granted ownership to ${granteeKey.substring(0, 32)}… on '${projectId}'${acked ? ` (synced to ${acked} peer${acked > 1 ? 's' : ''})` : ''}`);
+}
+/**
+ * bd-hy3o: Claim ownership of a pre-existing project (members only).
+ */
+export async function projectClaimOwnership(projectId) {
+    const config = loadConfig();
+    if (!config) {
+        console.error('Error: Not configured. Run "ogp setup" first.');
+        process.exit(1);
+    }
+    const project = getProject(projectId);
+    if (!project) {
+        console.error(`Error: Project '${projectId}' not found`);
+        process.exit(1);
+    }
+    if (project.creation?.provenance === 'original') {
+        console.error('Error: Project already has an original owner');
+        process.exit(1);
+    }
+    // Member check must tolerate 32-char / full-key / email member forms (members.includes is exact).
+    const myKey = getPublicKey();
+    const myShort = myKey.substring(0, 32);
+    const member = project.members.some(m => m === myKey || m === myShort || (m.length >= 32 && m.substring(0, 32) === myShort) || m === config.email);
+    if (!member) {
+        console.error('Error: Only an existing project member may claim ownership');
+        process.exit(1);
+    }
+    const creation = buildSignedCreation({ projectId, creatorKey: myKey, provenance: 'legacy-claim' }, getPrivateKey());
+    const result = setProjectCreation(projectId, creation);
+    if (result === 'rejected' || result === 'exists-original') {
+        console.error(`Error: claim failed (${result})`);
+        process.exit(1);
+    }
+    const { listPeers } = await import('../daemon/peers.js');
+    const peers = listPeers('approved').filter(p => listProjectsForPeer(p.id, [project]).length > 0);
+    for (const peer of peers) {
+        try {
+            await federationSend(peer.id, 'project.create', JSON.stringify({ projectId, projectName: project.name, creation }), 30000);
+        }
+        catch { /* best-effort */ }
+    }
+    console.log(`✓ Claimed ownership of '${projectId}' (legacy-claim). You are now root owner.`);
+}
+/**
+ * bd-hy3o: List the owners of a project.
+ */
+export function projectOwners(projectId) {
+    const project = getProject(projectId);
+    if (!project) {
+        console.error(`Error: Project '${projectId}' not found`);
+        process.exit(1);
+    }
+    if (!project.creation) {
+        console.log(`Project '${projectId}' has no ownership record. Run 'ogp project claim-ownership ${projectId}'.`);
+        return;
+    }
+    console.log(`Owners of '${projectId}':`);
+    console.log(`  • creator: ${project.creation.creatorKey.substring(0, 32)}…  [${project.creation.provenance}]`);
+    for (const g of project.ownerGrants ?? []) {
+        console.log(`  • ${g.grantee.substring(0, 32)}…  (granted by ${g.grantedBy.substring(0, 32)}…)`);
+    }
+    if (project.pendingGrants?.length) {
+        console.log(`  (${project.pendingGrants.length} pending grant(s) awaiting their root)`);
     }
 }
 //# sourceMappingURL=project.js.map

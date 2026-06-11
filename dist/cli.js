@@ -15,7 +15,7 @@ import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { installCompletion } from './cli/completion.js';
 import { showPolicies, configurePolicies, addTopic, removeTopic, resetPolicy, showActivity, clearActivity, setDefault, setLogging, setTopic, setPeerDefault } from './cli/agent-comms.js';
 import { registerNewIntent, listRegisteredIntents, removeIntent } from './cli/intent-registry.js';
-import { projectCreate, projectJoin, projectList, projectRemove, projectContribute, projectQuery, projectStatus, projectRequestJoin, projectSendContribution, projectQueryPeer, projectStatusPeer } from './cli/project.js';
+import { projectCreate, projectJoin, projectList, projectRemove, projectContribute, projectQuery, projectStatus, projectRequestJoin, projectSendContribution, projectQueryPeer, projectStatusPeer, projectAddOwner, projectClaimOwnership, projectOwners } from './cli/project.js';
 import { configCommand, whoami } from './cli/config.js';
 import { keychainCommand } from './cli/keychain.js';
 import { showContextHelp } from './shared/help.js';
@@ -41,9 +41,20 @@ function selectFramework(forFlag) {
     // If --for is provided, use it
     if (forFlag) {
         const metaConfig = loadMetaConfig();
-        // No frameworks configured
+        // No frameworks configured in the meta-registry. In server/container
+        // deployments the daemon is launched by setting OGP_HOME directly and the
+        // meta-registry (created by interactive `ogp setup`) is never populated —
+        // possibly because the daemon and CLI run under different $HOME values.
+        // If OGP_HOME is already set, honor it instead of hard-failing, so the CLI
+        // can still talk to the running daemon. See OGP_META_HOME for overriding
+        // the registry location.
         if (!metaConfig.frameworks || metaConfig.frameworks.length === 0) {
-            console.error('Error: No frameworks configured. Run "ogp setup" first.');
+            if (process.env.OGP_HOME) {
+                console.error(`Warning: --for ${forFlag} given but no frameworks are configured; ` +
+                    `using OGP_HOME=${process.env.OGP_HOME}.`);
+                return;
+            }
+            console.error('Error: No frameworks configured. Run "ogp setup" first, or set OGP_HOME.');
             process.exit(1);
         }
         // Resolve alias
@@ -412,7 +423,14 @@ program
     console.log(`  Check interval: ${heartbeatConfig.intervalMs / 1000}s`);
     console.log(`  Check timeout: ${heartbeatConfig.timeoutMs / 1000}s`);
     console.log(`  Max consecutive failures: ${heartbeatConfig.maxConsecutiveFailures}`);
-    console.log(`  Heartbeat status: ${heartbeatConfig.isRunning ? 'Running' : 'Stopped'}`);
+    // The heartbeat loop runs inside the long-lived daemon process and is started
+    // unconditionally at daemon boot (see startHeartbeat()). This `ogp status` command
+    // runs in a *separate*, short-lived CLI process where the heartbeat timer is always
+    // null, so heartbeatConfig.isRunning here reflects the CLI process, not the daemon —
+    // it would always read 'Stopped' even while the daemon's heartbeat is actively
+    // checking peers (bd-d1l). The authoritative cross-process signal is whether the
+    // daemon itself is running.
+    console.log(`  Heartbeat status: ${status.running ? 'Running' : 'Stopped'}`);
 });
 /**
  * Pad string to the right with spaces
@@ -428,14 +446,16 @@ federation
     .description('List all peers (use --for all to show all frameworks)')
     .option('-s, --status <status>', 'Filter by status (pending|approved|rejected)')
     .option('-t, --tag <tag>', 'Filter by tag')
+    .option('--json', 'Output machine-readable JSON')
     .action(async (options) => {
-    await federationList(options.status, options.tag);
+    await federationList(options.status, options.tag, options.json ?? false);
 });
 federation
     .command('status')
     .description('Show federation status and alias → public key mappings (use --for all for all frameworks)')
-    .action(async () => {
-    await federationStatus();
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (options) => {
+    await federationStatus(options.json ?? false);
 });
 federation
     .command('request')
@@ -444,23 +464,28 @@ federation
     .argument('[peer-id]', 'Peer ID (optional — auto-resolved from /.well-known/ogp)')
     .option('-a, --alias <name>', 'User-friendly alias for this peer (e.g., "big-papa")')
     .option('--petname <name>', 'Deprecated: use --alias instead')
+    .option('--json', 'Output machine-readable JSON')
     .action(async (peerUrl, peerId, options) => {
+    const json = options.json ?? false;
     // Handle backward compatibility: --petname maps to --alias with deprecation warning
     let alias = options.alias;
     if (options.petname) {
         if (!alias) {
-            console.warn('⚠️  --petname is deprecated. Use --alias instead.');
+            if (!json)
+                console.warn('⚠️  --petname is deprecated. Use --alias instead.');
             alias = options.petname;
         }
         else {
-            console.warn('⚠️  Both --alias and --petname provided. Using --alias.');
+            if (!json)
+                console.warn('⚠️  Both --alias and --petname provided. Using --alias.');
         }
     }
     // Auto-resolve peer ID from /.well-known/ogp if not provided
     if (!peerId) {
         try {
             const wellKnownUrl = `${peerUrl.replace(/\/$/, '')}/.well-known/ogp`;
-            console.log(`Resolving peer ID from ${wellKnownUrl}...`);
+            if (!json)
+                console.log(`Resolving peer ID from ${wellKnownUrl}...`);
             const res = await fetch(wellKnownUrl, { signal: AbortSignal.timeout(10000) });
             if (!res.ok)
                 throw new Error(`HTTP ${res.status}`);
@@ -468,15 +493,21 @@ federation
             if (!data.publicKey)
                 throw new Error('No publicKey in response');
             peerId = data.publicKey;
-            console.log(`✓ Resolved peer: ${data.displayName || 'Unknown'} (${peerId.slice(0, 16)}...)`);
+            if (!json)
+                console.log(`✓ Resolved peer: ${data.displayName || 'Unknown'} (${peerId.slice(0, 16)}...)`);
         }
         catch (err) {
-            console.error(`✗ Could not resolve peer ID from ${peerUrl}/.well-known/ogp: ${err.message}`);
-            console.error(`  Provide it manually: ogp federation request <peer-url> <peer-id>`);
+            if (json) {
+                console.log(JSON.stringify({ ok: false, peerUrl, status: 'failed', error: `could not resolve peer ID: ${err.message}` }));
+            }
+            else {
+                console.error(`✗ Could not resolve peer ID from ${peerUrl}/.well-known/ogp: ${err.message}`);
+                console.error(`  Provide it manually: ogp federation request <peer-url> <peer-id>`);
+            }
             process.exit(1);
         }
     }
-    await federationRequest(peerUrl, peerId, alias);
+    await federationRequest(peerUrl, peerId, alias, json);
 });
 federation
     .command('connect')
@@ -588,20 +619,37 @@ federation
     .command('ping')
     .description('Ping a peer gateway to test connectivity')
     .argument('<peer-url>', 'Peer gateway URL')
-    .action(async (peerUrl) => {
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (peerUrl, options) => {
+    const json = options.json ?? false;
     try {
         const res = await fetch(`${peerUrl}/federation/ping`);
         if (res.ok) {
             const data = await res.json();
-            console.log(`✓ Pong from ${data.displayName} (${data.gatewayUrl})`);
-            console.log(`  Time: ${data.timestamp}`);
+            if (json) {
+                console.log(JSON.stringify({ ok: true, peerUrl, status: res.status, displayName: data.displayName, gatewayUrl: data.gatewayUrl, timestamp: data.timestamp }, null, 2));
+            }
+            else {
+                console.log(`✓ Pong from ${data.displayName} (${data.gatewayUrl})`);
+                console.log(`  Time: ${data.timestamp}`);
+            }
         }
         else {
-            console.error(`✗ Ping failed: ${res.status} ${res.statusText}`);
+            if (json) {
+                console.log(JSON.stringify({ ok: false, peerUrl, status: res.status, error: res.statusText }, null, 2));
+            }
+            else {
+                console.error(`✗ Ping failed: ${res.status} ${res.statusText}`);
+            }
         }
     }
     catch (err) {
-        console.error(`✗ Ping failed:`, err);
+        if (json) {
+            console.log(JSON.stringify({ ok: false, peerUrl, error: err instanceof Error ? err.message : String(err) }, null, 2));
+        }
+        else {
+            console.error(`✗ Ping failed:`, err);
+        }
     }
 });
 federation
@@ -695,15 +743,38 @@ program
 program
     .command('whoami')
     .description('Show current identity and configuration')
-    .action(() => {
-    whoami();
+    .option('--json', 'Output machine-readable JSON')
+    .action((options) => {
+    whoami(options.json ?? false);
 });
 program.addCommand(configCommand);
 program.addCommand(keychainCommand);
 // Agent-comms configuration commands
 const agentComms = program
     .command('agent-comms')
-    .description('Configure agent-to-agent communication policies');
+    .description('Configure agent-to-agent communication policies (use "agent-comms send" to send a message)');
+// Discoverability alias for sending: the send path historically lives at
+// "ogp federation agent". Mirror it here so "ogp agent-comms send" works too.
+agentComms
+    .command('send')
+    .description('Send an agent-comms message to a peer (alias of "ogp federation agent")')
+    .argument('<peer-id>', 'Peer ID')
+    .argument('<topic>', 'Topic (e.g., memory-management)')
+    .argument('<message>', 'Message text')
+    .option('-p, --priority <level>', 'Priority (low|normal|high)', 'normal')
+    .option('-c, --conversation <id>', 'Conversation ID for threading')
+    .option('-w, --wait', 'Wait for reply')
+    .option('-t, --timeout <ms>', 'Reply timeout in milliseconds', '30000')
+    .option('--to-agent <persona>', 'Target a specific persona on the peer (requires multi-agent-personas capability)')
+    .action(async (peerId, topic, message, options) => {
+    await federationSendAgentComms(peerId, topic, message, {
+        priority: options.priority,
+        conversationId: options.conversation,
+        waitForReply: options.wait,
+        replyTimeout: parseInt(options.timeout, 10),
+        toAgent: options.toAgent
+    });
+});
 agentComms
     .command('interview')
     .description('Run the delegated-authority and human-delivery interview for the active framework')
@@ -782,12 +853,13 @@ agentComms
     .argument('[peer-id]', 'Optional peer ID to filter')
     .option('--last <n>', 'Show last N entries', '50')
     .option('--clear', 'Clear the activity log')
+    .option('--json', 'Output structured activity entries as JSON')
     .action((peerId, options) => {
     if (options.clear) {
         clearActivity();
     }
     else {
-        showActivity(peerId, parseInt(options.last, 10));
+        showActivity(peerId, parseInt(options.last, 10), options.json);
     }
 });
 agentComms
@@ -898,11 +970,13 @@ project
     .option('--author <id>', 'Filter by author')
     .option('--search <text>', 'Search by text content')
     .option('--limit <n>', 'Maximum results to return', '20')
+    .option('--json', 'Output machine-readable JSON (includes contribution ids + ISO timestamps)')
     .action(async (projectId, options) => {
     const queryOptions = {
         ...options,
         entryType: options.type || options.topic, // --type takes precedence; --topic remains a legacy alias
-        limit: parseInt(options.limit, 10)
+        limit: parseInt(options.limit, 10),
+        json: options.json ?? false
     };
     await projectQuery(projectId, queryOptions);
 });
@@ -945,13 +1019,15 @@ project
     .option('--topic <name>', 'Filter by entry type (alias for --type)')
     .option('--author <id>', 'Filter by author')
     .option('--limit <n>', 'Maximum results to return', '20')
-    .option('--timeout <ms>', 'Response timeout in milliseconds', '10000')
+    .option('--timeout <ms>', 'Response timeout in milliseconds', '30000')
+    .option('--json', 'Output machine-readable JSON (includes contribution ids + ISO timestamps)')
     .action(async (peerId, projectId, options) => {
     const queryOptions = {
         ...options,
         entryType: options.type || options.topic, // --type takes precedence; --topic remains a legacy alias
         limit: parseInt(options.limit, 10),
-        timeout: parseInt(options.timeout, 10)
+        timeout: parseInt(options.timeout, 10),
+        json: options.json ?? false
     };
     await projectQueryPeer(peerId, projectId, queryOptions);
 });
@@ -987,6 +1063,28 @@ project
     }
     deleteProject(projectId);
     console.log(`✓ Deleted project '${proj.name}' (${projectId})`);
+});
+project
+    .command('add-owner')
+    .description('Grant ownership of a project to a peer key (owners only)')
+    .argument('<project-id>', 'Project ID')
+    .argument('<grantee-key>', 'Public key of the new owner')
+    .action(async (projectId, granteeKey) => {
+    await projectAddOwner(projectId, granteeKey);
+});
+project
+    .command('claim-ownership')
+    .description('Claim ownership of a pre-existing project (members only)')
+    .argument('<project-id>', 'Project ID')
+    .action(async (projectId) => {
+    await projectClaimOwnership(projectId);
+});
+project
+    .command('owners')
+    .description('List the owners of a project')
+    .argument('<project-id>', 'Project ID')
+    .action((projectId) => {
+    projectOwners(projectId);
 });
 // Completion commands
 const completion = program

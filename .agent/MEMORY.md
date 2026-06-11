@@ -52,6 +52,7 @@
 - Federation message routing debugging between Apollo@Hermes and Junior@OpenClaw (Apr 8, 2026)
 - Exposed token rotation: gateway auth token, hooks token, OGP daemon config (Apr 11, 2026)
 - Git history cleanup to remove exposed tokens from CURRENT_WORK.md
+- _2026-05-08_: First live remote multi-persona routing proof recorded: `Cosmo` sent a persona-targeted OGP message to David's `atlas` persona over the existing federation and Atlas acknowledged receipt. This is the first confirmed real-gateway evidence in this repo that `--to-agent` reached a non-primary advertised persona.
 
 ## Decisions
 
@@ -67,3 +68,8 @@ _2026-04-15_: Agent name chosen as "Relay" — fits the federation/message-routi
 - OGP convergence mentioned in P-HERMES-04: both OpenClaw and Hermes converging on SKILL.md format + OGP compatibility
 - Active build phase — code wins over docs when they conflict, file issues on GitHub
 - Optimizes for: speed > correctness > cost (per USER.md)
+
+## Artifacts
+
+- _2026-04-30_: Shareable silent OGP overview demo video generated at `artifacts/ogp-overview-video/ogp-overview-demo.mp4` (63.8s, 1920x1080, H.264). Supporting files: `artifacts/ogp-overview-video/storyboard.md`, `artifacts/ogp-overview-video/narration.txt`, `artifacts/ogp-overview-video/slides/`, renderer at `scripts/render-ogp-overview-video.mjs`. Narrative: BGP-style signed scoped federation for AI gateways, covering discovery/approval, trust boundary, scope grants, agent-comms, project intents, multi-framework support, and multi-agent personas.
+- _2026-04-30_: Animated cut generated at `artifacts/ogp-overview-video/ogp-overview-demo-animated.mp4` (62.6s, 1920x1080, H.264). Renderer now uses subtle motion on each slide plus directional `xfade` transitions instead of a raw slide concat.

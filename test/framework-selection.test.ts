@@ -35,6 +35,11 @@ describe('framework-selection', () => {
     // If --for is provided, use it
     if (forFlag) {
       if (!config.frameworks || config.frameworks.length === 0) {
+        // Graceful degradation: honor a pre-set OGP_HOME (server/container
+        // deployments where the meta-registry was never populated).
+        if (process.env.OGP_HOME) {
+          return;
+        }
         throw new Error('No frameworks configured');
       }
 
@@ -186,6 +191,20 @@ describe('framework-selection', () => {
       };
 
       expect(() => selectFramework('openclaw', config)).toThrow('No frameworks configured');
+    });
+
+    it('should honor pre-set OGP_HOME when --for given but no frameworks configured', () => {
+      // Server/container case: daemon launched with OGP_HOME set directly, the
+      // meta-registry was never populated by `ogp setup`. --for must not crash.
+      process.env.OGP_HOME = '/home/node/.openclaw/.ogp';
+
+      const config: MetaConfig = {
+        version: '1.0.0',
+        frameworks: [],
+      };
+
+      expect(() => selectFramework('openclaw', config)).not.toThrow();
+      expect(process.env.OGP_HOME).toBe('/home/node/.openclaw/.ogp');
     });
   });
 

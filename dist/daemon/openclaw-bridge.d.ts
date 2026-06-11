@@ -21,6 +21,12 @@ type HookDispatchOptions = {
      */
     agentId?: string;
 };
+interface OpenClawHooksConfigSnapshot {
+    token?: string;
+    allowRequestSessionKey: boolean;
+    allowedSessionKeyPrefixes?: string[];
+}
+export declare function parseOpenClawHooksConfigText(configText: string): OpenClawHooksConfigSnapshot | undefined;
 /**
  * Connect bridge (no-op for request-based implementation)
  */

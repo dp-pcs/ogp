@@ -95,14 +95,14 @@ _ogp() {
         federation\:"Manage federation"
         agent-comms\:"Configure agent-to-agent messaging"
         config\:"Manage configuration"
-        expose\:"Expose daemon via tunnel"
-        expose-stop\:"Stop background tunnel"
+        tunnel\:"Inspect and manage cloudflared / ngrok tunnels"
         shutdown\:"Stop daemon and tunnel"
         install\:"Install LaunchAgent (macOS)"
         uninstall\:"Uninstall LaunchAgent (macOS)"
+        keychain\:"Manage the macOS keychain used for private-key storage"
         intent\:"Manage custom intents"
         project\:"Manage project contexts"
-        completion\:"Install completion scripts"
+        completion\:"Manage shell completion"
       ))'
       ;;
     args)
@@ -125,8 +125,11 @@ _ogp() {
         completion)
           _ogp_completion
           ;;
-        expose)
-          _ogp_expose
+        tunnel)
+          _ogp_tunnel
+          ;;
+        keychain)
+          _ogp_keychain
           ;;
       esac
       ;;
@@ -235,6 +238,7 @@ _ogp_agent_comms() {
 
   _arguments \
     '1:subcommand:((
+      send\:"Send an agent-comms message to a peer (alias of federation agent)"
       policies\:"Show response policies"
       configure\:"Configure response policies"
       add-topic\:"Add topic to peer response policy"
@@ -318,6 +322,7 @@ _ogp_config() {
       frameworks\:"Show all detected frameworks"
       health-check\:"Manage health check configuration"
       show-identity\:"Show current identity configuration"
+      list-agents\:"List local personas for the active framework"
       set-identity\:"Update identity information"
       set-tags\:"Set tags (replaces existing)"
       add-tag\:"Add a tag"
@@ -428,6 +433,9 @@ _ogp_project() {
       query-peer\:"Query peer project contributions"
       status-peer\:"Request project status from peer"
       delete\:"Delete local project and all contributions"
+      add-owner\:"Grant ownership to a peer key (owners only)"
+      claim-ownership\:"Claim ownership of a pre-existing project (members only)"
+      owners\:"List the owners of a project"
     ))' \
     '*::arg:->args'
 
@@ -512,10 +520,24 @@ _ogp_completion() {
   ))'
 }
 
-_ogp_expose() {
+_ogp_tunnel() {
   _arguments \
-    '(-m --method)'{-m,--method}'[Tunnel method]:method:(cloudflared ngrok)' \
-    '(-b --background)'{-b,--background}'[Run in background]'
+    '1:subcommand:((
+      list\:"List running tunnels and reconcile against gatewayUrl"
+      start\:"Start a cloudflared or ngrok tunnel"
+      stop\:"Stop a running tunnel"
+    ))' \
+    '*::arg:->args'
+}
+
+_ogp_keychain() {
+  _arguments \
+    '1:subcommand:((
+      init\:"Initialize the dedicated OGP keychain"
+      unlock\:"Unlock the OGP keychain"
+      lock\:"Lock the OGP keychain"
+      status\:"Show keychain status"
+    ))'
 }
 
 _ogp

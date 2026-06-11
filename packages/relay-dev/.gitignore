@@ -1,0 +1,4 @@
+# relay-dev is a non-publishing dev tool — build artifacts not tracked
+dist/
+node_modules/
+package-lock.json

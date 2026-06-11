@@ -212,3 +212,82 @@ describe('rendezvous verify helper compatibility', () => {
     expect(rendezvousVerify({}, 'pk').reason).toBe('missing-signature');
   });
 });
+
+/**
+ * bd-b7em Phase 1: transport descriptor carried inside the signed registration.
+ * The descriptor must be parsed ONLY from the signature-verified payload, so a
+ * relay/iroh transport can never be injected by an unsigned sibling field.
+ */
+describe('transport descriptor (bd-b7em)', () => {
+  const realDeps = (env: { payloadStr?: string; signature?: string }, pk: string) =>
+    rendezvousVerify(env, pk);
+
+  it('absent transport ⇒ direct (no descriptor on result)', () => {
+    const kp = generateKeyPair();
+    const env = signCanonical({ pubkey: kp.publicKey, port: 18790 }, kp.privateKey);
+    const result = validateSignedRegistration({ payloadStr: env.payloadStr, signature: env.signature }, realDeps);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.transport).toBeUndefined();
+  });
+
+  it('stores a signed relay descriptor', () => {
+    const kp = generateKeyPair();
+    const env = signCanonical(
+      { pubkey: kp.publicKey, port: 18790, transport: { transport: 'relay', relayUrl: 'wss://relay.test/relay' } },
+      kp.privateKey
+    );
+    const result = validateSignedRegistration({ payloadStr: env.payloadStr, signature: env.signature }, realDeps);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.transport).toEqual({ transport: 'relay', relayUrl: 'wss://relay.test/relay' });
+  });
+
+  it('stores a signed iroh descriptor (field carried, not consumed in Phase 1)', () => {
+    const kp = generateKeyPair();
+    const env = signCanonical(
+      { pubkey: kp.publicKey, port: 18790, transport: { transport: 'iroh', nodeId: 'node-abc', relayUrl: 'https://iroh.test' } },
+      kp.privateKey
+    );
+    const result = validateSignedRegistration({ payloadStr: env.payloadStr, signature: env.signature }, realDeps);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.transport).toEqual({ transport: 'iroh', nodeId: 'node-abc', relayUrl: 'https://iroh.test' });
+  });
+
+  it('rejects relay descriptor missing relayUrl with 400', () => {
+    const kp = generateKeyPair();
+    const env = signCanonical(
+      { pubkey: kp.publicKey, port: 18790, transport: { transport: 'relay' } },
+      kp.privateKey
+    );
+    const result = validateSignedRegistration({ payloadStr: env.payloadStr, signature: env.signature }, realDeps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(400);
+      expect(result.error).toMatch(/relayUrl is required/);
+    }
+  });
+
+  it('rejects an unknown transport mode with 400', () => {
+    const kp = generateKeyPair();
+    const env = signCanonical(
+      { pubkey: kp.publicKey, port: 18790, transport: { transport: 'carrier-pigeon' } },
+      kp.privateKey
+    );
+    const result = validateSignedRegistration({ payloadStr: env.payloadStr, signature: env.signature }, realDeps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(400);
+  });
+
+  it('TRUST: a transport field OUTSIDE the signed payload is ignored', () => {
+    // Sign a plain direct registration (no transport in the signed bytes)...
+    const kp = generateKeyPair();
+    const env = signCanonical({ pubkey: kp.publicKey, port: 18790 }, kp.privateKey);
+    // ...then an attacker bolts a relay transport onto the OUTER body. Since the
+    // validator only parses the verified payloadStr, this must be ignored.
+    const result = validateSignedRegistration(
+      { payloadStr: env.payloadStr, signature: env.signature, transport: { transport: 'relay', relayUrl: 'wss://evil.test/relay' } } as any,
+      realDeps
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.transport).toBeUndefined(); // attacker's transport not honored
+  });
+});
