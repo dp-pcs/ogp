@@ -189,7 +189,9 @@ function SettingRow({ label, sub, children }) {
 }
 
 function SettingsView({ ctx }) {
-  const { framework, identity, daemon, actions } = ctx;
+  const { framework, identity, daemon, actions, transport, busy } = ctx;
+  const t = transport || { mode: "direct", relayUrl: null };
+  const mode = t.mode || "direct";
   return (
     <PageBody>
       <PageHeader title="Settings" sub={`Configuration for ${framework.displayName}`} />
@@ -222,6 +224,44 @@ function SettingsView({ ctx }) {
           <SettingRow label="Version"><Mono>{daemon.version ? `v${daemon.version}` : "—"}</Mono></SettingRow>
           <SettingRow label="Launch at login" sub="Start daemon when you log in"><Switch checked={true} onChange={() => {}} /></SettingRow>
           <SettingRow label="Poll interval" sub="How often the companion refreshes"><span style={{ fontWeight: 600, fontSize: 13.5, color: "var(--text)" }}>5s</span></SettingRow>
+        </Card>
+
+        <Card pad={20} style={{ gridColumn: "1 / -1" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 8 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 11, background: "var(--accent-soft)", color: "var(--accent)", display: "grid", placeItems: "center" }}><Icon name="globe" size={20} /></div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>Transport</div>
+              <div style={{ fontSize: 12, color: "var(--text-faint)" }}>How peers reach this daemon</div>
+            </div>
+          </div>
+          <SettingRow label="Mode" sub={mode === "direct" ? "Direct connection (needs a public URL or tunnel)" : "Relay — reachable with no inbound port or tunnel"}>
+            <Segmented
+              value={mode === "iroh" ? "relay" : mode}
+              size="sm"
+              onChange={(v) => { if (v !== mode) actions.setTransport?.(v); }}
+              options={[
+                { value: "direct", label: "Direct", icon: "globe" },
+                { value: "relay", label: "Relay", icon: "tunnel" },
+              ]}
+            />
+          </SettingRow>
+          {mode === "relay" && (
+            <SettingRow label="Relay URL" sub="Auto-derived from rendezvous if unset">
+              <Mono>{t.relayUrl ? t.relayUrl.replace(/^wss?:\/\//, "") : "wss://<rendezvous>/relay (default)"}</Mono>
+            </SettingRow>
+          )}
+          {mode === "relay" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 11, marginTop: 12, padding: "11px 13px", borderRadius: 10, background: "var(--warn-soft)", border: "1px solid color-mix(in srgb, var(--warn) 30%, var(--border))" }}>
+              <Icon name="alertTriangle" size={17} style={{ color: "var(--warn)", flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text-muted)" }}>
+                Relay takes effect when the daemon (re)starts. Restart now to apply.
+              </div>
+              <Button variant="solid" tone="warn" size="sm" icon="cpu"
+                onClick={() => actions.restartDaemon?.()} disabled={!daemon.running || busy?.daemon}>
+                {busy?.daemon ? "Restarting…" : daemon.running ? "Restart daemon" : "Daemon stopped"}
+              </Button>
+            </div>
+          )}
         </Card>
 
         <Card pad={20} style={{ gridColumn: "1 / -1" }}>

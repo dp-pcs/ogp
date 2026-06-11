@@ -30,6 +30,7 @@ function initStore() {
       tunnel: clone(D.TUNNELS[fw.id]),
       peers: clone(D.PEERS[fw.id]),
       activity: clone(D.ACTIVITY[fw.id]),
+      transport: clone((D.TRANSPORT && D.TRANSPORT[fw.id]) || { mode: "direct", relayUrl: null, irohRelayUrl: null }),
     };
   }
   return s;
@@ -107,6 +108,7 @@ function App() {
             tunnel: snap.tunnels[fwk.id] || { active: null, options: [] },
             peers: snap.peers[fwk.id] || [],
             activity: snap.activity[fwk.id] || [],
+            transport: snap.transport?.[fwk.id] || { mode: "direct", relayUrl: null, irohRelayUrl: null },
           };
         }
         return s;
@@ -296,6 +298,35 @@ function App() {
       showToast("Identity updated", { icon: "user", tone: "ok" });
       return Promise.resolve();
     },
+    // bd-b7em: set transport mode (+ relay URL). Daemon restart applies it; the
+    // Settings UI shows a Restart button rather than auto-bouncing the gateway.
+    setTransport(mode, relayUrl) {
+      if (LIVE) {
+        return Promise.resolve(BK.setTransport(fwId, mode, relayUrl))
+          .then(() => hydrate())
+          .then(() => showToast(`Transport set to ${mode}`, { icon: "cpu", tone: "ok" }))
+          .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }));
+      }
+      patch((s) => { s.transport = { ...(s.transport || {}), mode, relayUrl: relayUrl || s.transport?.relayUrl || null }; });
+      showToast(`Transport set to ${mode}`, { icon: "cpu", tone: "ok" });
+      return Promise.resolve();
+    },
+    // Restart the daemon (stop→start) so a transport change takes effect without
+    // leaving the app. Used by the Settings transport row's "Restart" button.
+    restartDaemon() {
+      if (LIVE) {
+        setBusy((b) => ({ ...b, daemon: true }));
+        showToast("Restarting daemon…", { icon: "cpu", tone: "ok" });
+        return Promise.resolve(BK.toggleDaemon(fwId, false))
+          .then(() => BK.toggleDaemon(fwId, true))
+          .then(() => hydrate())
+          .then(() => showToast("Daemon restarted", { icon: "cpu", tone: "ok" }))
+          .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }))
+          .finally(() => setBusy((b) => ({ ...b, daemon: false })));
+      }
+      showToast("Daemon restarted", { icon: "cpu", tone: "ok" });
+      return Promise.resolve();
+    },
   };
 
   function refresh() {
@@ -307,7 +338,7 @@ function App() {
 
   const ctx = {
     framework: fw, identity: fw.identity, theme: t.theme,
-    daemon: st.daemon, tunnel: st.tunnel, peers: st.peers, activity: st.activity,
+    daemon: st.daemon, tunnel: st.tunnel, peers: st.peers, activity: st.activity, transport: st.transport,
     gatewayUp, busy, actions, setRoute, setSelected, selectedPeerId,
     peerStyle: t.peerStyle, setPeerStyle: (v) => setTweak("peerStyle", v),
     tunnelStyle: t.tunnelStyle, openWizard: () => setWizardOpen(true),
