@@ -91,6 +91,15 @@ async fn ogp_set_identity(
 }
 
 #[tauri::command]
+async fn ogp_set_transport(
+    framework: String,
+    mode: String,
+    relay_url: Option<String>,
+) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::set_transport(&framework, &mode, relay_url)).await
+}
+
+#[tauri::command]
 async fn ogp_refresh_frameworks() -> Result<Value, ogp::OgpError> {
     ogp::clear_framework_cache();
     Ok(serde_json::json!({ "ok": true }))
@@ -111,6 +120,7 @@ pub fn run() {
             ogp_set_policy,
             ogp_open_terminal,
             ogp_set_identity,
+            ogp_set_transport,
             ogp_refresh_frameworks,
         ])
         .run(tauri::generate_context!())

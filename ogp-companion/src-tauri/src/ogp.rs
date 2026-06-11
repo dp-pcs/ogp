@@ -174,6 +174,7 @@ pub fn snapshot() -> Result<Value, OgpError> {
     let mut tunnels = Map::new();
     let mut daemon = Map::new();
     let mut activity = Map::new();
+    let mut transport = Map::new();
 
     for fw in &frameworks {
         let id = fw.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -205,6 +206,12 @@ pub fn snapshot() -> Result<Value, OgpError> {
         let araw = run_json(fwref, &["agent-comms", "activity", "--json", "--last", "100"])
             .unwrap_or(json!([]));
         activity.insert(id.clone(), map_activity(&araw));
+
+        // transport: config transport show --json → { mode, relayUrl, irohRelayUrl }.
+        // Graceful fallback to direct if the installed CLI predates --json.
+        let tmode = transport_show(&id)
+            .unwrap_or_else(|_| json!({ "mode": "direct", "relayUrl": Value::Null, "irohRelayUrl": Value::Null }));
+        transport.insert(id.clone(), tmode);
     }
 
     Ok(json!({
@@ -213,6 +220,7 @@ pub fn snapshot() -> Result<Value, OgpError> {
         "tunnels": tunnels,
         "daemon": daemon,
         "activity": activity,
+        "transport": transport,
     }))
 }
 
@@ -531,6 +539,25 @@ pub fn set_identity(
     let argrefs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     run(Some(framework), &argrefs)?;
     clear_framework_cache();
+    Ok(json!({ "ok": true }))
+}
+
+/// Read the current transport config for a framework (bd-b7em Phase 2).
+/// Returns { mode, relayUrl, irohRelayUrl }. Falls back to direct if the CLI is
+/// older than 0.10.1 (no `--json`) so the UI degrades gracefully.
+pub fn transport_show(framework: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["config", "transport", "show", "--json"])
+        .or_else(|_| Ok(json!({ "mode": "direct", "relayUrl": Value::Null, "irohRelayUrl": Value::Null })))
+}
+
+/// Set the transport mode (and optionally the relay URL) for a framework.
+/// Mirrors `ogp config transport set-mode <mode>` (+ `set-relay-url <url>`).
+/// The daemon must be restarted for relay to take effect — the UI surfaces that.
+pub fn set_transport(framework: &str, mode: &str, relay_url: Option<String>) -> Result<Value, OgpError> {
+    run(Some(framework), &["config", "transport", "set-mode", mode])?;
+    if let Some(url) = relay_url.filter(|s| !s.is_empty()) {
+        run(Some(framework), &["config", "transport", "set-relay-url", &url])?;
+    }
     Ok(json!({ "ok": true }))
 }
 

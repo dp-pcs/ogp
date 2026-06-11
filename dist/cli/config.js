@@ -410,10 +410,19 @@ function setTags(tags) {
  * reachability that doesn't require a tunnel.
  */
 const VALID_TRANSPORT_MODES = ['direct', 'relay', 'iroh'];
-function showTransport() {
+function showTransport(opts = {}) {
     const config = requireConfig();
     const t = config.transport;
     const mode = t?.mode ?? 'direct';
+    if (opts.json) {
+        // Structured read for programmatic callers (e.g. the Companion app).
+        console.log(JSON.stringify({
+            mode,
+            relayUrl: t?.relay?.url ?? null,
+            irohRelayUrl: t?.iroh?.relayUrl ?? null,
+        }));
+        return;
+    }
     console.log(`\nTransport mode: ${mode}${mode === 'direct' ? ' (default)' : ''}`);
     if (t?.relay?.url)
         console.log(`  relay url: ${t.relay.url}`);
@@ -630,8 +639,9 @@ const transportCommand = configCommand
 transportCommand
     .command('show', { isDefault: true })
     .description('Show the current transport configuration')
-    .action(() => {
-    showTransport();
+    .option('--json', 'Output as JSON ({ mode, relayUrl, irohRelayUrl })')
+    .action((opts) => {
+    showTransport({ json: !!opts.json });
 });
 transportCommand
     .command('set-mode')

@@ -88,6 +88,7 @@ async function fetchSnapshot() {
     tunnels: snap.tunnels || {},
     daemon: snap.daemon || {},
     activity: snap.activity || {},
+    transport: snap.transport || {},
   };
 }
 
@@ -131,6 +132,10 @@ window.OGP_BACKEND = {
       humanName: fields.human || null,
       organization: fields.org || null,
     }),
+  // Set transport mode (direct | relay | iroh) + optional relay URL. Daemon must
+  // be restarted for relay to take effect — the Settings UI surfaces a button.
+  setTransport: (fw, mode, relayUrl) =>
+    invoke("ogp_set_transport", { framework: fw, mode, relayUrl: relayUrl || null }),
   // Clear the Rust framework-discovery cache (identity lives there).
   refreshFrameworks: () => invoke("ogp_refresh_frameworks"),
 };

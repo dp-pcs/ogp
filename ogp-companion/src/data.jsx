@@ -166,4 +166,11 @@ const ACTIVITY = {
 
 function relAgo(ms) { return new Date(Date.now() - ms).toISOString(); }
 
-window.OGP_DATA = { FRAMEWORKS, PEERS, TUNNELS, DAEMON, ACTIVITY, ALL_INTENTS, scopeBundle };
+// ── Transport mode (bd-b7em) ──────────────────────────────────────
+// How this daemon is reached: direct (default) | relay | iroh.
+const TRANSPORT = {
+  openclaw: { mode: "direct", relayUrl: null, irohRelayUrl: null },
+  hermes:   { mode: "direct", relayUrl: null, irohRelayUrl: null },
+};
+
+window.OGP_DATA = { FRAMEWORKS, PEERS, TUNNELS, DAEMON, ACTIVITY, TRANSPORT, ALL_INTENTS, scopeBundle };
