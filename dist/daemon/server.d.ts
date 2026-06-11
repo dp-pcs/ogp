@@ -131,6 +131,7 @@ interface ShutdownDeps {
     stopDoormanCleanup: () => void;
     stopReplyCleanup: () => void;
     stopRendezvous: () => Promise<void>;
+    stopRelayClient: () => Promise<void>;
     stopHeartbeat: () => void;
     getServer: () => {
         close: (cb: (error?: Error) => void) => void;

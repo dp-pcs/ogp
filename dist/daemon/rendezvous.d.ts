@@ -32,6 +32,12 @@ type TransportDescriptor = {
  */
 export declare function buildTransportDescriptor(transport: TransportConfig | undefined, rendezvousUrl: string, irohNodeId?: string): TransportDescriptor | undefined;
 /**
+ * Resolve the relay WebSocket URL for THIS daemon's own receiver socket
+ * (bd-b7em Phase 2). Uses an explicitly configured relay.url, else derives
+ * wss://<rendezvous-host>/relay. Returns undefined when relay can't be resolved.
+ */
+export declare function resolveOwnRelayUrl(transport: TransportConfig | undefined, rendezvousUrl: string | undefined): string | undefined;
+/**
  * Start rendezvous registration and heartbeat.
  * Call this from server.ts after the daemon begins listening.
  */
