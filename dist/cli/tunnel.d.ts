@@ -65,7 +65,16 @@ export declare function tunnelList(tool?: TunnelTool, json?: boolean): Promise<v
  * tunnel started twice cannot be detected — cloudflared exposes no local agent to query.
  */
 export declare function tunnelStart(tool: TunnelTool, background?: boolean): Promise<void>;
+/**
+ * Outcome of a stop attempt. `no-managed-tunnel` is the bd-iakg case: ogp has no
+ * tracked tunnel to stop (the gateway may be served by an externally-started
+ * tunnel ogp can't manage). Callers — including the Companion — must be able to
+ * distinguish this from an actual stop, instead of treating it as success.
+ */
+export type TunnelStopStatus = 'stopped' | 'no-managed-tunnel' | 'already-stopped' | 'error';
 /** Stop the ogp-managed tunnel (PID file). Does not affect externally-started tunnels. */
-export declare function tunnelStop(): void;
+export declare function tunnelStop(opts?: {
+    json?: boolean;
+}): TunnelStopStatus;
 export declare const tunnelCommand: Command;
 //# sourceMappingURL=tunnel.d.ts.map

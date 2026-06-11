@@ -387,38 +387,55 @@ export async function tunnelStart(tool: TunnelTool, background = false): Promise
   spawnTunnel(tool, config.daemonPort, background);
 }
 
+/**
+ * Outcome of a stop attempt. `no-managed-tunnel` is the bd-iakg case: ogp has no
+ * tracked tunnel to stop (the gateway may be served by an externally-started
+ * tunnel ogp can't manage). Callers — including the Companion — must be able to
+ * distinguish this from an actual stop, instead of treating it as success.
+ */
+export type TunnelStopStatus = 'stopped' | 'no-managed-tunnel' | 'already-stopped' | 'error';
+
 /** Stop the ogp-managed tunnel (PID file). Does not affect externally-started tunnels. */
-export function tunnelStop(): void {
+export function tunnelStop(opts: { json?: boolean } = {}): TunnelStopStatus {
+  const emit = (status: TunnelStopStatus, message: string, stream: 'log' | 'error' = 'log') => {
+    if (opts.json) {
+      console.log(JSON.stringify({ stopped: status === 'stopped', status, message }));
+    } else if (stream === 'error') {
+      console.error(message);
+    } else {
+      console.log(message);
+    }
+    return status;
+  };
+
   const pidFile = getTunnelPidFile();
   if (!fs.existsSync(pidFile)) {
-    console.log('No ogp-managed tunnel is running.');
-    console.log('(Tunnels started outside ogp are not tracked here — stop them with their own CLI.)');
-    return;
+    return emit(
+      'no-managed-tunnel',
+      'No ogp-managed tunnel is running.\n(Tunnels started outside ogp are not tracked here — stop them with their own CLI.)'
+    );
   }
   try {
     const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
     if (Number.isNaN(pid)) {
-      console.error('Invalid PID in tunnel.pid file');
       fs.unlinkSync(pidFile);
-      return;
+      return emit('error', 'Invalid PID in tunnel.pid file', 'error');
     }
     try {
       process.kill(pid, 0);
     } catch {
-      console.log('Tunnel is not running (stale PID file)');
       fs.unlinkSync(pidFile);
-      return;
+      return emit('already-stopped', 'Tunnel is not running (stale PID file)');
     }
     process.kill(pid, 'SIGTERM');
     fs.unlinkSync(pidFile);
-    console.log('Tunnel stopped');
+    return emit('stopped', 'Tunnel stopped');
   } catch (error: any) {
     if (error?.code === 'ESRCH') {
-      console.log('Tunnel already stopped (process exited between checks)');
       try { fs.unlinkSync(pidFile); } catch { /* already gone */ }
-    } else {
-      console.error('Failed to stop tunnel:', error);
+      return emit('already-stopped', 'Tunnel already stopped (process exited between checks)');
     }
+    return emit('error', `Failed to stop tunnel: ${error?.message ?? error}`, 'error');
   }
 }
 
@@ -457,6 +474,12 @@ tunnelCommand
 tunnelCommand
   .command('stop')
   .description('Stop the ogp-managed tunnel')
-  .action(() => {
-    tunnelStop();
+  .option('--json', 'Output machine-readable JSON ({ stopped, status, message })')
+  .action((options: { json?: boolean }) => {
+    const status = tunnelStop({ json: options.json });
+    // Non-zero exit when nothing was actually stopped, so callers (e.g. the
+    // Companion) don't misread a no-op as success (bd-iakg).
+    if (status === 'no-managed-tunnel' || status === 'error') {
+      process.exitCode = 2;
+    }
   });

@@ -204,7 +204,16 @@ function App() {
       setBusy((b) => ({ ...b, tunnel: true }));
       if (LIVE) {
         Promise.resolve(BK.stopTunnel(fwId))
-          .then(() => hydrate())
+          .then((res) => {
+            // bd-iakg: report the real outcome. A no-op (gateway served by an
+            // external tunnel ogp can't manage) must NOT show as success.
+            if (res && res.ok === false) {
+              showToast(res.message || "No OGP-managed tunnel to stop", { icon: "alertTriangle", tone: "warn" });
+            } else {
+              showToast("Tunnel stopped", { icon: "globeOff", tone: "danger" });
+            }
+            return hydrate();
+          })
           .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }))
           .finally(() => setBusy((b) => ({ ...b, tunnel: false, startingId: null })));
         showToast("Stopping tunnel…", { icon: "globeOff", tone: "danger" });

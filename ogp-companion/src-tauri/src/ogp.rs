@@ -187,10 +187,12 @@ pub fn snapshot() -> Result<Value, OgpError> {
         merge_comms_policy(&mut plist, state_dir_for_policy);
         peers.insert(id.clone(), plist);
 
-        // daemon: cheap liveness via the state dir's daemon.pid (no subprocess).
+        // daemon: cheap liveness via the state dir's daemon.pid, with a port-probe
+        // fallback when the pid file is absent (bd-kl7w).
         let port = fw.get("daemonPort").cloned().unwrap_or(json!(18790));
+        let port_num = port.as_u64().and_then(|n| u16::try_from(n).ok());
         let state_dir = fw.get("stateDir").and_then(|v| v.as_str());
-        let (running, pid) = daemon_state(state_dir);
+        let (running, pid) = daemon_state(state_dir, port_num);
         daemon.insert(
             id.clone(),
             json!({ "running": running, "port": port, "version": ogp_version(), "uptimeMs": 0, "pid": pid }),
@@ -273,20 +275,41 @@ fn merge_comms_policy(plist: &mut Value, state_dir: Option<&str>) {
 /// Cheap daemon state: read <stateDir>/daemon.pid and probe with kill(pid,0).
 /// Avoids spawning `ogp status` (a node process) on every 5s poll. Returns
 /// (running, pid).
-fn daemon_state(state_dir: Option<&str>) -> (bool, Value) {
-    let Some(dir) = state_dir else { return (false, Value::Null) };
-    // expand a leading ~ to $HOME
-    let dir = if let Some(rest) = dir.strip_prefix("~") {
-        format!("{}{}", std::env::var("HOME").unwrap_or_default(), rest)
-    } else {
-        dir.to_string()
-    };
-    let pid_path = std::path::Path::new(&dir).join("daemon.pid");
-    let Ok(s) = std::fs::read_to_string(&pid_path) else { return (false, Value::Null) };
-    let Ok(pid) = s.trim().parse::<i32>() else { return (false, Value::Null) };
-    // signal 0 = liveness probe (no signal sent)
-    let alive = unsafe { libc_kill(pid, 0) == 0 };
-    if alive { (true, json!(pid)) } else { (false, Value::Null) }
+fn daemon_state(state_dir: Option<&str>, port: Option<u16>) -> (bool, Value) {
+    // Primary: daemon.pid in the state dir + a kill(pid,0) liveness probe.
+    if let Some(dir) = state_dir {
+        let dir = if let Some(rest) = dir.strip_prefix("~") {
+            format!("{}{}", std::env::var("HOME").unwrap_or_default(), rest)
+        } else {
+            dir.to_string()
+        };
+        let pid_path = std::path::Path::new(&dir).join("daemon.pid");
+        if let Ok(s) = std::fs::read_to_string(&pid_path) {
+            if let Ok(pid) = s.trim().parse::<i32>() {
+                if unsafe { libc_kill(pid, 0) == 0 } {
+                    return (true, json!(pid));
+                }
+            }
+        }
+    }
+    // bd-kl7w fallback: the pid file can be absent even when the daemon is up
+    // (e.g. started in the foreground, which doesn't fork+write daemon.pid).
+    // Mirror `ogp status`: probe the daemon port before declaring it down.
+    if let Some(p) = port {
+        if port_is_listening(p) {
+            return (true, Value::Null); // running, pid unknown (started externally)
+        }
+    }
+    (false, Value::Null)
+}
+
+/// TCP connect probe to 127.0.0.1:port with a short timeout — a cheap liveness
+/// check that doesn't depend on a pid file.
+fn port_is_listening(port: u16) -> bool {
+    use std::net::{TcpStream, SocketAddr};
+    use std::time::Duration;
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
 }
 
 extern "C" {
@@ -401,8 +424,34 @@ pub fn start_tunnel(framework: &str, option_id: &str) -> Result<Value, OgpError>
 }
 
 pub fn stop_tunnel(framework: &str) -> Result<Value, OgpError> {
-    run(Some(framework), &["tunnel", "stop"])?;
-    Ok(json!({ "ok": true }))
+    // bd-iakg: ask for structured output and report the REAL outcome. A no-op
+    // (gateway served by an externally-started tunnel ogp can't manage) exits
+    // non-zero, so run() returns Err — but that's an expected, non-fatal outcome
+    // we surface as { ok:false, status:"no-managed-tunnel" } rather than a green
+    // success or a scary error. Older CLIs (no --json) fall back to the old path.
+    let out = run(Some(framework), &["tunnel", "stop", "--json"]);
+    match out {
+        Ok(s) => {
+            // CLI succeeded (something was stopped). Parse status if present.
+            let parsed: Value = serde_json::from_str(s.trim()).unwrap_or(json!({ "ok": true }));
+            let stopped = parsed.get("stopped").and_then(|v| v.as_bool()).unwrap_or(true);
+            Ok(json!({ "ok": stopped, "status": parsed.get("status").cloned().unwrap_or(json!("stopped")) }))
+        }
+        Err(e) => {
+            // Non-zero exit. Distinguish the expected no-op from a real failure by
+            // looking for the structured marker in the error text.
+            let msg = e.0;
+            if msg.contains("no-managed-tunnel") || msg.contains("No ogp-managed tunnel") {
+                Ok(json!({
+                    "ok": false,
+                    "status": "no-managed-tunnel",
+                    "message": "No OGP-managed tunnel — your gateway is served by an external tunnel. Stop it with its own tooling."
+                }))
+            } else {
+                Err(OgpError(msg))
+            }
+        }
+    }
 }
 
 pub fn toggle_daemon(framework: &str, run_it: bool) -> Result<Value, OgpError> {
