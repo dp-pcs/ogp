@@ -518,6 +518,28 @@ function setTransportMode(mode: string): void {
   config.transport = { ...(config.transport ?? {}), mode: mode as TransportMode };
   saveConfig(config);
   console.log(`✓ Transport mode set to: ${mode}`);
+
+  // bd-mj79: relay derives its URL from an explicit transport.relay.url OR the
+  // rendezvous URL (wss://<rendezvous>/relay). With neither, the daemon can't
+  // open a relay receiver — it logs "no relay URL could be resolved" and, if the
+  // user has also dropped their tunnel, is SILENTLY UNREACHABLE. Warn loudly with
+  // the exact remediation rather than let them discover it in production.
+  if (mode === 'relay') {
+    const hasRelayUrl = !!config.transport?.relay?.url;
+    const hasRendezvous = !!(config.rendezvous?.enabled && config.rendezvous?.url);
+    if (!hasRelayUrl && !hasRendezvous) {
+      console.warn('');
+      console.warn('⚠ Relay mode needs a relay endpoint, but none can be resolved:');
+      console.warn('  • no transport.relay.url is set, and');
+      console.warn('  • rendezvous is not enabled (relay derives wss://<rendezvous>/relay from it).');
+      console.warn('  Without one, the daemon stays reachable only via direct — and if your');
+      console.warn('  tunnel/public gateway is down, peers cannot reach you at all.');
+      console.warn('  Fix with EITHER:');
+      console.warn('    ogp config transport set-relay-url wss://rendezvous.elelem.expert/relay');
+      console.warn('  OR add to your config: "rendezvous": { "enabled": true, "url": "https://rendezvous.elelem.expert" }');
+    }
+  }
+
   if (mode !== 'direct') {
     console.log('  Restart the daemon for the change to take effect.');
   }
