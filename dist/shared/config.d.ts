@@ -49,6 +49,23 @@ export interface TransportConfig {
     iroh?: {
         relayUrl?: string;
     };
+    /**
+     * bd-maas: multi-transport advertisement (opt-in). When set, the daemon
+     * advertises EACH of these modes (a peer reaches us on whichever it prefers),
+     * instead of the single `mode`. Absent ⇒ fall back to `mode` (one-element list).
+     */
+    advertise?: TransportMode[];
+    /**
+     * bd-maas: preferred mode when WE deliver to a peer that advertises several with
+     * no preference of its own is handled by the SENDER default (direct-first). This
+     * field orders OUR OWN advertised list so peers know which transport we'd rather
+     * receive on. Must be a member of `advertise` (or `mode`); otherwise ignored.
+     */
+    prefer?: TransportMode;
+}
+/** One entry in a resolved transport advertisement list (bd-maas). */
+export interface TransportEntry {
+    mode: TransportMode;
 }
 export type InboundFederationMode = 'forward' | 'summarize' | 'autonomous' | 'approval-required';
 export interface InboundFederationPolicy {
@@ -231,6 +248,19 @@ export declare function getConfigDir(): string;
  * preserving today's behavior for every existing user (bd-b7em).
  */
 export declare function getTransportMode(config: Pick<OGPConfig, 'transport'>): TransportMode;
+/**
+ * Resolve the ordered transport advertisement list (bd-maas). This is the internal
+ * source of truth; `mode`/`advertise`/`prefer` are the user-facing knobs over it.
+ *
+ * Precedence (Option A, settled 2026-06-11):
+ *   1. `transport.advertise` set ⇒ that list, de-duplicated, with `prefer` (if a
+ *      member) hoisted to the front and the rest in declaration order.
+ *   2. else `transport.mode` ⇒ a one-element list (today's behavior, byte-identical).
+ *   3. absent ⇒ `[{ mode: 'direct' }]`.
+ *
+ * Pure — exported for testing. Never throws; ignores an out-of-list `prefer`.
+ */
+export declare function resolveTransportList(config: Pick<OGPConfig, 'transport'>): TransportEntry[];
 /**
  * Get the config file path (computed dynamically based on OGP_HOME)
  */

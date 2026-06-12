@@ -87,6 +87,34 @@ export type RequestValidation = RequestValidationOk | ApprovalValidationErr;
 export declare function validateSignedRequest(body: any, deps: ApprovalValidationDeps): RequestValidation;
 export declare function validateSignedApproval(body: any, storedPublicKey: string, deps: ApprovalValidationDeps): ApprovalValidation;
 /**
+ * Transport-agnostic result of a federation handshake handler. The HTTP route
+ * maps this to `res.status(statusCode).json(body)`; the relay path (bd-63bs)
+ * maps it into a `response` frame. Same body either way.
+ */
+export interface FederationHandlerResult {
+    statusCode: number;
+    body: Record<string, unknown>;
+}
+export interface FederationHandlerDeps {
+    cfg: OGPConfig;
+    verifyEnvelope: ApprovalValidationDeps['verifyEnvelope'];
+}
+/**
+ * Core of POST /federation/request — extracted so the same logic serves both the
+ * HTTP route (server.ts) and a relay `federation` frame (relay-client.ts). Pure
+ * with respect to transport: it reads/writes the peer store and fires the agent
+ * notification exactly as before, and returns {statusCode, body} instead of
+ * touching `res`. Behavior is byte-identical to the previous inline handler.
+ */
+export declare function handleFederationRequestCore(body: unknown, deps: FederationHandlerDeps): Promise<FederationHandlerResult>;
+/**
+ * Core of POST /federation/approve — extracted so the same logic serves both the
+ * HTTP route and a relay `federation` frame (bd-63bs). Returns {statusCode, body};
+ * behavior is byte-identical to the previous inline handler, including the
+ * auto-grant-back to the approving peer.
+ */
+export declare function handleFederationApproveCore(body: unknown, deps: FederationHandlerDeps): Promise<FederationHandlerResult>;
+/**
  * B0032 v0.7.0 — `/.well-known/ogp` response shape.
  * Exported so tests (and future framework integrations) can type against it.
  */

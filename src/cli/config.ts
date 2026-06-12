@@ -7,6 +7,7 @@ import {
   requireConfig,
   synthesizePersonas,
   effectiveHookAgentId,
+  resolveTransportList,
   type OGPConfig,
   type TransportMode
 } from '../shared/config.js';
@@ -489,13 +490,19 @@ function showTransport(opts: { json?: boolean } = {}): void {
   const config = requireConfig();
   const t = config.transport;
   const mode = t?.mode ?? 'direct';
+  // bd-maas: the resolved advertisement list is the source of truth.
+  const advertised = resolveTransportList(config).map((e) => e.mode);
 
   if (opts.json) {
-    // Structured read for programmatic callers (e.g. the Companion app).
+    // Structured read for programmatic callers (e.g. the Companion app). `mode`
+    // and the relay/iroh urls stay as-is (bd-26fg companion toggle); `advertise`
+    // and `prefer` surface the multi-transport list.
     console.log(JSON.stringify({
       mode,
       relayUrl: t?.relay?.url ?? null,
       irohRelayUrl: t?.iroh?.relayUrl ?? null,
+      advertise: advertised,
+      prefer: t?.prefer ?? null,
     }));
     return;
   }
@@ -505,6 +512,9 @@ function showTransport(opts: { json?: boolean } = {}): void {
   if (t?.iroh?.relayUrl) console.log(`  iroh relay url: ${t.iroh.relayUrl}`);
   if (mode === 'relay' && !t?.relay?.url) {
     console.log('  relay url: (default — wss://<rendezvous>/relay)');
+  }
+  if (t?.advertise && t.advertise.length > 0) {
+    console.log(`  advertising: ${advertised.join(', ')}${t.prefer ? ` (prefer ${t.prefer})` : ''}`);
   }
   console.log('');
 }
@@ -551,6 +561,58 @@ function setTransportRelayUrl(url: string): void {
   config.transport = { ...existing, relay: { url } };
   saveConfig(config);
   console.log(`✓ Transport relay url set to: ${url}`);
+}
+
+/**
+ * bd-maas: advertise reachability on MULTIPLE transports (opt-in). Peers reach us
+ * on whichever they prefer; we order our list with `prefer`. `set-mode` stays the
+ * simple single-mode path; this layers the list on top.
+ */
+function setTransportAdvertise(modes: string[]): void {
+  const invalid = modes.filter((m) => !(VALID_TRANSPORT_MODES as readonly string[]).includes(m));
+  if (invalid.length > 0) {
+    console.error(`Error: invalid transport mode(s): ${invalid.join(', ')}. Valid: ${VALID_TRANSPORT_MODES.join(', ')}`);
+    process.exit(1);
+  }
+  if (modes.length === 0) {
+    console.error('Error: provide at least one transport mode to advertise.');
+    process.exit(1);
+  }
+  const config = requireConfig();
+  config.transport = { ...(config.transport ?? { mode: 'direct' as TransportMode }), advertise: modes as TransportMode[] };
+  saveConfig(config);
+  console.log(`✓ Advertising transports: ${modes.join(', ')}`);
+
+  // Same prerequisite as set-mode relay (bd-mj79): advertising relay needs a
+  // resolvable relay endpoint, else the relay leg is silently dead.
+  if (modes.includes('relay')) {
+    const hasRelayUrl = !!config.transport?.relay?.url;
+    const hasRendezvous = !!(config.rendezvous?.enabled && config.rendezvous?.url);
+    if (!hasRelayUrl && !hasRendezvous) {
+      console.warn('');
+      console.warn('⚠ Advertising relay needs a relay endpoint, but none can be resolved:');
+      console.warn('  set one with: ogp config transport set-relay-url wss://rendezvous.elelem.expert/relay');
+      console.warn('  OR enable rendezvous in your config (relay derives wss://<rendezvous>/relay).');
+    }
+  }
+  console.log('  Restart the daemon for the change to take effect.');
+}
+
+/** bd-maas: set the preferred transport (ordered first in our advertised list). */
+function setTransportPrefer(mode: string): void {
+  if (!(VALID_TRANSPORT_MODES as readonly string[]).includes(mode)) {
+    console.error(`Error: invalid transport mode '${mode}'. Valid: ${VALID_TRANSPORT_MODES.join(', ')}`);
+    process.exit(1);
+  }
+  const config = requireConfig();
+  config.transport = { ...(config.transport ?? { mode: 'direct' as TransportMode }), prefer: mode as TransportMode };
+  saveConfig(config);
+  console.log(`✓ Preferred transport set to: ${mode}`);
+  const advertise = config.transport?.advertise;
+  if (advertise && advertise.length > 0 && !advertise.includes(mode as TransportMode)) {
+    console.warn(`⚠ '${mode}' is not in your advertised list (${advertise.join(', ')}); preference is ignored until you advertise it.`);
+  }
+  console.log('  Restart the daemon for the change to take effect.');
 }
 
 /**
@@ -771,7 +833,7 @@ const transportCommand = configCommand
 transportCommand
   .command('show', { isDefault: true })
   .description('Show the current transport configuration')
-  .option('--json', 'Output as JSON ({ mode, relayUrl, irohRelayUrl })')
+  .option('--json', 'Output as JSON ({ mode, relayUrl, irohRelayUrl, advertise, prefer })')
   .action((opts) => {
     showTransport({ json: !!opts.json });
   });
@@ -790,4 +852,21 @@ transportCommand
   .argument('<url>', 'Relay endpoint, e.g. wss://relay.example.com/relay')
   .action((url) => {
     setTransportRelayUrl(url);
+  });
+
+// bd-maas: opt-in multi-transport advertisement. set-mode stays the simple path.
+transportCommand
+  .command('advertise')
+  .description('Advertise reachability on multiple transports (bd-maas)')
+  .argument('<modes...>', 'One or more of: direct, relay, iroh (in preference order)')
+  .action((modes: string[]) => {
+    setTransportAdvertise(modes);
+  });
+
+transportCommand
+  .command('prefer')
+  .description('Set the preferred transport (ordered first in the advertised list)')
+  .argument('<mode>', 'Transport mode: direct, relay, or iroh')
+  .action((mode) => {
+    setTransportPrefer(mode);
   });

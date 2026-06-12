@@ -1,6 +1,6 @@
 import { listPeers, loadPeers, getPeer, approvePeer, rejectPeer, updatePeer, updatePeerGrantedScopes } from '../daemon/peers.js';
 import { requireConfig, loadConfig } from '../shared/config.js';
-import { lookupPeer, lookupPeerTransport } from '../daemon/rendezvous.js';
+import { lookupPeer, lookupPeerTransports } from '../daemon/rendezvous.js';
 import { deliverViaRelay } from '../daemon/relay-client.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject, sign } from '../shared/signing.js';
@@ -958,37 +958,11 @@ export async function federationRemove(peerId) {
  * handling: { ok, status?, result }. `result` is the peer's MessageResponse
  * (or a synthesized failure for relay errors).
  */
-export async function deliverFederationMessage(peer, frame, opts) {
-    // Resolve transport. Any failure (rendezvous disabled, lookup throws/null,
-    // direct, or iroh) ⇒ direct. Relay never preempts the default unless the peer
-    // explicitly advertised a relay descriptor inside their signed registration.
-    let relayUrl = null;
-    if (opts.config.rendezvous?.enabled && peer.publicKey) {
-        try {
-            const resolved = await lookupPeerTransport(opts.config.rendezvous, peer.publicKey);
-            if (resolved && resolved.mode === 'relay')
-                relayUrl = resolved.relayUrl;
-        }
-        catch {
-            // fall through to direct — a flaky rendezvous must not break direct sends
-        }
-    }
-    if (relayUrl) {
-        try {
-            const result = await deliverViaRelay(relayUrl, peer.publicKey, frame, opts.timeoutMs);
-            const r = result;
-            return { ok: r?.success !== false, status: r?.statusCode, result };
-        }
-        catch (err) {
-            return {
-                ok: false,
-                result: { success: false, error: `peer not connected via relay: ${err.message}` }
-            };
-        }
-    }
-    // DIRECT PATH — unchanged wire behavior.
+/** Deliver `frame` to `peer.gatewayUrl` over direct HTTP. Byte-identical to the
+ * original send. Throws only on network/abort (caller maps that to try-next). */
+async function deliverDirect(peer, frame, timeoutMs) {
     const controller = new AbortController();
-    const timeoutId = opts.timeoutMs ? setTimeout(() => controller.abort(), opts.timeoutMs) : null;
+    const timeoutId = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
         const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
             method: 'POST',
@@ -1015,6 +989,61 @@ export async function deliverFederationMessage(peer, frame, opts) {
         if (timeoutId)
             clearTimeout(timeoutId);
     }
+}
+/** Deliver `frame` to a peer over a relay WebSocket. Throws on relay/connection
+ * failure (caller maps that to try-next / a synthesized failure). */
+async function deliverRelay(relayUrl, toPubkey, frame, timeoutMs) {
+    const result = await deliverViaRelay(relayUrl, toPubkey, frame, timeoutMs);
+    const r = result;
+    return { ok: r?.success !== false, status: r?.statusCode, result };
+}
+export async function deliverFederationMessage(peer, frame, opts) {
+    // bd-maas: resolve the peer's advertised transport LIST and walk it by
+    // preference, using the first transport that delivers. Any rendezvous failure
+    // (disabled, lookup throws, empty list) ⇒ a single direct attempt, so the
+    // default path can never be broken by a flaky rendezvous.
+    let transports = [];
+    if (opts.config.rendezvous?.enabled && peer.publicKey) {
+        try {
+            transports = await lookupPeerTransports(opts.config.rendezvous, peer.publicKey);
+        }
+        catch {
+            transports = []; // fall through to direct
+        }
+    }
+    // No advertised list ⇒ exactly the original single direct send (byte-identical).
+    if (transports.length === 0) {
+        return deliverDirect(peer, frame, opts.timeoutMs);
+    }
+    // Walk the preference order; the first transport that delivers wins. A failed
+    // attempt (throw, or a relay error) falls through to the next entry; the last
+    // failure is returned so callers' existing error handling still fires.
+    let last = null;
+    for (const t of transports) {
+        try {
+            if (t.mode === 'relay') {
+                last = await deliverRelay(t.relayUrl, peer.publicKey, frame, opts.timeoutMs);
+            }
+            else if (t.mode === 'direct') {
+                // Prefer the advertised direct url, else the peer record's gatewayUrl.
+                const target = t.url ? { ...peer, gatewayUrl: t.url } : peer;
+                last = await deliverDirect(target, frame, opts.timeoutMs);
+            }
+            else {
+                continue; // iroh not deliverable yet (Phase 3) — skip this leg
+            }
+            if (last.ok)
+                return last;
+            // Non-ok response (e.g. peer-not-connected via relay) ⇒ try the next leg.
+        }
+        catch (err) {
+            last = {
+                ok: false,
+                result: { success: false, error: `${t.mode} delivery failed: ${err.message}` }
+            };
+        }
+    }
+    return last ?? deliverDirect(peer, frame, opts.timeoutMs);
 }
 export async function federationSend(peerId, intent, payloadJson, timeoutMs, toAgent) {
     const config = requireConfig();

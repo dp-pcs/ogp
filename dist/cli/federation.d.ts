@@ -39,21 +39,6 @@ export interface ApproveOptions {
 export declare function federationApprove(peerId: string, options?: ApproveOptions): Promise<void>;
 export declare function federationReject(peerId: string): Promise<void>;
 export declare function federationRemove(peerId: string): Promise<void>;
-/**
- * Deliver an already-signed federation envelope to a peer, branching on the
- * peer's advertised transport (bd-b7em Phase 2).
- *
- * - DIRECT (default, and the fallback for everything): byte-identical to the
- *   original behavior — POST {message, messageStr, signature} to
- *   `${peer.gatewayUrl}/federation/message`. A flaky/disabled rendezvous lookup
- *   MUST fall through to direct so it can never break the default path.
- * - RELAY: route the same opaque frame over a WebSocket to the relay, which
- *   forwards it to the peer's persistent socket and returns their response.
- *
- * Returns a normalized shape so callers can keep their existing response
- * handling: { ok, status?, result }. `result` is the peer's MessageResponse
- * (or a synthesized failure for relay errors).
- */
 export declare function deliverFederationMessage(peer: Peer, frame: {
     message: unknown;
     messageStr: string;

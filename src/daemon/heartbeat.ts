@@ -172,10 +172,12 @@ async function checkPeerHealth(peer: Peer): Promise<HealthCheckResult> {
   try {
     const cfg = loadConfig();
     if (cfg?.rendezvous?.enabled && peer.publicKey) {
-      const { lookupPeerTransport } = await import('./rendezvous.js');
-      const resolved = await lookupPeerTransport(cfg.rendezvous, peer.publicKey);
-      if (resolved && resolved.mode === 'relay') {
-        // Present in rendezvous (TTL-fresh) + advertising relay ⇒ reachable.
+      const { lookupPeerTransports } = await import('./rendezvous.js');
+      const resolved = await lookupPeerTransports(cfg.rendezvous, peer.publicKey);
+      // bd-maas: a peer is reachable if ANY advertised transport is reachable.
+      // A relay entry means they're registered (TTL-fresh) and holding a relay
+      // socket ⇒ reachable without probing their (possibly absent) gateway.
+      if (resolved.some((t) => t.mode === 'relay')) {
         return { reachable: true };
       }
     }

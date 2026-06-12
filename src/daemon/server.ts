@@ -1250,7 +1250,19 @@ export function startServer(config?: OGPConfig, background = false): void {
 
     // Start rendezvous registration (if configured)
     if (cfg.rendezvous?.enabled) {
-      startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort, cfg.transport).catch((err: Error) => {
+      // bd-maas Part B: advertise a signed identity card so the rendezvous can
+      // serve discovery info for relay-only peers (no public /.well-known/ogp).
+      const card = {
+        displayName: cfg.displayName,
+        email: cfg.email,
+        gatewayUrl: cfg.gatewayUrl,
+        publicKey: getPublicKey(),
+        offeredIntents: loadIntents().map((i) => i.name)
+      };
+      startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort, cfg.transport, {
+        gatewayUrl: cfg.gatewayUrl,
+        card
+      }).catch((err: Error) => {
         console.warn(`[OGP] Rendezvous startup error: ${err.message}`);
       });
     }

@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// Mock the two transport-decision dependencies so we can assert the branch.
+// Mock the transport-decision dependencies so we can assert the branch. bd-maas:
+// the delivery walk reads the transport LIST via lookupPeerTransports (plural).
 vi.mock('../src/daemon/rendezvous.js', () => ({
+  lookupPeerTransports: vi.fn().mockResolvedValue([]),
   lookupPeerTransport: vi.fn(),
   lookupPeer: vi.fn(),
 }));
@@ -10,7 +12,7 @@ vi.mock('../src/daemon/relay-client.js', () => ({
 }));
 
 import { deliverFederationMessage } from '../src/cli/federation.js';
-import { lookupPeerTransport } from '../src/daemon/rendezvous.js';
+import { lookupPeerTransports } from '../src/daemon/rendezvous.js';
 import { deliverViaRelay } from '../src/daemon/relay-client.js';
 
 const peer = { id: 'pkB', displayName: 'B', gatewayUrl: 'https://b.example', publicKey: 'pubB' } as any;
@@ -36,18 +38,19 @@ describe('deliverFederationMessage transport branch', () => {
   });
 
   it('DIRECT (peer advertises direct): still posts to gatewayUrl', async () => {
-    (lookupPeerTransport as any).mockResolvedValue({ mode: 'direct', url: 'https://b.example' });
+    (lookupPeerTransports as any).mockResolvedValue([{ mode: 'direct', url: 'https://b.example' }]);
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true }) });
     vi.stubGlobal('fetch', fetchMock);
 
     await deliverFederationMessage(peer, frame, { config: { rendezvous: { enabled: true, url: 'https://rv' } } as any });
 
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe('https://b.example/federation/message');
     expect(deliverViaRelay).not.toHaveBeenCalled();
   });
 
   it('RELAY: routes via deliverViaRelay, never calls fetch', async () => {
-    (lookupPeerTransport as any).mockResolvedValue({ mode: 'relay', relayUrl: 'ws://rv/relay', pubkey: 'pubB' });
+    (lookupPeerTransports as any).mockResolvedValue([{ mode: 'relay', relayUrl: 'ws://rv/relay', pubkey: 'pubB' }]);
     (deliverViaRelay as any).mockResolvedValue({ success: true, nonce: 'n2' });
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -60,19 +63,36 @@ describe('deliverFederationMessage transport branch', () => {
     expect(out.result).toEqual({ success: true, nonce: 'n2' });
   });
 
-  it('RELAY error maps to a failed-send result (not a throw)', async () => {
-    (lookupPeerTransport as any).mockResolvedValue({ mode: 'relay', relayUrl: 'ws://rv/relay', pubkey: 'pubB' });
+  it('RELAY error (single-leg) maps to a failed-send result (not a throw)', async () => {
+    (lookupPeerTransports as any).mockResolvedValue([{ mode: 'relay', relayUrl: 'ws://rv/relay', pubkey: 'pubB' }]);
     (deliverViaRelay as any).mockRejectedValue(new Error('peer-not-connected'));
     vi.stubGlobal('fetch', vi.fn());
 
     const out = await deliverFederationMessage(peer, frame, { config: { rendezvous: { enabled: true, url: 'https://rv' } } as any });
 
     expect(out.ok).toBe(false);
-    expect(String(out.result.error)).toContain('not connected via relay');
+    expect(String(out.result.error)).toContain('relay delivery failed');
+  });
+
+  it('PREFERENCE WALK: relay fails ⇒ falls back to direct (bd-maas)', async () => {
+    (lookupPeerTransports as any).mockResolvedValue([
+      { mode: 'relay', relayUrl: 'ws://rv/relay', pubkey: 'pubB' },
+      { mode: 'direct', url: 'https://b.example' }
+    ]);
+    (deliverViaRelay as any).mockRejectedValue(new Error('peer-not-connected'));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true, nonce: 'n3' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await deliverFederationMessage(peer, frame, { config: { rendezvous: { enabled: true, url: 'https://rv' } } as any });
+
+    expect(deliverViaRelay).toHaveBeenCalledOnce();   // relay tried first
+    expect(fetchMock).toHaveBeenCalledOnce();          // then fell back to direct
+    expect(out.ok).toBe(true);
+    expect(out.result).toEqual({ success: true, nonce: 'n3' });
   });
 
   it('lookup THROWS ⇒ falls through to DIRECT (flaky rendezvous never breaks direct)', async () => {
-    (lookupPeerTransport as any).mockRejectedValue(new Error('rendezvous down'));
+    (lookupPeerTransports as any).mockRejectedValue(new Error('rendezvous down'));
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true }) });
     vi.stubGlobal('fetch', fetchMock);
 
