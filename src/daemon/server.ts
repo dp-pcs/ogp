@@ -603,12 +603,30 @@ export async function handleFederationApproveCore(
           protocolVersion: '0.2.0',
           scopeGrants: bundle
         }, keypair.privateKey);
-        await fetch(`${freshPeer.gatewayUrl}/federation/approve`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payloadStr: gpayloadStr, signature: gsignature })
-        });
-        console.log(`[OGP] Sent auto-grant confirmation back to ${approvedPeer.displayName}`);
+
+        // bd-63bs: route the grant-back over relay when the approving peer is
+        // relay-only (no gatewayUrl to POST to).
+        let relayBack: string | null = null;
+        if (cfg.rendezvous?.enabled && freshPeer.publicKey && !freshPeer.gatewayUrl) {
+          try {
+            const { lookupPeerTransports } = await import('./rendezvous.js');
+            const ts = await lookupPeerTransports(cfg.rendezvous, freshPeer.publicKey);
+            const relay = ts.find((t) => t.mode === 'relay');
+            if (relay && relay.mode === 'relay') relayBack = relay.relayUrl;
+          } catch { /* fall through to direct */ }
+        }
+        if (relayBack) {
+          const { federationViaRelay } = await import('./relay-client.js');
+          await federationViaRelay(relayBack, freshPeer.publicKey, 'approve', { payloadStr: gpayloadStr, signature: gsignature });
+          console.log(`[OGP] Sent auto-grant confirmation back to ${approvedPeer.displayName} (via relay)`);
+        } else {
+          await fetch(`${freshPeer.gatewayUrl}/federation/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ payloadStr: gpayloadStr, signature: gsignature })
+          });
+          console.log(`[OGP] Sent auto-grant confirmation back to ${approvedPeer.displayName}`);
+        }
       } catch (e) {
         console.warn(`[OGP] Could not send auto-grant back to ${approvedPeer.displayName}:`, e);
       }

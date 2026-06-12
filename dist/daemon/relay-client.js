@@ -28,18 +28,20 @@ class RelaySocket {
     privateKey;
     onDeliver;
     onClosed;
+    onFederation;
     ws = null;
     pingTimer = null;
     pongTimer = null;
     authed = false;
     pending = new Map();
-    constructor(relayUrl, role, pubkey, privateKey, onDeliver, onClosed) {
+    constructor(relayUrl, role, pubkey, privateKey, onDeliver, onClosed, onFederation = null) {
         this.relayUrl = relayUrl;
         this.role = role;
         this.pubkey = pubkey;
         this.privateKey = privateKey;
         this.onDeliver = onDeliver;
         this.onClosed = onClosed;
+        this.onFederation = onFederation;
     }
     /** Open the socket and complete the Ed25519 challenge handshake. */
     connect() {
@@ -94,6 +96,12 @@ class RelaySocket {
                     // Inbound delivery for us — hand to the receiver dispatch.
                     if (this.onDeliver)
                         this.onDeliver(frame.reqId, frame.frame);
+                    return;
+                }
+                if (frame.type === 'federation') {
+                    // Inbound federation handshake (bd-63bs) — dispatch by op.
+                    if (this.onFederation)
+                        this.onFederation(frame.op, frame.reqId, frame.frame);
                     return;
                 }
                 if (frame.type === 'response') {
@@ -156,6 +164,22 @@ class RelaySocket {
             }, timeoutMs);
             this.pending.set(reqId, { resolve, reject, timer });
             this.safeSend({ type: 'deliver', reqId, to: toPubkey, frame });
+        });
+    }
+    /** Send a federation handshake frame (request/approve) and await the response. */
+    sendFederation(op, toPubkey, frame, timeoutMs) {
+        return new Promise((resolve, reject) => {
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                reject(new Error('relay socket not open'));
+                return;
+            }
+            const reqId = crypto.randomUUID();
+            const timer = setTimeout(() => {
+                this.pending.delete(reqId);
+                reject(new Error('relay federation timeout'));
+            }, timeoutMs);
+            this.pending.set(reqId, { resolve, reject, timer });
+            this.safeSend({ type: 'federation', op, reqId, to: toPubkey, frame });
         });
     }
     /** Send a response frame back to the relay (receiver leg). */
@@ -229,6 +253,32 @@ async function dispatchInbound(sock, reqId, frame) {
     }
 }
 /**
+ * Dispatch an inbound federation handshake frame (bd-63bs) through the same
+ * transport-agnostic cores the HTTP routes use. The relay forwarded a signed
+ * { payloadStr, signature } envelope; we run the request/approve core and send the
+ * {statusCode, body} back as the response frame. E2E Ed25519 is verified inside
+ * the core exactly as on the HTTP path.
+ */
+async function dispatchFederationInbound(sock, op, reqId, frame) {
+    try {
+        const { requireConfig } = await import('../shared/config.js');
+        const { verifyCanonical } = await import('../shared/signing.js');
+        const { handleFederationRequestCore, handleFederationApproveCore } = await import('./server.js');
+        const deps = {
+            cfg: requireConfig(),
+            verifyEnvelope: (env, pk) => verifyCanonical(env, pk)
+        };
+        const body = { payloadStr: frame.payloadStr, signature: frame.signature };
+        const result = op === 'request'
+            ? await handleFederationRequestCore(body, deps)
+            : await handleFederationApproveCore(body, deps);
+        sock.sendResponse(reqId, result);
+    }
+    catch (err) {
+        sock.sendResponse(reqId, { statusCode: 500, body: { error: `relay federation handler failed: ${err.message}` } });
+    }
+}
+/**
  * Start the persistent receiver socket. Call from server.ts startup ONLY when
  * transport.mode === 'relay'. Idempotent; reconnects with backoff on drop.
  */
@@ -242,7 +292,7 @@ export async function startRelayClient(relayUrl) {
 async function connectReceiver() {
     if (stopped || !identity || !receiverRelayUrl)
         return;
-    const sock = new RelaySocket(receiverRelayUrl, 'receiver', identity.pubkey, identity.privateKey, (reqId, frame) => { void dispatchInbound(sock, reqId, frame); }, () => scheduleReconnect());
+    const sock = new RelaySocket(receiverRelayUrl, 'receiver', identity.pubkey, identity.privateKey, (reqId, frame) => { void dispatchInbound(sock, reqId, frame); }, () => scheduleReconnect(), (op, reqId, frame) => { void dispatchFederationInbound(sock, op, reqId, frame); });
     try {
         await sock.connect();
         receiver = sock;
@@ -304,6 +354,29 @@ export async function deliverViaRelay(relayUrl, toPubkey, frame, timeoutMs = DEF
     try {
         await sock.connect();
         return await sock.deliver(toPubkey, frame, timeoutMs);
+    }
+    finally {
+        sock.close();
+    }
+}
+/**
+ * Send a signed federation handshake envelope (request or approve) to a relay-mode
+ * peer over the relay and await their {statusCode, body} (bd-63bs). Lets two
+ * relay-only peers federate with no public HTTP gateway. Reuses the live receiver
+ * socket on the same relay; otherwise opens a transient sender socket. Throws on
+ * timeout / peer-not-connected (callers map that to a failed handshake).
+ */
+export async function federationViaRelay(relayUrl, toPubkey, op, frame, timeoutMs = DEFAULT_DELIVER_TIMEOUT_MS) {
+    // Fast path: piggyback on the persistent receiver if it's on the same relay.
+    if (receiver && receiver.ws && receiver.ws.readyState === WebSocket.OPEN && receiverRelayUrl === relayUrl) {
+        return receiver.sendFederation(op, toPubkey, frame, timeoutMs);
+    }
+    // Slow path: transient sender socket for this exchange.
+    const { getPublicKey, getPrivateKey } = await import('./keypair.js');
+    const sock = new RelaySocket(relayUrl, 'sender', getPublicKey(), getPrivateKey(), null, null);
+    try {
+        await sock.connect();
+        return await sock.sendFederation(op, toPubkey, frame, timeoutMs);
     }
     finally {
         sock.close();

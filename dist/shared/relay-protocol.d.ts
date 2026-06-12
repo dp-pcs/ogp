@@ -51,6 +51,25 @@ export interface DeliverFrame {
     from?: string;
     frame: RelayFrame;
 }
+/** The opaque, end-to-end-signed handshake unit the relay forwards verbatim for a
+ *  `federation` frame. Identical to the JSON body POSTed to /federation/request or
+ *  /federation/approve in direct mode (a signCanonical envelope). */
+export interface FederationRelayFrame {
+    payloadStr: string;
+    signature: string;
+}
+/** Federation handshake over relay (bd-63bs). One frame, `op` selects request vs
+ *  approve. Routes through the SAME untrusted forward-by-pubkey + reqId↔response
+ *  path as `deliver`; the relay never inspects `frame`. Lets two relay-only peers
+ *  complete the request/approve handshake with no public HTTP gateway. */
+export interface FederationFrame {
+    type: 'federation';
+    op: 'request' | 'approve';
+    reqId: string;
+    to?: string;
+    from?: string;
+    frame: FederationRelayFrame;
+}
 /** (6) C→S / (7) S→C response leg. `result` is the recipient's MessageResponse. */
 export interface ResponseFrame {
     type: 'response';
@@ -71,14 +90,15 @@ export interface PingFrame {
 export interface PongFrame {
     type: 'pong';
 }
-export type RelayClientFrame = AuthFrame | DeliverFrame | ResponseFrame | PingFrame | PongFrame;
-export type RelayServerFrame = ChallengeFrame | AuthOkFrame | AuthErrFrame | DeliverFrame | ResponseFrame | ErrorFrame | PingFrame | PongFrame;
+export type RelayClientFrame = AuthFrame | DeliverFrame | FederationFrame | ResponseFrame | PingFrame | PongFrame;
+export type RelayServerFrame = ChallengeFrame | AuthOkFrame | AuthErrFrame | DeliverFrame | FederationFrame | ResponseFrame | ErrorFrame | PingFrame | PongFrame;
 export type RelayAnyFrame = RelayClientFrame | RelayServerFrame;
 /** Parse a raw WS text frame into a typed object, or null if not a `{type}` object. */
 export declare function parseFrame(raw: string): RelayAnyFrame | null;
 export declare function isChallengeFrame(f: RelayAnyFrame): f is ChallengeFrame;
 export declare function isAuthFrame(f: RelayAnyFrame): f is AuthFrame;
 export declare function isDeliverFrame(f: RelayAnyFrame): f is DeliverFrame;
+export declare function isFederationFrame(f: RelayAnyFrame): f is FederationFrame;
 export declare function isResponseFrame(f: RelayAnyFrame): f is ResponseFrame;
 /** The canonical payload a daemon signs to answer an auth challenge. The nonce
  *  is INSIDE the signed bytes so the signature covers it (replay resistance). */
