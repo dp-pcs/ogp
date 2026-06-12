@@ -228,6 +228,10 @@ section{position:relative;}
 .companion-copy .clist{margin:26px 0 30px; display:flex; flex-direction:column; gap:12px;}
 .companion-copy .clist div{display:flex; gap:11px; align-items:center; font-size:15px; color:var(--ink);}
 .companion-copy .clist svg{width:18px; height:18px; color:var(--blue); flex-shrink:0;}
+.companion-actions{display:flex; flex-wrap:wrap; gap:12px;}
+.companion-note{margin-top:16px; font-size:13px; color:var(--ink-soft);}
+.companion-note a{color:var(--blue); text-decoration:none;}
+.companion-note a:hover{text-decoration:underline;}
 .companion-visual{
   position:relative; background:
     radial-gradient(100% 100% at 80% 0%, rgba(53,214,255,0.16), transparent 50%),
