@@ -1,7 +1,6 @@
 import { listPeers, loadPeers, savePeers, getPeer, getPeerByUrl, getPeerByPublicKey, approvePeer, rejectPeer, updatePeer, updatePeerGrantedScopes, type Peer } from '../daemon/peers.js';
 import { requireConfig, loadConfig, type OGPConfig } from '../shared/config.js';
-import { lookupPeer, lookupPeerTransport, lookupPeerTransports, type ResolvedTransport } from '../daemon/rendezvous.js';
-import { fetchPeerCard } from '../daemon/rendezvous.js';
+import { lookupPeer, lookupPeerTransport, lookupPeerTransports, fetchPeerCard, type ResolvedTransport } from '../daemon/rendezvous.js';
 import { deliverFederationMessage } from '../daemon/federation-delivery.js';
 import { federationViaRelay } from '../daemon/relay-client.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
@@ -1221,6 +1220,7 @@ export async function federationRemove(peerId: string): Promise<void> {
  * handling: { ok, status?, result }. `result` is the peer's MessageResponse
  * (or a synthesized failure for relay errors).
  */
+
 export async function federationSend(
   peerId: string,
   intent: string,
