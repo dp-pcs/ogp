@@ -1,168 +1,226 @@
-# Relay-mode Federation Handshake — Design (bd-63bs)
+# Multi-Transport Advertisement + Relay Handshake — Design
 
 **Status:** proposed, for review before implementation. Trust-adjacent → escalate-before-merge.
-**Depends on:** relay Phase 2 (bd-b7em, shipped). **Relates to:** bd-uiwr (health over relay, PR #68).
+**Depends on:** relay Phase 2 (bd-b7em, shipped). **Relates to:** bd-uiwr (health over relay, merged #68).
+**Beads:** bd-63bs (handshake over relay) + new bead (multi-transport advertisement). Built as **one combined effort** per David (2026-06-11).
 
-## Problem
+## What changed from the first draft
 
-Relay Phase 2 routes ongoing **message delivery** over the relay, but the initial
-federation **handshake** still uses direct HTTP. Concretely, two daemons that are
-both relay-only (no tunnel / no public gateway) **cannot federate at all** — there
-is no HTTP path between them for the request/approve exchange. Relay only helps
-*after* a federation already exists.
+The first draft scoped only "route the request/approve handshake over relay." Review
+with David turned it into a better, larger design:
 
-This is the gap between "relay works for existing federations" and "relay is
-turnkey no-tunnel onboarding" — which was the whole point (tunnel setup is the #1
-adoption deterrent).
+1. **Multi-transport advertisement** (Q1): a gateway advertises a *list* of transports
+   it's reachable on, with a stated **preference**, not a single mode. Each direction
+   honors the **recipient's** advertisement independently (asymmetry is correct: if you
+   advertise relay-only and I advertise direct, I reach you via relay and you reach me
+   via direct).
+2. **Rendezvous serves the identity card** (Q2): a relay-only peer has no public
+   `/.well-known/ogp`, so the rendezvous server returns the peer's signed identity card
+   on lookup — making relay peers first-class for *discovery*, not just delivery.
+3. **Handshake over relay** (bd-63bs): the request/approve exchange routes over relay so
+   two relay-only peers can federate.
 
-## Why this is bigger than the delivery branch
+All three touch the **Ed25519-signed registration** and/or the **auto-deploying
+rendezvous** → escalate-before-merge, backward-compatible.
 
-Message delivery was easy because the receiver funnels **everything** through one
-transport-agnostic function, `handleMessage()` (src/daemon/message-handler.ts:90).
-The relay receiver just calls it (relay-client.ts:204 `dispatchInbound`).
+---
 
-The handshake is **not** structured that way:
+## Part A — Multi-transport advertisement (preference + fallback)
 
-- **Receiver side:** `/federation/request` and `/federation/approve` are *separate
-  Express route handlers* (src/daemon/server.ts:543 and ~:268) with their own
-  validation (`validateSignedRegistration`-style pure validators at :76, :145),
-  tombstone handling, and response shapes. They are **not** reachable through
-  `handleMessage`. The relay receiver only knows how to call `handleMessage`.
-- **Sender side:** `federationRequest()` (src/cli/federation.ts:677) does two
-  HTTP things *before* it POSTs, both of which assume reachability:
-  1. `ensureLocalGatewayReachable()` (:681) — checks **our own** gateway responds.
-     For a relay-only requester whose tunnel is down, **this fails immediately**
-     and blocks the whole request.
-  2. `resolvePeerGatewayUrl()` (:693) — fetches the peer's `/.well-known/ogp` card
-     for their identity (publicKey, displayName) before sending.
+### Schema change (the keystone)
 
-So "handshake over relay" = a new relay frame type + making the request/approve
-handlers callable off the HTTP path + reworking the sender preflight + getting the
-identity-card exchange to work without `/.well-known`.
+Today the signed registration carries a single transport descriptor:
+```
+transport: { transport: 'relay', relayUrl }            // one mode
+```
+New: a **list**, ordered or preference-tagged, still inside the signed payload:
+```
+transports: [
+  { mode: 'direct', gatewayUrl: 'https://…', preference: 1 },
+  { mode: 'relay',  relayUrl: 'wss://…/relay', preference: 2 }
+]
+```
+- **Backward compatible:** the old single `transport` object still parses (treated as a
+  one-element list). Absent ⇒ direct, exactly as today. Old daemons keep working; new
+  daemons reading an old record see one transport.
+- Lives inside `signCanonical(...)` registration → rendezvous cannot forge or reorder it
+  (same trust property as Phase 1). **This is the escalate-before-merge keystone.**
+- Config: `transport.modes` becomes a list (or we keep `transport.mode` for the simple
+  case and add `transport.advertise: ['direct','relay']` + `transport.prefer`). Decide in
+  review — must stay ergonomic for the 99% single-mode user.
 
-## Design
+### Sender resolution + fallback
 
-### 1. Refactor the receive handlers to be transport-agnostic (pure cores)
+When delivering to peer X, `lookupPeerTransport(X)` returns X's advertised list. The
+sender walks it by preference and uses the first transport it can establish:
 
-Extract the bodies of the `/federation/request` and `/federation/approve` Express
-handlers into pure async functions:
+1. Honor X's stated preference order.
+2. **Default when X advertises both with no preference: try direct first, fall back to
+   relay** (direct = no relay hop / lower latency; relay = safety net). [David, 2026-06-11]
+3. On failure of the preferred transport, fall through to the next in the list.
+4. This is **per-recipient and independent of what the sender advertises** — asymmetry is
+   expected and correct.
 
+Touchpoints: `lookupPeerTransport` (src/daemon/rendezvous.ts:255) returns a list;
+`deliverFederationMessage` (src/cli/federation.ts) iterates with fallback instead of the
+current single relay-or-direct branch.
+
+### Health (already partly done)
+
+bd-uiwr (merged) treats "registered with a relay descriptor" as reachable. Extend to the
+list: a peer is healthy if **any** advertised transport is reachable (relay-registered OR
+direct HTTP OK).
+
+---
+
+## Part B — Rendezvous serves the identity card
+
+### Why
+
+Direct peers expose `/.well-known/ogp` (displayName, publicKey, offeredIntents, etc.).
+Relay-only peers have no HTTP address to serve it from. Today rendezvous `/peer/<pubkey>`
+returns reachability (pubkey, ip, port, transport) but **not** the full card
+(packages/rendezvous/src/index.ts:274). So a relay peer is reachable but not *discoverable*.
+
+### Change
+
+- The daemon includes its identity card **inside the signed registration** (displayName,
+  publicKey, offeredIntents, organization — the same fields as `/.well-known/ogp`, built by
+  the pure card-builder at src/daemon/server.ts:279).
+- Rendezvous stores it (from the **verified** payload only — same discipline as the
+  transport descriptor) and returns it on `/peer/<pubkey>`.
+- Lookup helper: `fetchPeerCard(pubkey)` queries rendezvous; for relay peers this replaces
+  the `/.well-known/ogp` fetch. Direct peers still use `/.well-known` (or rendezvous if
+  present — rendezvous becomes a uniform discovery layer).
+- **Trust:** card is in the signed payload → rendezvous can't fabricate identity. The card's
+  `publicKey` must equal the registration pubkey (reject mismatch).
+
+This is the second trust-adjacent rendezvous change and pairs naturally with Part A (both
+enrich what the signed registration carries + what rendezvous serves) — done in one pass.
+
+---
+
+## Part C — Handshake over relay (bd-63bs)
+
+### Receiver: make the handlers transport-agnostic
+
+`/federation/request` (server.ts:543) and `/federation/approve` (~:268) are Express route
+handlers with their own validation/tombstone logic — **not** funneled through
+`handleMessage`. Extract pure cores:
 ```
 handleFederationRequest(signedEnvelope) -> { status, statusCode, body }
 handleFederationApprove(signedEnvelope) -> { status, statusCode, body }
 ```
+Routes become thin wrappers (no HTTP behavior change — locked by existing tests). The
+**approve** core's response body includes the approver's identity card (so the requester
+stores a complete peer record even without an HTTP card fetch — and complements Part B).
 
-The Express routes become thin wrappers (parse req.body → call core → res.json).
-This mirrors how `handleMessage` already works and is independently good hygiene.
-**No behavior change on the HTTP path** — locked by existing tests + a new
-"wrapper calls core" test.
-
-### 2. New relay frame type: `federation` (request/approve)
-
-The relay already routes opaque signed envelopes by pubkey with reqId↔response
-correlation (`deliver`/`response` frames, relay-core.ts). Add a sibling that
-carries a handshake op so the receiver can dispatch to the right core:
+### New relay frame: one `federation` frame with an `op` field [Q3, locked]
 
 ```
-{ type: 'federation', op: 'request'|'approve', reqId, to, frame: { payloadStr, signature } }
+{ type: 'federation', op: 'request' | 'approve', reqId, to, frame: { payloadStr, signature } }
 ```
+- Routes through the relay's existing untrusted forward-by-pubkey path (relay-core), with
+  the same reqId↔response correlation as `deliver`.
+- Receiver `dispatchInbound` (relay-client.ts:204) switches on `op` →
+  request/approve core → returns the result as the `response` frame.
+- Relay stays untrusted; E2E Ed25519 unchanged (the handshake envelope is signed exactly
+  as today).
 
-- Sender: `deliverViaRelay`-style call but tagged `op`.
-- Relay core: routes identically to `deliver` (it never inspects the envelope —
-  same untrusted-forwarder property).
-- Receiver (`dispatchInbound`, relay-client.ts:204): switch on `op` →
-  `handleFederationRequest` / `handleFederationApprove` / (default) `handleMessage`
-  → send the result back as the `response` frame.
+### Sender preflight rework
 
-This keeps the relay **untrusted** and the E2E Ed25519 guarantee intact — the
-handshake envelope is signed exactly as today; only the transport changes.
+`federationRequest` (src/cli/federation.ts:677) currently does two HTTP things that break
+for relay-only peers:
+1. `ensureLocalGatewayReachable` (:681) — checks **our own** gateway. **Skip in relay mode**
+   (relay reachability doesn't need our gateway public).
+2. `resolvePeerGatewayUrl` → `/.well-known` (:693) — **replace with `fetchPeerCard(pubkey)`
+   from rendezvous** (Part B) when the peer is relay-only.
 
-### 3. Sender preflight rework (the subtle part)
+Then route the signed request via the `federation` relay frame instead of `fetch`.
 
-In `federationRequest()`, branch when the **target advertises relay** (via
-`lookupPeerTransport`) AND we intend to reach them over relay:
+### Bootstrap
 
-- **Skip `ensureLocalGatewayReachable`** — relay reachability does not depend on
-  our own gateway being public. (Keep it for the direct path unchanged.)
-- **Skip `resolvePeerGatewayUrl` / `/.well-known` fetch** — we can't fetch a
-  relay-only peer's card over HTTP. Get their identity from the **rendezvous
-  record** instead (pubkey is the routing key; displayName/etc. can be exchanged
-  IN the handshake response, or fetched lazily later). The request envelope
-  already carries *our* full identity; the approve response carries *theirs*.
-- Route the signed request envelope via the new `federation` relay frame.
+No new discovery: `ogp federation connect <pubkey>` and `invite`/`accept <code>` already
+resolve the peer via rendezvous; they now resolve a transport *list* + card, then hand off
+to the relay handshake when relay wins the preference walk.
 
-### 4. Identity exchange without `/.well-known`
-
-Today the requester learns the peer's card via HTTP before federating. Over relay:
-- The **request** already includes the requester's full `peer` block (signed).
-- The **approve** response should symmetrically include the approver's `peer`
-  block (displayName, publicKey, offeredIntents) so the requester can store a
-  complete peer record. Minor addition to the approve core's response body.
-
-### 5. Bootstrap / discovery
-
-How does the requester find a relay peer in the first place? The existing
-rendezvous paths already cover it:
-- `ogp federation connect <pubkey>` → `lookupPeerTransport` → sees relay → handshake over relay.
-- `ogp federation invite` / `accept <code>` → resolves pubkey via rendezvous → same.
-
-No new discovery mechanism needed; only the handshake *transport* changes.
+---
 
 ## What does NOT change
 
-- Direct federation: byte-identical. The relay branch only triggers when the peer
-  advertises relay and (optionally) our own gateway is unreachable.
-- E2E Ed25519: every handshake envelope is signed/verified exactly as today.
-- The relay server: it already forwards opaque envelopes by pubkey; the new
-  `federation` frame routes through the same untrusted path (may need to accept
-  the new `type` in validation, but no new trust surface).
+- **Direct federation: byte-identical.** The relay path only triggers when the peer's
+  advertised list selects relay. Single-`transport` (old) records still parse.
+- **E2E Ed25519** preserved in every transport and in the handshake.
+- The relay server remains an **untrusted forwarder** — it gains a `federation` frame type
+  and (Part B) stores+serves a signed card, but never sees private keys and can't forge.
 
 ## Files
 
-**Modify**
-- `src/daemon/server.ts` — extract `handleFederationRequest`/`handleFederationApprove`
-  cores; routes become wrappers; approve response includes approver identity.
-- `src/daemon/relay-client.ts` — `dispatchInbound` switches on `op`; add a
-  `requestViaRelay`/`approveViaRelay` (or generalize `deliverViaRelay` with an op).
-- `src/shared/relay-protocol.ts` — add the `federation` frame type + guard.
-- `src/cli/federation.ts` — `federationRequest` (and the approve sender) branch on
-  relay; skip gateway preflight + `/.well-known` in relay mode; identity from
-  rendezvous/handshake.
-- `packages/relay-dev/src/relay-core.ts` + `packages/rendezvous/src/relay-core.ts`
-  — accept/route the `federation` frame (vendored copy stays in sync; the rendezvous
-  edit is **the escalate-before-merge, merge=deploy piece**).
+**Daemon (dormant for direct users — no deploy):**
+- `src/shared/config.ts` — transport config becomes a list/preference (keep simple-mode ergonomic).
+- `src/daemon/rendezvous.ts` — build + parse a transport *list*; `lookupPeerTransport` returns it; `fetchPeerCard`; backward-compat for single descriptor.
+- `src/cli/federation.ts` — `deliverFederationMessage` preference-walk + fallback; `federationRequest` preflight rework + relay handshake.
+- `src/daemon/server.ts` — extract request/approve cores; include card in approve response; include card in registration.
+- `src/daemon/relay-client.ts` — `dispatchInbound` op-routing; request/approve over relay.
+- `src/shared/relay-protocol.ts` — `federation` frame type + guard.
+- `src/daemon/heartbeat.ts` — health = any advertised transport reachable.
+- `packages/relay-dev/src/relay-core.ts` — route the `federation` frame (dogfood).
 
-**Tests**
-- Handler-core unit tests (request/approve cores in isolation).
-- `dispatchInbound` op-routing test.
-- Relay-core routes `federation` frames (mirror existing routeDeliver tests).
-- A federation-deliver-style regression: direct handshake path unchanged.
-- e2e: two relay-only daemons complete a full request→approve→federated handshake
-  over the relay with no HTTP gateway (extend test/relay-e2e.test.ts).
+**Rendezvous (ESCALATE — merge=deploy):**
+- `packages/rendezvous/src/index.ts` + `verify.ts` — parse/store/return the transport *list* and the identity card from the verified payload; route the `federation` relay frame.
+- `packages/rendezvous/src/relay-core.ts` (vendored) — accept the `federation` frame.
+
+## Tests
+- Transport-list parse + backward-compat (old single descriptor → one-element list).
+- Preference walk + fallback (prefer direct→relay default; explicit preference honored; first-reachable wins).
+- Card in signed registration; rendezvous returns it; pubkey-mismatch rejected (tamper test, mirror existing).
+- Request/approve handler cores in isolation; wrapper-calls-core (no HTTP change).
+- `dispatchInbound` op-routing; relay-core routes `federation` frame.
+- Direct-path regression (handshake + delivery byte-identical).
+- e2e: two relay-only daemons complete request→approve→federated handshake with no HTTP gateway (extend test/relay-e2e.test.ts).
 
 ## Rollout / PRs
 
-1. **PR A (daemon + relay-dev, no deploy):** handler-core refactor, `federation`
-   frame, relay-client op routing, sender preflight rework, relay-dev core, all
-   tests. Dormant for direct users.
-2. **PR B (rendezvous mount, ESCALATE — merge=deploy):** accept/route the
-   `federation` frame in `packages/rendezvous/src/relay-core.ts`. Trust-adjacent +
-   auto-deploys. Dogfood the full two-relay-only handshake locally first.
+Per David: **one combined effort**, but still split by deploy risk:
+1. **PR A — daemon + relay-dev (no deploy):** all daemon-side changes (transport list,
+   preference/fallback, card fetch, handler cores, relay handshake, health). Dormant for
+   direct users; relay handshake just connection-refuses until PR B lands.
+2. **PR B — rendezvous (ESCALATE, merge=deploy):** transport-list + card storage/serving +
+   `federation` frame routing. Trust-adjacent + auto-deploys. Dogfood the full two-relay-only
+   federation locally first; David reviews the diff before merge.
 
 ## Estimate / risk
 
-~1.5–2 days. Trust-adjacent (Ed25519 handshake path) and touches the
-auto-deploying rendezvous → both the handler refactor and the relay frame need
-careful review. The refactor (step 1) is the riskiest for regressions and should
-land behind the existing handshake tests with no behavior change before the relay
-path is added.
+~2–3 days given the combined scope. Three trust-adjacent surfaces (signed transport list,
+signed card, relay handshake) all reviewed together. Highest-regression-risk piece is the
+request/approve handler-core refactor — land it behind existing handshake tests with **no
+behavior change** before adding the relay path.
 
-## Open questions for review
+## Settled decisions (David, 2026-06-11)
+- Q1 → multi-transport advertisement with preference + fallback; honor the recipient's
+  advertisement per-direction; default both-no-preference = **direct first, relay fallback**.
+- Q2 → **rendezvous serves the signed identity card** for relay peers (chosen over
+  handshake-only card exchange; also enrich the approve response as a complement).
+- Q3 → **one `federation` frame with an `op` field.**
+- Sequencing → **one combined effort**, PRs split by deploy risk (A dormant, B escalate).
 
-1. Identity exchange: is enriching the **approve** response with the approver's
-   `peer` block acceptable, or do we want a dedicated card-exchange frame?
-2. Should the relay path be **automatic** when the peer advertises relay, or
-   **opt-in** (e.g. only when our own gateway is detected unreachable)? Auto is
-   more turnkey; opt-in is more conservative for the trust review.
-3. Do we want `request`/`approve` to share one `federation` frame with an `op`
-   field (proposed), or two distinct frame types? One-with-op is less surface.
+## Config ergonomics — SETTLED (Option A, David 2026-06-11)
+
+Keep the simple single-mode path **exactly as today**; layer multi-transport on as
+opt-in extras. No migration, no breaking change to `set-mode`.
+
+```
+ogp config transport set-mode relay          # unchanged — the 99% case, ships as-is
+ogp config transport advertise direct relay  # opt-in: reachable on both
+ogp config transport prefer relay            # opt-in: preference (else default direct-first)
+```
+
+- The transport **list is the internal source of truth**. `set-mode <m>` writes a
+  one-element list `[{ mode: m }]`; `advertise` writes the multi-element list.
+- **Precedence rule (resolve the "which wins"):** if `transport.advertise` is set, it
+  defines the advertised list and `mode`/`prefer` order it; if only `mode` is set, it's a
+  one-element list (today's behavior). Absent ⇒ direct.
+- This keeps Option A able to *become* a full list model later with zero user-facing
+  change (the list is already the truth; the simple commands just write into it).
+- Companion toggle (bd-26fg) keeps working — it sets `mode`; a future UI can expose the
+  advertise/prefer list.
