@@ -164,6 +164,26 @@ function getLocalPeerId(): string | null {
  * health in `peerStatus`, parsed and returned alongside the boolean reachability.
  */
 async function checkPeerHealth(peer: Peer): Promise<HealthCheckResult> {
+  // bd-uiwr: a relay-only peer has no reachable HTTP gateway, so the direct probe
+  // below would always fail and show them perpetually "unhealthy" even when they
+  // are reachable via the relay. If the peer is currently registered at rendezvous
+  // advertising a relay descriptor, treat that registration (fresh by the server's
+  // 90s TTL) as the liveness signal instead of probing their dead gatewayUrl.
+  try {
+    const cfg = loadConfig();
+    if (cfg?.rendezvous?.enabled && peer.publicKey) {
+      const { lookupPeerTransport } = await import('./rendezvous.js');
+      const resolved = await lookupPeerTransport(cfg.rendezvous, peer.publicKey);
+      if (resolved && resolved.mode === 'relay') {
+        // Present in rendezvous (TTL-fresh) + advertising relay ⇒ reachable.
+        return { reachable: true };
+      }
+    }
+  } catch {
+    // Rendezvous unavailable or lookup failed — fall through to the HTTP probe so
+    // a flaky rendezvous never makes a directly-reachable peer look unhealthy.
+  }
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), activeConfig.timeoutMs);
