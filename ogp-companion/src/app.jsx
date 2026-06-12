@@ -69,6 +69,9 @@ function App() {
   const [busy, setBusy] = useState({ daemon: false, tunnel: false, startingId: null });
   const [toast, setToast] = useState(null);
   const [scale, setScale] = useState(1);
+  // bd-mmx7: in-app update state. status: idle | checking | available | downloading
+  // | installing | ready | uptodate | error. handle holds the live updater object.
+  const [update, setUpdate] = useState({ status: "idle", version: null, notes: "", progress: null, handle: null, error: null });
   const toastTimer = useRef(null);
 
   // theme + accent + density → CSS vars
@@ -92,6 +95,25 @@ function App() {
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, []);
+
+  // bd-mmx7: silent update check shortly after launch. Surfaces a non-blocking
+  // "update available" affordance in Settings; never auto-installs. No-op in the
+  // browser preview (isLive() false ⇒ checkForUpdate resolves not-available).
+  useEffect(() => {
+    if (!LIVE) return;
+    const timer = setTimeout(() => {
+      Promise.resolve(window.OGP_BACKEND.checkForUpdate?.())
+        .then((res) => {
+          if (res && res.available) {
+            setUpdate({ status: "available", version: res.version, notes: res.notes, progress: null, handle: res._handle, error: null });
+            showToast(`Update available: v${res.version}`, { icon: "download", tone: "ok" });
+          }
+        })
+        .catch(() => { /* silent — the manual Check button surfaces errors */ });
+    }, 4000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [LIVE]);
 
   // hydrate from the real OGP backend (Tauri). Falls back to mock data in a
   // plain browser where window.OGP_BACKEND.isLive() is false.
@@ -336,6 +358,46 @@ function App() {
       showToast("Daemon restarted", { icon: "cpu", tone: "ok" });
       return Promise.resolve();
     },
+
+    // bd-mmx7: manual "Check for updates". Surfaces available/up-to-date/error.
+    checkForUpdates() {
+      if (!LIVE) { showToast("Updates are only available in the desktop app", { icon: "alertTriangle", tone: "warn" }); return Promise.resolve(); }
+      setUpdate((u) => ({ ...u, status: "checking", error: null }));
+      return Promise.resolve(BK.checkForUpdate())
+        .then((res) => {
+          if (res && res.available) {
+            setUpdate({ status: "available", version: res.version, notes: res.notes, progress: null, handle: res._handle, error: null });
+          } else {
+            setUpdate((u) => ({ ...u, status: "uptodate", error: null }));
+            showToast("You're on the latest version", { icon: "check", tone: "ok" });
+          }
+        })
+        .catch((e) => {
+          setUpdate((u) => ({ ...u, status: "error", error: String(e.message || e) }));
+          showToast(`Update check failed: ${String(e.message || e)}`, { icon: "alertTriangle", tone: "danger" });
+        });
+    },
+
+    // Download + install the pending update, then relaunch into the new version.
+    installUpdate() {
+      if (!LIVE) return Promise.resolve();
+      setUpdate((u) => ({ ...u, status: "downloading", progress: 0, error: null }));
+      showToast("Downloading update…", { icon: "download", tone: "ok" });
+      return Promise.resolve(
+        BK.installUpdate(update.handle, (phase, pct) => {
+          setUpdate((u) => ({ ...u, status: phase === "done" ? "ready" : phase, progress: pct }));
+        })
+      )
+        .then(() => {
+          setUpdate((u) => ({ ...u, status: "ready", progress: 100 }));
+          showToast("Update installed — restarting…", { icon: "check", tone: "ok" });
+          return BK.relaunchApp();
+        })
+        .catch((e) => {
+          setUpdate((u) => ({ ...u, status: "error", error: String(e.message || e) }));
+          showToast(`Update failed: ${String(e.message || e)}`, { icon: "alertTriangle", tone: "danger" });
+        });
+    },
   };
 
   function refresh() {
@@ -348,7 +410,8 @@ function App() {
   const ctx = {
     framework: fw, identity: fw.identity, theme: t.theme,
     daemon: st.daemon, tunnel: st.tunnel, peers: st.peers, activity: st.activity, transport: st.transport,
-    gatewayUp, busy, actions, setRoute, setSelected, selectedPeerId,
+    gatewayUp, busy, actions, setRoute, setSelected, selectedPeerId, update,
+    appVersion: (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : null),
     peerStyle: t.peerStyle, setPeerStyle: (v) => setTweak("peerStyle", v),
     tunnelStyle: t.tunnelStyle, openWizard: () => setWizardOpen(true),
   };

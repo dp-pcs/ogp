@@ -138,4 +138,58 @@ window.OGP_BACKEND = {
     invoke("ogp_set_transport", { framework: fw, mode, relayUrl: relayUrl || null }),
   // Clear the Rust framework-discovery cache (identity lives there).
   refreshFrameworks: () => invoke("ogp_refresh_frameworks"),
+
+  // ── bd-mmx7: in-app auto-update ──────────────────────────────────
+  // Check the GitHub-Releases update endpoint for a newer signed build.
+  // Returns { available, version, notes } or { available:false }. In the
+  // browser (no Tauri) it resolves to not-available so the UI degrades cleanly.
+  checkForUpdate: async () => {
+    if (!hasTauri()) return { available: false };
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const update = await check();
+    if (!update) return { available: false };
+    return {
+      available: true,
+      version: update.version,
+      currentVersion: update.currentVersion,
+      notes: update.body || "",
+      // keep the live handle so installUpdate can reuse it without re-checking
+      _handle: update,
+    };
+  },
+  // Download + install the pending update (reusing the handle from checkForUpdate),
+  // reporting coarse progress via onProgress(phase, pct). On success the caller
+  // should relaunch via relaunchApp().
+  installUpdate: async (handle, onProgress) => {
+    if (!hasTauri()) throw new Error("Updates are only available in the desktop app");
+    const update = handle || (await (async () => {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      return check();
+    })());
+    if (!update) throw new Error("No update available");
+    let downloaded = 0;
+    let total = 0;
+    await update.downloadAndInstall((event) => {
+      switch (event.event) {
+        case "Started":
+          total = event.data.contentLength || 0;
+          onProgress?.("downloading", 0);
+          break;
+        case "Progress":
+          downloaded += event.data.chunkLength || 0;
+          onProgress?.("downloading", total ? Math.round((downloaded / total) * 100) : null);
+          break;
+        case "Finished":
+          onProgress?.("installing", 100);
+          break;
+      }
+    });
+    onProgress?.("done", 100);
+  },
+  // Relaunch into the freshly installed version.
+  relaunchApp: async () => {
+    if (!hasTauri()) return;
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  },
 };
