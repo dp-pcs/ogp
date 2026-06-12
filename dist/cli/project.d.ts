@@ -1,3 +1,20 @@
+import { type BackfillDeps, type BackfillResult } from '../daemon/contribution-backfill.js';
+/**
+ * bd-53c: BackfillDeps wired to the real federation transport + local store. The
+ * `query` leg sends a signed `project.query` and shapes federationSend's result into
+ * the helper's QueryResponse; `upsert` is the idempotent, signature-verifying merge.
+ * Factored out so both on-join (CLI) and the periodic heartbeat pass reuse it.
+ */
+export declare function liveBackfillDeps(): BackfillDeps;
+/**
+ * Pull + union-merge contributions for `projectId` from every OTHER project member
+ * that is an approved peer (bd-53c). Best-effort — offline / non-member peers are
+ * logged and skipped, never fatal. Returns the per-peer results for the caller to
+ * summarize. Shared by on-join and the periodic heartbeat pass.
+ */
+export declare function backfillProjectFromMembers(projectId: string, selfId: string, deps?: BackfillDeps, opts?: {
+    limit?: number;
+}): Promise<BackfillResult[]>;
 interface ProjectJoinOptions {
     description?: string;
     create?: boolean;

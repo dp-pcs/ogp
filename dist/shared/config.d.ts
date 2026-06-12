@@ -236,6 +236,11 @@ export interface OGPConfig {
     hermesWebhookUrl?: string;
     hermesWebhookSecret?: string;
     healthCheck?: HealthCheckConfig;
+    backfill?: {
+        enabled?: boolean;
+        maxPeersPerPass?: number;
+        limit?: number;
+    };
     keychainPath?: string;
     keychainPasswordFile?: string;
 }

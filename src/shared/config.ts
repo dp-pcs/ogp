@@ -374,6 +374,16 @@ export interface OGPConfig {
   // Health check configuration (optional)
   healthCheck?: HealthCheckConfig;
 
+  // bd-53c: cross-member contribution backfill (anti-entropy). On-join backfill
+  // always runs; this gates the PERIODIC pass that piggybacks on the heartbeat.
+  // Default enabled. `maxPeersPerPass` caps fan-out so a large project can't flood
+  // federation traffic on one tick.
+  backfill?: {
+    enabled?: boolean;          // default true
+    maxPeersPerPass?: number;   // default 10
+    limit?: number;             // per-query contribution cap (default 500)
+  };
+
   // macOS dedicated-keychain support for headless deployments.
   // When set, all `security` invocations target this keychain instead of the
   // login keychain. If keychainPasswordFile is also set, the keychain is
