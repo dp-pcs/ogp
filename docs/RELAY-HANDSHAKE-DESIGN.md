@@ -204,7 +204,23 @@ behavior change** before adding the relay path.
 - Q3 → **one `federation` frame with an `op` field.**
 - Sequencing → **one combined effort**, PRs split by deploy risk (A dormant, B escalate).
 
-## Remaining open question
-- Config ergonomics for the transport list: keep `transport.mode` for the common single-mode
-  case and add `transport.advertise: [...]` + `transport.prefer`, vs a full `transport.modes`
-  list? Decide at implementation; must not regress the simple `set-mode relay` UX.
+## Config ergonomics — SETTLED (Option A, David 2026-06-11)
+
+Keep the simple single-mode path **exactly as today**; layer multi-transport on as
+opt-in extras. No migration, no breaking change to `set-mode`.
+
+```
+ogp config transport set-mode relay          # unchanged — the 99% case, ships as-is
+ogp config transport advertise direct relay  # opt-in: reachable on both
+ogp config transport prefer relay            # opt-in: preference (else default direct-first)
+```
+
+- The transport **list is the internal source of truth**. `set-mode <m>` writes a
+  one-element list `[{ mode: m }]`; `advertise` writes the multi-element list.
+- **Precedence rule (resolve the "which wins"):** if `transport.advertise` is set, it
+  defines the advertised list and `mode`/`prefer` order it; if only `mode` is set, it's a
+  one-element list (today's behavior). Absent ⇒ direct.
+- This keeps Option A able to *become* a full list model later with zero user-facing
+  change (the list is already the truth; the simple commands just write into it).
+- Companion toggle (bd-26fg) keeps working — it sets `mode`; a future UI can expose the
+  advertise/prefer list.
