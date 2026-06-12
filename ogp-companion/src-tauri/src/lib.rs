@@ -108,6 +108,10 @@ async fn ogp_refresh_frameworks() -> Result<Value, ogp::OgpError> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // bd-mmx7: in-app auto-update. The updater plugin powers check()/
+        // downloadAndInstall() from the frontend; process provides relaunch().
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             ogp_snapshot,
             ogp_start_tunnel,

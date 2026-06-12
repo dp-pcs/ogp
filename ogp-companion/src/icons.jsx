@@ -8,6 +8,7 @@ const ICON_PATHS = {
   activity: '<path d="M3 12h3.5l2.5-7 4 14 2.5-7H21"/>',
   settings: '<path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2.2"/><circle cx="8" cy="16" r="2.2"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v5h-5"/>',
+  download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   check: '<path d="M5 12.5 10 17.5 19 6.5"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',

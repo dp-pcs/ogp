@@ -188,10 +188,69 @@ function SettingRow({ label, sub, children }) {
   );
 }
 
+// bd-mmx7: the App-updates panel body. Renders by update status: idle/uptodate ⇒
+// a Check button; available ⇒ version + notes + Install; downloading/installing ⇒
+// progress; ready ⇒ restarting; error ⇒ message + retry.
+function UpdatePanel({ up, actions }) {
+  const status = up.status || "idle";
+  const busyStates = ["checking", "downloading", "installing", "ready"];
+  const isBusy = busyStates.includes(status);
+
+  if (status === "available") {
+    return (
+      <div>
+        <SettingRow label="Update available" sub={`Version ${up.version} is ready to install`}>
+          <Badge tone="ok">v{up.version}</Badge>
+        </SettingRow>
+        {up.notes ? (
+          <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 9, background: "var(--surface-2)", fontSize: 12.5, color: "var(--text-muted)", maxHeight: 120, overflow: "auto", whiteSpace: "pre-wrap" }}>{up.notes}</div>
+        ) : null}
+        <div style={{ display: "flex", gap: 9, marginTop: 12 }}>
+          <Button variant="solid" icon="download" size="sm" onClick={() => actions.installUpdate?.()}>Install &amp; restart</Button>
+          <Button variant="outline" icon="refresh" size="sm" onClick={() => actions.checkForUpdates?.()}>Re-check</Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isBusy) {
+    const label = status === "downloading" ? (up.progress != null ? `Downloading… ${up.progress}%` : "Downloading…")
+      : status === "installing" ? "Installing…"
+      : status === "ready" ? "Restarting…"
+      : "Checking…";
+    return (
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13.5, color: "var(--text)", fontWeight: 600 }}>
+          <Icon name="download" size={16} style={{ color: "var(--accent)" }} />
+          {label}
+        </div>
+        {status === "downloading" && up.progress != null ? (
+          <div style={{ marginTop: 10, height: 6, borderRadius: 99, background: "var(--surface-2)", overflow: "hidden" }}>
+            <div style={{ width: `${up.progress}%`, height: "100%", background: "var(--accent)", transition: "width 160ms ease" }} />
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  // idle | uptodate | error
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+      <div style={{ flex: 1, fontSize: 12.5, color: status === "error" ? "var(--danger)" : "var(--text-muted)" }}>
+        {status === "uptodate" ? "You're on the latest version."
+          : status === "error" ? (up.error || "Update check failed.")
+          : "Check for a newer signed build. Updates download and verify in-app — no reinstall."}
+      </div>
+      <Button variant="outline" icon="refresh" size="sm" onClick={() => actions.checkForUpdates?.()}>Check for updates</Button>
+    </div>
+  );
+}
+
 function SettingsView({ ctx }) {
-  const { framework, identity, daemon, actions, transport, busy } = ctx;
+  const { framework, identity, daemon, actions, transport, busy, update, appVersion } = ctx;
   const t = transport || { mode: "direct", relayUrl: null };
   const mode = t.mode || "direct";
+  const up = update || { status: "idle" };
   return (
     <PageBody>
       <PageHeader title="Settings" sub={`Configuration for ${framework.displayName}`} />
@@ -224,6 +283,17 @@ function SettingsView({ ctx }) {
           <SettingRow label="Version"><Mono>{daemon.version ? `v${daemon.version}` : "—"}</Mono></SettingRow>
           <SettingRow label="Launch at login" sub="Start daemon when you log in"><Switch checked={true} onChange={() => {}} /></SettingRow>
           <SettingRow label="Poll interval" sub="How often the companion refreshes"><span style={{ fontWeight: 600, fontSize: 13.5, color: "var(--text)" }}>5s</span></SettingRow>
+        </Card>
+
+        <Card pad={20} style={{ gridColumn: "1 / -1" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 8 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 11, background: "var(--accent-soft)", color: "var(--accent)", display: "grid", placeItems: "center" }}><Icon name="download" size={20} /></div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text)" }}>App updates</div>
+              <div style={{ fontSize: 12, color: "var(--text-faint)" }}>OGP Companion {appVersion ? `v${appVersion}` : ""}</div>
+            </div>
+          </div>
+          <UpdatePanel up={up} actions={actions} />
         </Card>
 
         <Card pad={20} style={{ gridColumn: "1 / -1" }}>
