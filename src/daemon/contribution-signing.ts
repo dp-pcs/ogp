@@ -40,6 +40,30 @@ export interface SignedContributionWire {
   signature: string;
 }
 
+/**
+ * Reconstruct the EXACT canonical bytes an author signed for a stored contribution
+ * record. `signCanonical` serializes `{ ...canonical, timestamp }` via JSON.stringify
+ * (buildSignedContribution: id, projectId, authorId, entryType, summary, [metadata]);
+ * signCanonical appends `timestamp` last. This MUST match that order/shape byte-for-
+ * byte or the signature won't verify — a single shared helper used by the signer-side
+ * upsert AND the query responder (bd-53c) eliminates drift. Guarded by a round-trip
+ * test (the emitted payloadStr re-verifies against the stored signature).
+ */
+export function canonicalPayloadStr(
+  record: Pick<ProjectContribution, 'id' | 'authorId' | 'entryType' | 'topic' | 'summary' | 'metadata' | 'timestamp'>,
+  projectId: string
+): string {
+  return JSON.stringify({
+    id: record.id,
+    projectId,
+    authorId: record.authorId,
+    entryType: record.entryType ?? record.topic,
+    summary: record.summary,
+    ...(record.metadata !== undefined && { metadata: record.metadata }),
+    timestamp: record.timestamp
+  });
+}
+
 export interface BuildParams {
   projectId: string;
   authorId: string;          // author's ed25519 public key hex

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getConfigDir, ensureConfigDir } from '../shared/config.js';
-import { verifySignedContribution } from './contribution-signing.js';
+import { verifySignedContribution, canonicalPayloadStr } from './contribution-signing.js';
 import { deriveOwners, verifySignedCreation, verifySignedGrant, _ownershipCanonicalPeerId as canonicalPeerId } from './project-ownership.js';
 export function getContributionEntryType(contribution) {
     return contribution?.entryType || contribution?.topic || 'unknown';
@@ -281,12 +281,8 @@ export function upsertContribution(projectId, record) {
         id: record.id,
         authorId: record.authorId,
         timestamp: record.timestamp,
-        payloadStr: JSON.stringify({
-            id: record.id, projectId, authorId: record.authorId,
-            entryType: record.entryType, summary: record.summary,
-            ...(record.metadata !== undefined && { metadata: record.metadata }),
-            timestamp: record.timestamp
-        }),
+        // Shared canonical reconstruction (bd-53c) — identical bytes to the signer side.
+        payloadStr: canonicalPayloadStr(record, projectId),
         signature: record.signature
     });
     if (!check.ok)
