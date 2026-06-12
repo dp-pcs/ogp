@@ -85,3 +85,55 @@ restart of a 6-hostname tunnel. Awaiting David's explicit go.
 
 ## Durable memory
 `bd recall ogp-tunnel-restart` — restart command + dead-tunnel symptom (error 1033 / 530).
+
+---
+
+## PREPPED FIX — APPROVAL-READY COMMAND BLOCK (do NOT run without David's explicit go)
+
+Hard-gated: root-owned `/Library/LaunchDaemons` edit + tunnel restart (6 hostnames).
+Sequenced so there is **never a window with neither the nohup nor a managed daemon** mid-flight,
+and the kill-test uses **SIGTERM** (the original bug was a clean exit-0, so only a graceful term proves the fix; `kill -9` would falsely pass even under the old buggy config).
+
+```bash
+set -euo pipefail
+PLIST=/Library/LaunchDaemons/com.cloudflare.cloudflared.plist
+STAMP=$(date +%Y%m%d-%H%M%S)
+
+# 1. Timestamped backup (rollback = cp back + reload)
+sudo cp -p "$PLIST" "${PLIST}.bak-${STAMP}"
+
+# 2. Flip KeepAlive dict {SuccessfulExit:false} -> unconditional <true/>
+#    (PlistBuddy: delete the dict key, re-add as bool true)
+sudo /usr/libexec/PlistBuddy -c "Delete :KeepAlive" "$PLIST" 2>/dev/null || true
+sudo /usr/libexec/PlistBuddy -c "Add :KeepAlive bool true" "$PLIST"
+plutil -lint "$PLIST"                       # validate before loading
+
+# 3. Hand the tunnel to launchd. Bootout the (currently not-running) daemon entry,
+#    THEN kill the orphan nohup, THEN bootstrap — minimal gap, daemon owns it last.
+sudo launchctl bootout system/com.cloudflare.cloudflared 2>/dev/null || true
+kill 60729 2>/dev/null || true              # orphan manual nohup (verify pid first!)
+sudo launchctl bootstrap system "$PLIST"
+sudo launchctl kickstart -k system/com.cloudflare.cloudflared
+
+# 4. Verify managed + healthy
+launchctl print system/com.cloudflare.cloudflared | grep -E 'state|active count|last exit'
+#   expect: state = running, active count = 1
+curl -so /dev/null -w '%{http_code}\n' https://ogp.sarcastek.com/   # expect 404 (tunnel up), NOT 530
+curl -s -m 10 https://ogp.sarcastek.com/federation/ping             # expect {"pong":true,...}
+
+# 5. Kill-test the fix — MUST be SIGTERM (graceful), the exact failure mode:
+MPID=$(launchctl print system/com.cloudflare.cloudflared | awk '/pid =/{print $3; exit}')
+sudo launchctl kill SIGTERM system/com.cloudflare.cloudflared
+sleep 8                                      # ThrottleInterval=5
+launchctl print system/com.cloudflare.cloudflared | grep -E 'state|pid'
+#   expect: state = running with a NEW pid (auto-respawned after clean SIGTERM exit)
+curl -s -m 10 https://ogp.sarcastek.com/federation/ping             # expect pong again
+```
+
+**Rollback:** `sudo cp -p "${PLIST}.bak-${STAMP}" "$PLIST" && sudo launchctl bootout system/com.cloudflare.cloudflared && sudo launchctl bootstrap system "$PLIST"`.
+
+**Pre-flight before running (re-verify, values drift):**
+- Confirm the orphan nohup pid: `pgrep -f 'cloudflared tunnel .* run sarcastek-backend'` (was 60729; update the `kill` line if changed).
+- Confirm `$PLIST` still has `KeepAlive` as the dict form: `sudo /usr/libexec/PlistBuddy -c "Print :KeepAlive" "$PLIST"`.
+
+**Note on the tradeoff (per David's session feedback):** unconditional `<true/>` also respawns on *intentional* stops — but a federation tunnel has no legitimate "stop and stay down" during normal ops. The correct maintenance-stop procedure becomes `sudo launchctl bootout system/com.cloudflare.cloudflared` (removes from management), **not** `kill`. So `<true/>` is the right default; this is not a reason to hesitate.
