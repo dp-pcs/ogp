@@ -49,6 +49,15 @@ export function isDeliverFrame(f) {
         && typeof d.frame.messageStr === 'string'
         && typeof d.frame.signature === 'string';
 }
+export function isFederationFrame(f) {
+    const x = f;
+    return f.type === 'federation'
+        && (x.op === 'request' || x.op === 'approve')
+        && typeof x.reqId === 'string'
+        && !!x.frame && typeof x.frame === 'object'
+        && typeof x.frame.payloadStr === 'string'
+        && typeof x.frame.signature === 'string';
+}
 export function isResponseFrame(f) {
     return f.type === 'response' && typeof f.reqId === 'string';
 }

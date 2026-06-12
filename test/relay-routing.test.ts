@@ -108,3 +108,66 @@ describe('RelayCore routing', () => {
     expect(a.sent.some((f) => f.type === 'error' && f.code === 'payload-too-large')).toBe(true);
   });
 });
+
+describe('RelayCore federation routing (bd-63bs)', () => {
+  it('routes a federation frame to the destination, preserving op', () => {
+    const core = makeCore();
+    const a = fakeSocket(1); const b = fakeSocket(2);
+    authAs(core, a, 'pkA'); authAs(core, b, 'pkB');
+
+    core.onMessage(a, JSON.stringify({ type: 'federation', op: 'request', reqId: 'f1', to: 'pkB', frame: { payloadStr: '{}', signature: 's' } }));
+
+    const fwd = b.sent.find((f) => f.type === 'federation');
+    expect(fwd).toBeTruthy();
+    expect(fwd.op).toBe('request');
+    expect(fwd.reqId).toBe('f1');
+    expect(fwd.from).toBe('pkA');
+    expect(fwd.frame).toEqual({ payloadStr: '{}', signature: 's' });
+  });
+
+  it('routes the federation response back to the sender by reqId', () => {
+    const core = makeCore();
+    const a = fakeSocket(1); const b = fakeSocket(2);
+    authAs(core, a, 'pkA'); authAs(core, b, 'pkB');
+
+    core.onMessage(a, JSON.stringify({ type: 'federation', op: 'approve', reqId: 'f2', to: 'pkB', frame: { payloadStr: '{}', signature: 's' } }));
+    core.onMessage(b, JSON.stringify({ type: 'response', reqId: 'f2', result: { statusCode: 200, body: { received: true } } }));
+
+    const resp = a.sent.find((f) => f.type === 'response');
+    expect(resp.reqId).toBe('f2');
+    expect(resp.result).toEqual({ statusCode: 200, body: { received: true } });
+  });
+
+  it('errors peer-not-connected for an offline federation target', () => {
+    const core = makeCore();
+    const a = fakeSocket(1);
+    authAs(core, a, 'pkA');
+
+    core.onMessage(a, JSON.stringify({ type: 'federation', op: 'request', reqId: 'f3', to: 'pkGHOST', frame: { payloadStr: '{}', signature: 's' } }));
+
+    const err = a.sent.find((f) => f.type === 'error');
+    expect(err.code).toBe('peer-not-connected');
+    expect(err.reqId).toBe('f3');
+  });
+
+  it('rejects a federation frame with a bad op', () => {
+    const core = makeCore();
+    const a = fakeSocket(1); const b = fakeSocket(2);
+    authAs(core, a, 'pkA'); authAs(core, b, 'pkB');
+
+    core.onMessage(a, JSON.stringify({ type: 'federation', op: 'nope', reqId: 'f4', to: 'pkB', frame: { payloadStr: '{}', signature: 's' } }));
+
+    expect(a.sent.some((f) => f.type === 'error' && f.code === 'bad-frame')).toBe(true);
+    expect(b.sent.some((f) => f.type === 'federation')).toBe(false);
+  });
+
+  it('rejects a federation frame from an unauthenticated socket', () => {
+    const core = makeCore();
+    const a = fakeSocket(1);
+    core.onConnection(a); // no auth
+    core.onMessage(a, JSON.stringify({ type: 'federation', op: 'request', reqId: 'f5', to: 'pkB', frame: { payloadStr: '{}', signature: 's' } }));
+
+    const err = a.sent.find((f) => f.type === 'error');
+    expect(err.code).toBe('unauthorized');
+  });
+});

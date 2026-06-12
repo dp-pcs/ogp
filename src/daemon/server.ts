@@ -250,6 +250,396 @@ export function validateSignedApproval(
 }
 
 /**
+ * Transport-agnostic result of a federation handshake handler. The HTTP route
+ * maps this to `res.status(statusCode).json(body)`; the relay path (bd-63bs)
+ * maps it into a `response` frame. Same body either way.
+ */
+export interface FederationHandlerResult {
+  statusCode: number;
+  body: Record<string, unknown>;
+}
+
+export interface FederationHandlerDeps {
+  cfg: OGPConfig;
+  verifyEnvelope: ApprovalValidationDeps['verifyEnvelope'];
+}
+
+/**
+ * Core of POST /federation/request — extracted so the same logic serves both the
+ * HTTP route (server.ts) and a relay `federation` frame (relay-client.ts). Pure
+ * with respect to transport: it reads/writes the peer store and fires the agent
+ * notification exactly as before, and returns {statusCode, body} instead of
+ * touching `res`. Behavior is byte-identical to the previous inline handler.
+ */
+export async function handleFederationRequestCore(
+  body: unknown,
+  deps: FederationHandlerDeps
+): Promise<FederationHandlerResult> {
+  const { cfg, verifyEnvelope } = deps;
+  try {
+    // SECURITY (F-04): Body must be a signed canonical envelope:
+    //   { payloadStr: "<JSON>", signature: "<hex>" }
+    // payloadStr contains { peer: {...}, offeredIntents?: [...], timestamp }.
+    // We verify against peer.publicKey from the body — that proves the
+    // caller possesses the private key for the publicKey they announce.
+    const validation = validateSignedRequest(body, { verifyEnvelope });
+    if (!validation.ok) {
+      if (validation.status === 401) {
+        console.error(`[OGP] Federation request rejected: ${validation.error}`);
+      }
+      return { statusCode: validation.status, body: { error: validation.error } };
+    }
+
+    const peer = validation.parsed.peer;
+    const offeredIntents = validation.parsed.offeredIntents as string[] | undefined;
+
+    // Derive peer ID from public key (BUILD-111: port-agnostic identity)
+    // NEVER trust sender's peer.id - always use public key prefix
+    // Use 32-char prefix to avoid collision on shared Ed25519 DER header (first 24 chars identical for ALL Ed25519 keys)
+    const peerIdFromKey = derivePeerIdFromPublicKey(peer.publicKey);
+
+    // Check for gateway URL collision (same URL, different keys = resync scenario)
+    const existingByUrl = getPeerByUrl(peer.gatewayUrl);
+    let resyncSnapshot: Peer['resyncSnapshot'] | undefined;
+
+    if (existingByUrl && existingByUrl.publicKey !== peer.publicKey) {
+      // Different keys for same gateway URL - create snapshot for later resync offer
+      const oldProjects = listProjectsForPeer(existingByUrl.id);
+      const now = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+
+      resyncSnapshot = {
+        oldPeerId: existingByUrl.id,
+        oldPublicKey: existingByUrl.publicKey,
+        oldAlias: existingByUrl.alias,
+        oldGrantedScopes: existingByUrl.grantedScopes,
+        oldReceivedScopes: existingByUrl.receivedScopes,
+        oldProjects: oldProjects.map(p => p.id),
+        oldResponsePolicy: existingByUrl.responsePolicy,
+        replacedAt: now,
+        expiresAt
+      };
+
+      console.log(`[OGP] Gateway URL collision detected: ${peer.gatewayUrl}`);
+      console.log(`[OGP] Old peer ID: ${existingByUrl.id} (${existingByUrl.status})`);
+      console.log(`[OGP] New peer ID: ${peerIdFromKey} (pending)`);
+      console.log(`[OGP] Created resync snapshot - will offer to restore config after approval`);
+
+      // Remove the old peer to avoid duplicates
+      removePeer(existingByUrl.id);
+    }
+
+    // Check if peer already exists (by public key)
+    const existingPeer = getPeer(peerIdFromKey);
+    if (existingPeer) {
+      // Allow re-federation if previously removed or rejected
+      if (existingPeer.status !== 'removed' && existingPeer.status !== 'rejected') {
+        return { statusCode: 200, body: {
+          received: true,
+          status: 'already-pending-or-approved',
+          peerId: peerIdFromKey
+        } };
+      }
+    }
+
+    // Store offered intents (BUILD-110: intent negotiation) — extracted from
+    // signed payloadStr above, so we know they were authored by the peer.
+    const peerData: Peer = createPendingPeerRecord({
+      id: peerIdFromKey,  // Always use derived ID, never sender's
+      displayName: peer.displayName,
+      email: peer.email,
+      gatewayUrl: peer.gatewayUrl,
+      publicKey: peer.publicKey,
+      // Enhanced identity fields (backward compatible)
+      humanName: peer.humanName,
+      agentName: peer.agentName,
+      organization: peer.organization,
+      offeredIntents,
+      // BUILD-115: Record which agent owns this federation relationship
+      agentId: cfg.agentId
+    });
+
+    // Attach resync snapshot if we're replacing an existing peer with different keys
+    if (resyncSnapshot) {
+      peerData.resyncSnapshot = resyncSnapshot;
+    }
+    if (offeredIntents && offeredIntents.length > 0) {
+      console.log(`[OGP] Peer ${peer.displayName} offers intents: ${offeredIntents.join(', ')}`);
+    }
+
+    addPeer(peerData);
+    if (existingPeer && (existingPeer.status === 'removed' || existingPeer.status === 'rejected')) {
+      console.log(`[OGP] Re-federation request from ${peer.displayName} (${peerIdFromKey}) — reset from ${existingPeer.status} to pending with fresh peer state`);
+    } else {
+      console.log(`[OGP] Peer ${peer.displayName} (${peerIdFromKey}) added to peers.json`);
+    }
+
+    console.log(`[OGP] Federation request from ${peer.displayName} (${peerIdFromKey})`);
+
+    // BUILD-77: Fire immediate OpenClaw notification to agent session
+    const offeredIntentsList = peerData.offeredIntents ? peerData.offeredIntents.join(', ') : 'message, agent-comms, project.* (defaults)';
+    const notificationText = `[OGP Federation Request] ${peer.displayName} (${peerIdFromKey}) requests federation approval\n` +
+      `Gateway: ${peer.gatewayUrl}\n` +
+      `Email: ${peer.email}\n` +
+      `Type: Bidirectional (two-way) federation\n` +
+      `Intents Offered: ${offeredIntentsList}\n` +
+      `Action: Review and approve/reject using: ogp federation approve ${peerIdFromKey}`;
+
+    // Send notification with metadata for agent processing
+    const notificationPayload = {
+      text: notificationText,
+      sessionKey: 'agent:main:main', // Default main agent session
+      peerId: peerData.id,
+      peerDisplayName: peerData.displayName,
+      intent: 'federation-request',
+      topic: 'federation',
+      messageClass: 'approval-request' as const,
+      metadata: {
+        ogp: {
+          type: 'federation_request',
+          peer: {
+            id: peerData.id,
+            displayName: peer.displayName,
+            email: peer.email,
+            gatewayUrl: peer.gatewayUrl
+          },
+          requestedAt: peerData.requestedAt,
+          federationType: 'bidirectional',
+          offeredIntents: peerData.offeredIntents || ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'],
+          approvalCommand: `ogp federation approve ${peerData.id}`
+        }
+      }
+    };
+
+    // Fire notification immediately (not via heartbeat)
+    try {
+      const notified = await notifyOpenClaw(notificationPayload);
+      if (notified) {
+        console.log(`[OGP] Agent session notified of federation request from ${peer.displayName}`);
+      } else {
+        console.warn(`[OGP] Failed to notify agent session of federation request from ${peer.displayName}`);
+      }
+    } catch (error) {
+      console.error(`[OGP] Error notifying agent session:`, error);
+    }
+
+    return { statusCode: 200, body: {
+      received: true,
+      status: 'pending',
+      message: 'Federation request received and pending approval'
+    } };
+  } catch (error) {
+    console.error('[OGP] Error handling federation request:', error);
+    return { statusCode: 500, body: { error: 'Internal server error' } };
+  }
+}
+
+/**
+ * Core of POST /federation/approve — extracted so the same logic serves both the
+ * HTTP route and a relay `federation` frame (bd-63bs). Returns {statusCode, body};
+ * behavior is byte-identical to the previous inline handler, including the
+ * auto-grant-back to the approving peer.
+ */
+export async function handleFederationApproveCore(
+  body: unknown,
+  deps: FederationHandlerDeps
+): Promise<FederationHandlerResult> {
+  const { cfg, verifyEnvelope } = deps;
+  try {
+    const safeBody = (body || {}) as { payloadStr?: unknown; signature?: unknown };
+    const { payloadStr } = safeBody;
+
+    // Pre-validation peer lookup uses unverified hints from payloadStr to find
+    // the pending record. Signature verification then authenticates against
+    // peer.publicKey (the stored value), so even if payloadStr claims a
+    // different publicKey, the unsigned hints can only narrow the search —
+    // they cannot grant approval.
+    let peerHints: { fromGatewayUrl?: string; fromPublicKey?: string; peerId?: string; fromGatewayId?: string } = {};
+    if (typeof payloadStr === 'string') {
+      try {
+        const preview = JSON.parse(payloadStr);
+        peerHints = {
+          fromGatewayUrl: preview.fromGatewayUrl,
+          fromPublicKey: preview.fromPublicKey,
+          peerId: preview.peerId,
+          fromGatewayId: preview.fromGatewayId
+        };
+      } catch { /* validation will reject below */ }
+    }
+    const peerIdFromKey = peerHints.fromPublicKey
+      ? derivePeerIdFromPublicKey(peerHints.fromPublicKey)
+      : (peerHints.peerId || peerHints.fromGatewayId);
+    const peer = findBestPeerForApproval({
+      peerId: peerIdFromKey,
+      gatewayUrl: peerHints.fromGatewayUrl,
+      publicKey: peerHints.fromPublicKey
+    });
+
+    if (!peer) {
+      return { statusCode: 404, body: { error: 'No pending peer found' } };
+    }
+
+    // SECURITY (F-01): Verify against peer.publicKey (the stored value),
+    // and reject any attempt to overwrite that publicKey via fromPublicKey.
+    const validation = validateSignedApproval(safeBody, peer.publicKey, { verifyEnvelope });
+    if (!validation.ok) {
+      if (validation.status === 401 || validation.status === 403) {
+        console.error(`[OGP] Approval rejected for peer ${peer.id}: ${validation.error}`);
+      }
+      return { statusCode: validation.status, body: { error: validation.error } };
+    }
+
+    const parsed = validation.parsed;
+    const fromGatewayUrl = parsed.fromGatewayUrl;
+    const fromDisplayName = parsed.fromDisplayName;
+    const fromPublicKey = parsed.fromPublicKey;
+    const fromEmail = parsed.fromEmail;
+    const scopeGrants = parsed.scopeGrants as ScopeBundle | undefined;
+    const protocolVersion = parsed.protocolVersion || (scopeGrants ? '0.2.0' : '0.1.0');
+
+    // Update peer info if fork sent richer data
+    const peerUpdates: Partial<Peer> = {};
+    if (fromDisplayName) peerUpdates.displayName = fromDisplayName;
+    if (fromGatewayUrl) peerUpdates.gatewayUrl = fromGatewayUrl;
+    if (fromPublicKey) peerUpdates.publicKey = fromPublicKey;
+    if (fromEmail) peerUpdates.email = fromEmail;
+    peerUpdates.protocolVersion = protocolVersion;
+    // BUILD-115: Record which agent owns this federation relationship
+    peerUpdates.agentId = cfg.agentId;
+
+    // Store received scopes (what this peer grants TO us)
+    if (scopeGrants) {
+      peerUpdates.receivedScopes = scopeGrants;
+      console.log(`[OGP] Received scope grants from ${peer.displayName}:`, scopeGrants.scopes.map(s => s.intent).join(', '));
+    }
+
+    const approvedAt = new Date().toISOString();
+    const approvedPeer: Peer = {
+      ...peer,
+      ...peerUpdates,
+      id: fromPublicKey ? derivePeerIdFromPublicKey(fromPublicKey) : peer.id,
+      status: 'approved',
+      approvedAt
+    };
+
+    const persisted = replacePeersByIdentity(
+      {
+        peerId: peer.id,
+        gatewayUrl: fromGatewayUrl || peer.gatewayUrl,
+        publicKey: fromPublicKey || peer.publicKey
+      },
+      approvedPeer
+    );
+
+    if (!persisted) {
+      return { statusCode: 500, body: { error: 'Failed to persist approved peer state' } };
+    }
+
+    console.log(`[OGP] Federation approved by ${approvedPeer.displayName} (wire protocol: v${protocolVersion})`);
+
+    const approvalNotificationText = `[OGP Federation Approved] ${approvedPeer.displayName} (${approvedPeer.id}) approved your federation request\n` +
+      `Gateway: ${approvedPeer.gatewayUrl}\n` +
+      `Status: Federation is now active.`;
+
+    const approvalNotificationPayload = {
+      text: approvalNotificationText,
+      sessionKey: 'agent:main:main',
+      peerId: approvedPeer.id,
+      peerDisplayName: approvedPeer.displayName,
+      intent: 'status-update',
+      topic: 'federation',
+      messageClass: 'status-update' as const,
+      metadata: {
+        ogp: {
+          type: 'federation_approved',
+          peer: {
+            id: approvedPeer.id,
+            displayName: approvedPeer.displayName,
+            email: approvedPeer.email,
+            gatewayUrl: approvedPeer.gatewayUrl
+          },
+          approvedAt,
+          protocolVersion,
+          scopeGrantsReceived: Boolean(scopeGrants)
+        }
+      }
+    };
+
+    try {
+      const notified = await notifyOpenClaw(approvalNotificationPayload);
+      if (notified) {
+        console.log(`[OGP] Agent session proactively notified of federation approval by ${approvedPeer.displayName}`);
+      } else {
+        console.warn(`[OGP] Failed to proactively notify agent session of federation approval by ${approvedPeer.displayName}`);
+      }
+    } catch (error) {
+      console.error(`[OGP] Error notifying agent session of approval:`, error);
+    }
+
+    // BUILD-99/100: Auto-grant default scopes back to the approving peer if they have none yet
+    // This ensures bidirectional scope negotiation happens in a single handshake
+    const { updatePeerGrantedScopes } = await import('./peers.js');
+    const { createScopeBundle, createScopeGrant, DEFAULT_RATE_LIMIT } = await import('./scopes.js');
+
+    const freshPeer = getPeer(approvedPeer.id);
+    if (freshPeer && !freshPeer.grantedScopes) {
+      const defaultIntents = ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'];
+      const scopes = defaultIntents.map(intent => createScopeGrant(intent, { rateLimit: DEFAULT_RATE_LIMIT }));
+      const bundle = createScopeBundle(scopes);
+      updatePeerGrantedScopes(approvedPeer.id, bundle);
+      console.log(`[OGP] Auto-granted default scopes to ${approvedPeer.displayName}: ${defaultIntents.join(', ')}`);
+
+      // Send our grants back to the approving peer (signed envelope per F-01)
+      try {
+        const ourConfig = requireConfig();
+        const keypair = (await import('./keypair.js')).loadOrGenerateKeyPair();
+        const { signCanonical } = await import('../shared/signing.js');
+        const { payloadStr: gpayloadStr, signature: gsignature } = signCanonical({
+          fromGatewayId: `${new URL(ourConfig.gatewayUrl).hostname}:${ourConfig.daemonPort}`,
+          fromDisplayName: ourConfig.displayName,
+          fromGatewayUrl: ourConfig.gatewayUrl,
+          fromPublicKey: keypair.publicKey,
+          fromEmail: ourConfig.email,
+          protocolVersion: '0.2.0',
+          scopeGrants: bundle
+        }, keypair.privateKey);
+
+        // bd-63bs: route the grant-back over relay when the approving peer is
+        // relay-only (no gatewayUrl to POST to).
+        let relayBack: string | null = null;
+        if (cfg.rendezvous?.enabled && freshPeer.publicKey && !freshPeer.gatewayUrl) {
+          try {
+            const { lookupPeerTransports } = await import('./rendezvous.js');
+            const ts = await lookupPeerTransports(cfg.rendezvous, freshPeer.publicKey);
+            const relay = ts.find((t) => t.mode === 'relay');
+            if (relay && relay.mode === 'relay') relayBack = relay.relayUrl;
+          } catch { /* fall through to direct */ }
+        }
+        if (relayBack) {
+          const { federationViaRelay } = await import('./relay-client.js');
+          await federationViaRelay(relayBack, freshPeer.publicKey, 'approve', { payloadStr: gpayloadStr, signature: gsignature });
+          console.log(`[OGP] Sent auto-grant confirmation back to ${approvedPeer.displayName} (via relay)`);
+        } else {
+          await fetch(`${freshPeer.gatewayUrl}/federation/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ payloadStr: gpayloadStr, signature: gsignature })
+          });
+          console.log(`[OGP] Sent auto-grant confirmation back to ${approvedPeer.displayName}`);
+        }
+      } catch (e) {
+        console.warn(`[OGP] Could not send auto-grant back to ${approvedPeer.displayName}:`, e);
+      }
+    }
+
+    return { statusCode: 200, body: { received: true } };
+  } catch (error) {
+    console.error('[OGP] Error handling approval:', error);
+    return { statusCode: 500, body: { error: 'Internal server error' } };
+  }
+}
+
+/**
  * B0032 v0.7.0 — `/.well-known/ogp` response shape.
  * Exported so tests (and future framework integrations) can type against it.
  */
@@ -542,165 +932,12 @@ export function startServer(config?: OGPConfig, background = false): void {
 
   // POST /federation/request - Incoming federation request
   app.post('/federation/request', async (req: Request, res: Response) => {
-    try {
-      // SECURITY (F-04): Body must be a signed canonical envelope:
-      //   { payloadStr: "<JSON>", signature: "<hex>" }
-      // payloadStr contains { peer: {...}, offeredIntents?: [...], timestamp }.
-      // We verify against peer.publicKey from the body — that proves the
-      // caller possesses the private key for the publicKey they announce.
-      const { verifyCanonical } = await import('../shared/signing.js');
-      const validation = validateSignedRequest(req.body, {
-        verifyEnvelope: (env, pk) => verifyCanonical(env, pk)
-      });
-      if (!validation.ok) {
-        if (validation.status === 401) {
-          console.error(`[OGP] Federation request rejected: ${validation.error}`);
-        }
-        return res.status(validation.status).json({ error: validation.error });
-      }
-
-      const peer = validation.parsed.peer;
-      const offeredIntents = validation.parsed.offeredIntents as string[] | undefined;
-
-      // Derive peer ID from public key (BUILD-111: port-agnostic identity)
-      // NEVER trust sender's peer.id - always use public key prefix
-      // Use 32-char prefix to avoid collision on shared Ed25519 DER header (first 24 chars identical for ALL Ed25519 keys)
-      const peerIdFromKey = derivePeerIdFromPublicKey(peer.publicKey);
-
-      // Check for gateway URL collision (same URL, different keys = resync scenario)
-      const existingByUrl = getPeerByUrl(peer.gatewayUrl);
-      let resyncSnapshot: Peer['resyncSnapshot'] | undefined;
-
-      if (existingByUrl && existingByUrl.publicKey !== peer.publicKey) {
-        // Different keys for same gateway URL - create snapshot for later resync offer
-        const oldProjects = listProjectsForPeer(existingByUrl.id);
-        const now = new Date().toISOString();
-        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
-
-        resyncSnapshot = {
-          oldPeerId: existingByUrl.id,
-          oldPublicKey: existingByUrl.publicKey,
-          oldAlias: existingByUrl.alias,
-          oldGrantedScopes: existingByUrl.grantedScopes,
-          oldReceivedScopes: existingByUrl.receivedScopes,
-          oldProjects: oldProjects.map(p => p.id),
-          oldResponsePolicy: existingByUrl.responsePolicy,
-          replacedAt: now,
-          expiresAt
-        };
-
-        console.log(`[OGP] Gateway URL collision detected: ${peer.gatewayUrl}`);
-        console.log(`[OGP] Old peer ID: ${existingByUrl.id} (${existingByUrl.status})`);
-        console.log(`[OGP] New peer ID: ${peerIdFromKey} (pending)`);
-        console.log(`[OGP] Created resync snapshot - will offer to restore config after approval`);
-
-        // Remove the old peer to avoid duplicates
-        removePeer(existingByUrl.id);
-      }
-
-      // Check if peer already exists (by public key)
-      const existingPeer = getPeer(peerIdFromKey);
-      if (existingPeer) {
-        // Allow re-federation if previously removed or rejected
-        if (existingPeer.status !== 'removed' && existingPeer.status !== 'rejected') {
-          return res.status(200).json({ 
-            received: true, 
-            status: 'already-pending-or-approved',
-            peerId: peerIdFromKey
-          });
-        }
-      }
-
-      // Store offered intents (BUILD-110: intent negotiation) — extracted from
-      // signed payloadStr above, so we know they were authored by the peer.
-      const peerData: Peer = createPendingPeerRecord({
-        id: peerIdFromKey,  // Always use derived ID, never sender's
-        displayName: peer.displayName,
-        email: peer.email,
-        gatewayUrl: peer.gatewayUrl,
-        publicKey: peer.publicKey,
-        // Enhanced identity fields (backward compatible)
-        humanName: peer.humanName,
-        agentName: peer.agentName,
-        organization: peer.organization,
-        offeredIntents,
-        // BUILD-115: Record which agent owns this federation relationship
-        agentId: cfg.agentId
-      });
-
-      // Attach resync snapshot if we're replacing an existing peer with different keys
-      if (resyncSnapshot) {
-        peerData.resyncSnapshot = resyncSnapshot;
-      }
-      if (offeredIntents && offeredIntents.length > 0) {
-        console.log(`[OGP] Peer ${peer.displayName} offers intents: ${offeredIntents.join(', ')}`);
-      }
-
-      addPeer(peerData);
-      if (existingPeer && (existingPeer.status === 'removed' || existingPeer.status === 'rejected')) {
-        console.log(`[OGP] Re-federation request from ${peer.displayName} (${peerIdFromKey}) — reset from ${existingPeer.status} to pending with fresh peer state`);
-      } else {
-        console.log(`[OGP] Peer ${peer.displayName} (${peerIdFromKey}) added to peers.json`);
-      }
-
-      console.log(`[OGP] Federation request from ${peer.displayName} (${peerIdFromKey})`);
-
-      // BUILD-77: Fire immediate OpenClaw notification to agent session
-      const offeredIntentsList = peerData.offeredIntents ? peerData.offeredIntents.join(', ') : 'message, agent-comms, project.* (defaults)';
-      const notificationText = `[OGP Federation Request] ${peer.displayName} (${peerIdFromKey}) requests federation approval\n` +
-        `Gateway: ${peer.gatewayUrl}\n` +
-        `Email: ${peer.email}\n` +
-        `Type: Bidirectional (two-way) federation\n` +
-        `Intents Offered: ${offeredIntentsList}\n` +
-        `Action: Review and approve/reject using: ogp federation approve ${peerIdFromKey}`;
-
-      // Send notification with metadata for agent processing
-      const notificationPayload = {
-        text: notificationText,
-        sessionKey: 'agent:main:main', // Default main agent session
-        peerId: peerData.id,
-        peerDisplayName: peerData.displayName,
-        intent: 'federation-request',
-        topic: 'federation',
-        messageClass: 'approval-request' as const,
-        metadata: {
-          ogp: {
-            type: 'federation_request',
-            peer: {
-              id: peerData.id,
-              displayName: peer.displayName,
-              email: peer.email,
-              gatewayUrl: peer.gatewayUrl
-            },
-            requestedAt: peerData.requestedAt,
-            federationType: 'bidirectional',
-            offeredIntents: peerData.offeredIntents || ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'],
-            approvalCommand: `ogp federation approve ${peerData.id}`
-          }
-        }
-      };
-
-      // Fire notification immediately (not via heartbeat)
-      try {
-        const notified = await notifyOpenClaw(notificationPayload);
-        if (notified) {
-          console.log(`[OGP] Agent session notified of federation request from ${peer.displayName}`);
-        } else {
-          console.warn(`[OGP] Failed to notify agent session of federation request from ${peer.displayName}`);
-        }
-      } catch (error) {
-        console.error(`[OGP] Error notifying agent session:`, error);
-      }
-
-      res.json({
-        received: true,
-        status: 'pending',
-        message: 'Federation request received and pending approval'
-      });
-    } catch (error) {
-      console.error('[OGP] Error handling federation request:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
+    const { verifyCanonical } = await import('../shared/signing.js');
+    const result = await handleFederationRequestCore(req.body, {
+      cfg,
+      verifyEnvelope: (env, pk) => verifyCanonical(env, pk)
+    });
+    res.status(result.statusCode).json(result.body);
   });
 
   // POST /federation/update-identity - Peer sends updated identity information
@@ -769,185 +1006,12 @@ export function startServer(config?: OGPConfig, background = false): void {
   // this prevents a third party from racing the legitimate peer to "approve"
   // and replacing the publicKey of a pending federation.
   app.post('/federation/approve', async (req: Request, res: Response) => {
-    try {
-      const body = req.body || {};
-      const { payloadStr, signature } = body as { payloadStr?: unknown; signature?: unknown };
-
-      // Pre-validation peer lookup uses unverified hints from payloadStr to find
-      // the pending record. Signature verification then authenticates against
-      // peer.publicKey (the stored value), so even if payloadStr claims a
-      // different publicKey, the unsigned hints can only narrow the search —
-      // they cannot grant approval.
-      let peerHints: { fromGatewayUrl?: string; fromPublicKey?: string; peerId?: string; fromGatewayId?: string } = {};
-      if (typeof payloadStr === 'string') {
-        try {
-          const preview = JSON.parse(payloadStr);
-          peerHints = {
-            fromGatewayUrl: preview.fromGatewayUrl,
-            fromPublicKey: preview.fromPublicKey,
-            peerId: preview.peerId,
-            fromGatewayId: preview.fromGatewayId
-          };
-        } catch { /* validation will reject below */ }
-      }
-      const peerIdFromKey = peerHints.fromPublicKey
-        ? derivePeerIdFromPublicKey(peerHints.fromPublicKey)
-        : (peerHints.peerId || peerHints.fromGatewayId);
-      const peer = findBestPeerForApproval({
-        peerId: peerIdFromKey,
-        gatewayUrl: peerHints.fromGatewayUrl,
-        publicKey: peerHints.fromPublicKey
-      });
-
-      if (!peer) {
-        return res.status(404).json({ error: 'No pending peer found' });
-      }
-
-      // SECURITY (F-01): Verify against peer.publicKey (the stored value),
-      // and reject any attempt to overwrite that publicKey via fromPublicKey.
-      const { verifyCanonical } = await import('../shared/signing.js');
-      const validation = validateSignedApproval(body, peer.publicKey, {
-        verifyEnvelope: (env, pk) => verifyCanonical(env, pk)
-      });
-      if (!validation.ok) {
-        if (validation.status === 401 || validation.status === 403) {
-          console.error(`[OGP] Approval rejected for peer ${peer.id}: ${validation.error}`);
-        }
-        return res.status(validation.status).json({ error: validation.error });
-      }
-
-      const parsed = validation.parsed;
-      const fromGatewayUrl = parsed.fromGatewayUrl;
-      const fromDisplayName = parsed.fromDisplayName;
-      const fromPublicKey = parsed.fromPublicKey;
-      const fromEmail = parsed.fromEmail;
-      const scopeGrants = parsed.scopeGrants as ScopeBundle | undefined;
-      const protocolVersion = parsed.protocolVersion || (scopeGrants ? '0.2.0' : '0.1.0');
-
-      // Update peer info if fork sent richer data
-      const peerUpdates: Partial<Peer> = {};
-      if (fromDisplayName) peerUpdates.displayName = fromDisplayName;
-      if (fromGatewayUrl) peerUpdates.gatewayUrl = fromGatewayUrl;
-      if (fromPublicKey) peerUpdates.publicKey = fromPublicKey;
-      if (fromEmail) peerUpdates.email = fromEmail;
-      peerUpdates.protocolVersion = protocolVersion;
-      // BUILD-115: Record which agent owns this federation relationship
-      peerUpdates.agentId = cfg.agentId;
-
-      // Store received scopes (what this peer grants TO us)
-      if (scopeGrants) {
-        peerUpdates.receivedScopes = scopeGrants;
-        console.log(`[OGP] Received scope grants from ${peer.displayName}:`, scopeGrants.scopes.map(s => s.intent).join(', '));
-      }
-
-      const approvedAt = new Date().toISOString();
-      const approvedPeer: Peer = {
-        ...peer,
-        ...peerUpdates,
-        id: fromPublicKey ? derivePeerIdFromPublicKey(fromPublicKey) : peer.id,
-        status: 'approved',
-        approvedAt
-      };
-
-      const persisted = replacePeersByIdentity(
-        {
-          peerId: peer.id,
-          gatewayUrl: fromGatewayUrl || peer.gatewayUrl,
-          publicKey: fromPublicKey || peer.publicKey
-        },
-        approvedPeer
-      );
-
-      if (!persisted) {
-        return res.status(500).json({ error: 'Failed to persist approved peer state' });
-      }
-
-      console.log(`[OGP] Federation approved by ${approvedPeer.displayName} (wire protocol: v${protocolVersion})`);
-
-      const approvalNotificationText = `[OGP Federation Approved] ${approvedPeer.displayName} (${approvedPeer.id}) approved your federation request\n` +
-        `Gateway: ${approvedPeer.gatewayUrl}\n` +
-        `Status: Federation is now active.`;
-
-      const approvalNotificationPayload = {
-        text: approvalNotificationText,
-        sessionKey: 'agent:main:main',
-        peerId: approvedPeer.id,
-        peerDisplayName: approvedPeer.displayName,
-        intent: 'status-update',
-        topic: 'federation',
-        messageClass: 'status-update' as const,
-        metadata: {
-          ogp: {
-            type: 'federation_approved',
-            peer: {
-              id: approvedPeer.id,
-              displayName: approvedPeer.displayName,
-              email: approvedPeer.email,
-              gatewayUrl: approvedPeer.gatewayUrl
-            },
-            approvedAt,
-            protocolVersion,
-            scopeGrantsReceived: Boolean(scopeGrants)
-          }
-        }
-      };
-
-      try {
-        const notified = await notifyOpenClaw(approvalNotificationPayload);
-        if (notified) {
-          console.log(`[OGP] Agent session proactively notified of federation approval by ${approvedPeer.displayName}`);
-        } else {
-          console.warn(`[OGP] Failed to proactively notify agent session of federation approval by ${approvedPeer.displayName}`);
-        }
-      } catch (error) {
-        console.error(`[OGP] Error notifying agent session of approval:`, error);
-      }
-
-      // BUILD-99/100: Auto-grant default scopes back to the approving peer if they have none yet
-      // This ensures bidirectional scope negotiation happens in a single handshake
-      const { updatePeerGrantedScopes } = await import('./peers.js');
-      const { createScopeBundle, createScopeGrant, DEFAULT_RATE_LIMIT } = await import('./scopes.js');
-      const { getPrivateKey: _getPrivateKey } = await import('./keypair.js');
-      const { signObject: _signObject } = await import('../shared/signing.js');
-
-      const freshPeer = getPeer(approvedPeer.id);
-      if (freshPeer && !freshPeer.grantedScopes) {
-        const defaultIntents = ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'];
-        const scopes = defaultIntents.map(intent => createScopeGrant(intent, { rateLimit: DEFAULT_RATE_LIMIT }));
-        const bundle = createScopeBundle(scopes);
-        updatePeerGrantedScopes(approvedPeer.id, bundle);
-        console.log(`[OGP] Auto-granted default scopes to ${approvedPeer.displayName}: ${defaultIntents.join(', ')}`);
-
-        // Send our grants back to the approving peer (signed envelope per F-01)
-        try {
-          const ourConfig = requireConfig();
-          const keypair = (await import('./keypair.js')).loadOrGenerateKeyPair();
-          const { signCanonical } = await import('../shared/signing.js');
-          const { payloadStr: gpayloadStr, signature: gsignature } = signCanonical({
-            fromGatewayId: `${new URL(ourConfig.gatewayUrl).hostname}:${ourConfig.daemonPort}`,
-            fromDisplayName: ourConfig.displayName,
-            fromGatewayUrl: ourConfig.gatewayUrl,
-            fromPublicKey: keypair.publicKey,
-            fromEmail: ourConfig.email,
-            protocolVersion: '0.2.0',
-            scopeGrants: bundle
-          }, keypair.privateKey);
-          await fetch(`${freshPeer.gatewayUrl}/federation/approve`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ payloadStr: gpayloadStr, signature: gsignature })
-          });
-          console.log(`[OGP] Sent auto-grant confirmation back to ${approvedPeer.displayName}`);
-        } catch (e) {
-          console.warn(`[OGP] Could not send auto-grant back to ${approvedPeer.displayName}:`, e);
-        }
-      }
-
-      res.json({ received: true });
-    } catch (error) {
-      console.error('[OGP] Error handling approval:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
+    const { verifyCanonical } = await import('../shared/signing.js');
+    const result = await handleFederationApproveCore(req.body, {
+      cfg,
+      verifyEnvelope: (env, pk) => verifyCanonical(env, pk)
+    });
+    res.status(result.statusCode).json(result.body);
   });
 
   // POST /federation/removed - Receive tear-down notification from removing peer
@@ -1204,7 +1268,19 @@ export function startServer(config?: OGPConfig, background = false): void {
 
     // Start rendezvous registration (if configured)
     if (cfg.rendezvous?.enabled) {
-      startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort, cfg.transport).catch((err: Error) => {
+      // bd-maas Part B: advertise a signed identity card so the rendezvous can
+      // serve discovery info for relay-only peers (no public /.well-known/ogp).
+      const card = {
+        displayName: cfg.displayName,
+        email: cfg.email,
+        gatewayUrl: cfg.gatewayUrl,
+        publicKey: getPublicKey(),
+        offeredIntents: loadIntents().map((i) => i.name)
+      };
+      startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort, cfg.transport, {
+        gatewayUrl: cfg.gatewayUrl,
+        card
+      }).catch((err: Error) => {
         console.warn(`[OGP] Rendezvous startup error: ${err.message}`);
       });
     }

@@ -126,6 +126,42 @@ export function getTransportMode(config) {
     return config.transport?.mode ?? 'direct';
 }
 /**
+ * Resolve the ordered transport advertisement list (bd-maas). This is the internal
+ * source of truth; `mode`/`advertise`/`prefer` are the user-facing knobs over it.
+ *
+ * Precedence (Option A, settled 2026-06-11):
+ *   1. `transport.advertise` set ⇒ that list, de-duplicated, with `prefer` (if a
+ *      member) hoisted to the front and the rest in declaration order.
+ *   2. else `transport.mode` ⇒ a one-element list (today's behavior, byte-identical).
+ *   3. absent ⇒ `[{ mode: 'direct' }]`.
+ *
+ * Pure — exported for testing. Never throws; ignores an out-of-list `prefer`.
+ */
+export function resolveTransportList(config) {
+    const t = config.transport;
+    const advertise = t?.advertise;
+    if (advertise && advertise.length > 0) {
+        // De-dup preserving declaration order.
+        const seen = new Set();
+        const ordered = [];
+        for (const m of advertise) {
+            if (!seen.has(m)) {
+                seen.add(m);
+                ordered.push(m);
+            }
+        }
+        // Hoist `prefer` to the front when it's actually in the advertised set.
+        const prefer = t?.prefer;
+        if (prefer && seen.has(prefer)) {
+            const rest = ordered.filter((m) => m !== prefer);
+            return [prefer, ...rest].map((mode) => ({ mode }));
+        }
+        return ordered.map((mode) => ({ mode }));
+    }
+    const mode = t?.mode ?? 'direct';
+    return [{ mode }];
+}
+/**
  * Get the config file path (computed dynamically based on OGP_HOME)
  */
 export function getConfigPath() {

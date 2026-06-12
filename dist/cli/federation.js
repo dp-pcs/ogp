@@ -1,7 +1,8 @@
 import { listPeers, loadPeers, getPeer, approvePeer, rejectPeer, updatePeer, updatePeerGrantedScopes } from '../daemon/peers.js';
 import { requireConfig, loadConfig } from '../shared/config.js';
-import { lookupPeer, lookupPeerTransport } from '../daemon/rendezvous.js';
-import { deliverViaRelay } from '../daemon/relay-client.js';
+import { lookupPeerTransports } from '../daemon/rendezvous.js';
+import { deliverViaRelay, federationViaRelay } from '../daemon/relay-client.js';
+import { fetchPeerCard } from '../daemon/rendezvous.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject, sign } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
@@ -117,7 +118,25 @@ async function resolvePeerGatewayUrl(gatewayUrl, contextLabel) {
         throw new Error(`${contextLabel}: peer gateway is not reachable or missing /.well-known/ogp. ${error.message}`);
     }
 }
+/** Resolve a peer's relay URL from their advertised transport list, or null if
+ *  they don't advertise relay (or rendezvous is disabled / lookup fails). bd-63bs. */
+async function resolvePeerRelayUrl(config, pubkey) {
+    if (!config.rendezvous?.enabled || !pubkey)
+        return null;
+    try {
+        const transports = await lookupPeerTransports(config.rendezvous, pubkey);
+        const relay = transports.find((t) => t.mode === 'relay');
+        return relay ? relay.relayUrl : null;
+    }
+    catch {
+        return null;
+    }
+}
 async function refreshPeerGatewayUrlForApproval(peer) {
+    // bd-63bs: a relay-only peer has no gatewayUrl to refresh; skip the /.well-known
+    // probe and keep the empty gatewayUrl (the approval routes over relay instead).
+    if (!peer.gatewayUrl)
+        return '';
     const { gatewayUrl, card } = await resolvePeerGatewayUrl(peer.gatewayUrl, 'Preflight');
     if (card.publicKey && peer.publicKey && card.publicKey !== peer.publicKey) {
         throw new Error(`Preflight: peer gateway identity mismatch. Expected ${peer.publicKey.substring(0, 32)}, got ${card.publicKey.substring(0, 32)}.`);
@@ -575,6 +594,91 @@ export async function federationStatus(json = false) {
         }
     }
 }
+/**
+ * Send a federation request to a RELAY-ONLY peer over the relay (bd-63bs). Unlike
+ * federationRequest (which POSTs to the peer's HTTP gateway), this:
+ *   1. skips ensureLocalGatewayReachable — relay reachability doesn't need our
+ *      gateway to be public;
+ *   2. resolves the peer's identity card from rendezvous (fetchPeerCard), not from
+ *      a /.well-known/ogp fetch the relay-only peer can't serve;
+ *   3. routes the same signed { peer, offeredIntents } envelope through the relay
+ *      `federation` frame.
+ * Returns true on a received-and-pending response.
+ */
+async function federationRequestViaRelay(relayUrl, pubkey, alias, json = false) {
+    const config = requireConfig();
+    const keypair = loadOrGenerateKeyPair();
+    const ourPeerId = keypair.publicKey.substring(0, 16);
+    // Resolve the peer's identity card from rendezvous (relay-only peers have no
+    // public /.well-known/ogp). Non-fatal if absent — we can still send the request.
+    let card = null;
+    try {
+        card = config.rendezvous ? await fetchPeerCard(config.rendezvous, pubkey) : null;
+    }
+    catch { /* non-fatal */ }
+    const peer = {
+        id: ourPeerId,
+        displayName: config.displayName,
+        email: config.email,
+        gatewayUrl: config.gatewayUrl,
+        publicKey: keypair.publicKey,
+        ...(config.humanName ? { humanName: config.humanName } : {}),
+        ...(config.agentName ? { agentName: config.agentName } : {}),
+        ...(config.organization ? { organization: config.organization } : {}),
+    };
+    let ourIntents = loadIntents().map((i) => i.name);
+    if (ourIntents.length === 0) {
+        ourIntents = ['message', 'agent-comms', 'project.join', 'project.contribute', 'project.query', 'project.status'];
+    }
+    const { signCanonical } = await import('../shared/signing.js');
+    const { payloadStr, signature } = signCanonical({ peer, offeredIntents: ourIntents }, keypair.privateKey);
+    try {
+        const raw = await federationViaRelay(relayUrl, pubkey, 'request', { payloadStr, signature });
+        const res = raw;
+        const ok = (res?.statusCode ?? 500) < 400;
+        if (!ok) {
+            const msg = res?.body?.error || `relay request failed (status ${res?.statusCode})`;
+            if (json)
+                console.log(JSON.stringify({ ok: false, peerId: pubkey, status: 'failed', error: msg }));
+            else
+                console.error(`Request failed: ${msg}`);
+            return false;
+        }
+        if (!json) {
+            console.log('✓ Federation request sent (via relay)');
+            console.log(`  Status: ${res.body?.status ?? 'pending'}`);
+            if (res.body?.message)
+                console.log(`  Message: ${res.body.message}`);
+        }
+        // Store the relay-only peer as pending (no gatewayUrl — they're relay-reachable).
+        try {
+            const { addPeer } = await import('../daemon/peers.js');
+            addPeer({
+                id: (card?.publicKey || pubkey).substring(0, 32),
+                displayName: card?.displayName || pubkey.slice(0, 16),
+                email: card?.email || '',
+                gatewayUrl: '',
+                publicKey: card?.publicKey || pubkey,
+                status: 'pending',
+                requestedAt: new Date().toISOString(),
+                alias,
+                agentId: config.agentId
+            });
+        }
+        catch { /* non-fatal */ }
+        if (json)
+            console.log(JSON.stringify({ ok: true, peerId: pubkey, status: res.body?.status ?? 'requested', message: res.body?.message }));
+        return true;
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (json)
+            console.log(JSON.stringify({ ok: false, peerId: pubkey, status: 'failed', error: msg }));
+        else
+            console.error('Failed to send request via relay:', msg);
+        return false;
+    }
+}
 export async function federationRequest(peerUrl, peerId, alias, json = false) {
     const config = requireConfig();
     const keypair = loadOrGenerateKeyPair();
@@ -804,12 +908,21 @@ export async function federationApprove(peerId, options = {}) {
             protocolVersion: '0.2.0',
             scopeGrants
         }, keypair.privateKey);
-        await fetch(`${peerGatewayUrl}/federation/approve`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ payloadStr, signature })
-        });
-        console.log('✓ Notified peer of approval');
+        // bd-63bs: route the approval over relay when the requester is relay-only
+        // (no gatewayUrl to POST to). Falls back to direct HTTP otherwise.
+        const relayUrl = await resolvePeerRelayUrl(config, peer.publicKey);
+        if (relayUrl && !peerGatewayUrl) {
+            await federationViaRelay(relayUrl, peer.publicKey, 'approve', { payloadStr, signature });
+            console.log('✓ Notified peer of approval (via relay)');
+        }
+        else {
+            await fetch(`${peerGatewayUrl}/federation/approve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ payloadStr, signature })
+            });
+            console.log('✓ Notified peer of approval');
+        }
     }
     catch (error) {
         console.error('Failed to notify peer:', error);
@@ -958,37 +1071,11 @@ export async function federationRemove(peerId) {
  * handling: { ok, status?, result }. `result` is the peer's MessageResponse
  * (or a synthesized failure for relay errors).
  */
-export async function deliverFederationMessage(peer, frame, opts) {
-    // Resolve transport. Any failure (rendezvous disabled, lookup throws/null,
-    // direct, or iroh) ⇒ direct. Relay never preempts the default unless the peer
-    // explicitly advertised a relay descriptor inside their signed registration.
-    let relayUrl = null;
-    if (opts.config.rendezvous?.enabled && peer.publicKey) {
-        try {
-            const resolved = await lookupPeerTransport(opts.config.rendezvous, peer.publicKey);
-            if (resolved && resolved.mode === 'relay')
-                relayUrl = resolved.relayUrl;
-        }
-        catch {
-            // fall through to direct — a flaky rendezvous must not break direct sends
-        }
-    }
-    if (relayUrl) {
-        try {
-            const result = await deliverViaRelay(relayUrl, peer.publicKey, frame, opts.timeoutMs);
-            const r = result;
-            return { ok: r?.success !== false, status: r?.statusCode, result };
-        }
-        catch (err) {
-            return {
-                ok: false,
-                result: { success: false, error: `peer not connected via relay: ${err.message}` }
-            };
-        }
-    }
-    // DIRECT PATH — unchanged wire behavior.
+/** Deliver `frame` to `peer.gatewayUrl` over direct HTTP. Byte-identical to the
+ * original send. Throws only on network/abort (caller maps that to try-next). */
+async function deliverDirect(peer, frame, timeoutMs) {
     const controller = new AbortController();
-    const timeoutId = opts.timeoutMs ? setTimeout(() => controller.abort(), opts.timeoutMs) : null;
+    const timeoutId = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
         const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
             method: 'POST',
@@ -1015,6 +1102,61 @@ export async function deliverFederationMessage(peer, frame, opts) {
         if (timeoutId)
             clearTimeout(timeoutId);
     }
+}
+/** Deliver `frame` to a peer over a relay WebSocket. Throws on relay/connection
+ * failure (caller maps that to try-next / a synthesized failure). */
+async function deliverRelay(relayUrl, toPubkey, frame, timeoutMs) {
+    const result = await deliverViaRelay(relayUrl, toPubkey, frame, timeoutMs);
+    const r = result;
+    return { ok: r?.success !== false, status: r?.statusCode, result };
+}
+export async function deliverFederationMessage(peer, frame, opts) {
+    // bd-maas: resolve the peer's advertised transport LIST and walk it by
+    // preference, using the first transport that delivers. Any rendezvous failure
+    // (disabled, lookup throws, empty list) ⇒ a single direct attempt, so the
+    // default path can never be broken by a flaky rendezvous.
+    let transports = [];
+    if (opts.config.rendezvous?.enabled && peer.publicKey) {
+        try {
+            transports = await lookupPeerTransports(opts.config.rendezvous, peer.publicKey);
+        }
+        catch {
+            transports = []; // fall through to direct
+        }
+    }
+    // No advertised list ⇒ exactly the original single direct send (byte-identical).
+    if (transports.length === 0) {
+        return deliverDirect(peer, frame, opts.timeoutMs);
+    }
+    // Walk the preference order; the first transport that delivers wins. A failed
+    // attempt (throw, or a relay error) falls through to the next entry; the last
+    // failure is returned so callers' existing error handling still fires.
+    let last = null;
+    for (const t of transports) {
+        try {
+            if (t.mode === 'relay') {
+                last = await deliverRelay(t.relayUrl, peer.publicKey, frame, opts.timeoutMs);
+            }
+            else if (t.mode === 'direct') {
+                // Prefer the advertised direct url, else the peer record's gatewayUrl.
+                const target = t.url ? { ...peer, gatewayUrl: t.url } : peer;
+                last = await deliverDirect(target, frame, opts.timeoutMs);
+            }
+            else {
+                continue; // iroh not deliverable yet (Phase 3) — skip this leg
+            }
+            if (last.ok)
+                return last;
+            // Non-ok response (e.g. peer-not-connected via relay) ⇒ try the next leg.
+        }
+        catch (err) {
+            last = {
+                ok: false,
+                result: { success: false, error: `${t.mode} delivery failed: ${err.message}` }
+            };
+        }
+    }
+    return last ?? deliverDirect(peer, frame, opts.timeoutMs);
 }
 export async function federationSend(peerId, intent, payloadJson, timeoutMs, toAgent) {
     const config = requireConfig();
@@ -1546,16 +1688,33 @@ export async function federationConnect(pubkey, alias) {
         process.exit(1);
     }
     console.log(`Looking up peer ${pubkey.slice(0, 16)}... in rendezvous at ${config.rendezvous.url}`);
-    const peerUrl = await lookupPeer(config.rendezvous, pubkey);
-    if (!peerUrl) {
+    // bd-63bs: resolve the peer's advertised transport list. Walk it by preference:
+    // a direct entry uses the HTTP handshake; a relay-only peer (no reachable direct
+    // url) uses the relay `federation` frame so two relay-only peers can federate.
+    const transports = await lookupPeerTransports(config.rendezvous, pubkey);
+    if (transports.length === 0) {
         console.error(`✗ Peer not found in rendezvous.`);
         console.error(`  Ask them to enable rendezvous or share their URL directly.`);
         console.error(`  Direct connect: ogp federation request <peer-url> ${pubkey}`);
         process.exit(1);
     }
-    console.log(`✓ Found peer at ${peerUrl}`);
-    console.log(`Sending federation request...`);
-    await federationRequest(peerUrl, pubkey, alias);
+    for (const t of transports) {
+        if (t.mode === 'direct') {
+            console.log(`✓ Found peer at ${t.url} (direct)`);
+            console.log(`Sending federation request...`);
+            if (await federationRequest(t.url, pubkey, alias))
+                return;
+        }
+        else if (t.mode === 'relay') {
+            console.log(`✓ Found peer on relay ${t.relayUrl}`);
+            console.log(`Sending federation request via relay...`);
+            if (await federationRequestViaRelay(t.relayUrl, pubkey, alias))
+                return;
+        }
+        // try the next advertised transport on failure
+    }
+    console.error('✗ Could not complete the federation request over any advertised transport.');
+    process.exit(1);
 }
 /**
  * Set a user-friendly alias for a peer.

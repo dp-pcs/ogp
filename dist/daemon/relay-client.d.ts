@@ -1,4 +1,4 @@
-import { type RelayFrame } from '../shared/relay-protocol.js';
+import { type RelayFrame, type FederationRelayFrame } from '../shared/relay-protocol.js';
 /**
  * Start the persistent receiver socket. Call from server.ts startup ONLY when
  * transport.mode === 'relay'. Idempotent; reconnects with backoff on drop.
@@ -13,4 +13,12 @@ export declare function stopRelayClient(): Promise<void>;
  * peer-not-connected (callers map that to a failed-send result).
  */
 export declare function deliverViaRelay(relayUrl: string, toPubkey: string, frame: RelayFrame, timeoutMs?: number): Promise<unknown>;
+/**
+ * Send a signed federation handshake envelope (request or approve) to a relay-mode
+ * peer over the relay and await their {statusCode, body} (bd-63bs). Lets two
+ * relay-only peers federate with no public HTTP gateway. Reuses the live receiver
+ * socket on the same relay; otherwise opens a transient sender socket. Throws on
+ * timeout / peer-not-connected (callers map that to a failed handshake).
+ */
+export declare function federationViaRelay(relayUrl: string, toPubkey: string, op: 'request' | 'approve', frame: FederationRelayFrame, timeoutMs?: number): Promise<unknown>;
 //# sourceMappingURL=relay-client.d.ts.map
