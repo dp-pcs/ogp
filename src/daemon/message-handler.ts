@@ -1021,6 +1021,12 @@ async function handleProjectQuery(
     }
   });
 
+  // bd-53c: include the signed envelope ({ signature, payloadStr }) for signed
+  // contributions so a member peer can trust-MERGE them (not just display them) via
+  // the existing upsertContribution verifier. payloadStr is reconstructed by the
+  // shared canonicalPayloadStr helper — byte-identical to what the author signed, so
+  // it re-verifies. Legacy unsigned records carry no envelope and are display-only.
+  const { canonicalPayloadStr } = await import('./contribution-signing.js');
   return {
     success: true,
     nonce: message.nonce,
@@ -1034,7 +1040,8 @@ async function handleProjectQuery(
         entryType: c.entryType || c.topic,
         topic: c.entryType || c.topic,
         summary: c.summary,
-        metadata: c.metadata
+        metadata: c.metadata,
+        ...(c.signature ? { signature: c.signature, payloadStr: canonicalPayloadStr(c, projectId) } : {})
       })),
       timestamp: new Date().toISOString()
     }

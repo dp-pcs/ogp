@@ -17,6 +17,26 @@ function canonicalPeerId(key) {
  */
 const CONTRIBUTION_MAX_AGE_MS = Number.MAX_SAFE_INTEGER;
 /**
+ * Reconstruct the EXACT canonical bytes an author signed for a stored contribution
+ * record. `signCanonical` serializes `{ ...canonical, timestamp }` via JSON.stringify
+ * (buildSignedContribution: id, projectId, authorId, entryType, summary, [metadata]);
+ * signCanonical appends `timestamp` last. This MUST match that order/shape byte-for-
+ * byte or the signature won't verify — a single shared helper used by the signer-side
+ * upsert AND the query responder (bd-53c) eliminates drift. Guarded by a round-trip
+ * test (the emitted payloadStr re-verifies against the stored signature).
+ */
+export function canonicalPayloadStr(record, projectId) {
+    return JSON.stringify({
+        id: record.id,
+        projectId,
+        authorId: record.authorId,
+        entryType: record.entryType ?? record.topic,
+        summary: record.summary,
+        ...(record.metadata !== undefined && { metadata: record.metadata }),
+        timestamp: record.timestamp
+    });
+}
+/**
  * Author side: mint a ULID, sign the canonical contribution, and return both the
  * storable record (verified:true) and the wire envelope to send.
  */

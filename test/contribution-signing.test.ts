@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { generateKeyPair } from '../src/shared/signing.js';
 import {
   buildSignedContribution,
-  verifySignedContribution
+  verifySignedContribution,
+  canonicalPayloadStr
 } from '../src/daemon/contribution-signing.js';
 
 describe('contribution-signing', () => {
@@ -118,5 +119,39 @@ describe('contribution-signing', () => {
     const { wire } = buildSignedContribution(base, author.privateKey);
     const res = verifySignedContribution(wire, author.publicKey); // full key, not prefix
     expect(res.ok).toBe(true);
+  });
+
+  // bd-53c: the query responder reconstructs payloadStr from the STORED record via
+  // canonicalPayloadStr. It must reproduce the exact bytes the author signed so the
+  // consumer can re-verify and trust-merge.
+  describe('canonicalPayloadStr (bd-53c responder reconstruction)', () => {
+    it('reproduces the exact signed bytes from a stored record (round-trip verifies)', () => {
+      const { record, wire } = buildSignedContribution(base, author.privateKey);
+      // The stored record carries entryType/topic/summary/metadata/timestamp; the
+      // responder also knows the projectId from the query.
+      const rebuilt = canonicalPayloadStr(record, base.projectId);
+      expect(rebuilt).toBe(wire.payloadStr); // byte-identical
+      // And it re-verifies against the original signature.
+      const res = verifySignedContribution({
+        id: record.id, authorId: record.authorId, timestamp: record.timestamp,
+        payloadStr: rebuilt, signature: record.signature!
+      });
+      expect(res.ok).toBe(true);
+    });
+
+    it('round-trips a record with no metadata (omits the key, matching the signer)', () => {
+      const noMeta = { projectId: 'p', authorId: author.publicKey, entryType: 'note', summary: 'hi' };
+      const { record, wire } = buildSignedContribution(noMeta, author.privateKey);
+      const rebuilt = canonicalPayloadStr(record, 'p');
+      expect(rebuilt).toBe(wire.payloadStr);
+      expect(rebuilt).not.toContain('metadata');
+    });
+
+    it('falls back to topic when entryType is absent on the stored record', () => {
+      const { record, wire } = buildSignedContribution(base, author.privateKey);
+      // Simulate a legacy-shaped record where only `topic` is populated.
+      const topicOnly = { ...record, entryType: undefined };
+      expect(canonicalPayloadStr(topicOnly, base.projectId)).toBe(wire.payloadStr);
+    });
   });
 });

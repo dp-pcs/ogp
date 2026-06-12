@@ -305,6 +305,65 @@ async function runHealthChecks() {
     console.log(`[OGP Heartbeat] Health check completed`);
     // Cleanup expired resync snapshots (older than 7 days)
     cleanupExpiredSnapshots();
+    // bd-53c: periodic contribution backfill (anti-entropy). Pull peers' signed
+    // contributions and union-merge by id so fragmented mirrors converge over time.
+    // Idempotent (re-pulls are no-op duplicates); best-effort; capped per pass.
+    await runContributionBackfill().catch((err) => {
+        console.warn(`[OGP Backfill] error: ${err.message}`);
+    });
+}
+/**
+ * Periodic anti-entropy pass (bd-53c). For each local project, pull contributions
+ * from the project's other members (approved peers) over the signed project.query
+ * path and union-merge by id. Capped fan-out so large projects can't flood a tick.
+ */
+async function runContributionBackfill() {
+    const cfg = loadConfig();
+    if (cfg?.backfill?.enabled === false)
+        return;
+    const maxPeers = cfg?.backfill?.maxPeersPerPass ?? 10;
+    const limit = cfg?.backfill?.limit ?? 500;
+    const { listProjects } = await import('./projects.js');
+    const { upsertContribution } = await import('./projects.js');
+    const { backfillContributionsFromPeer } = await import('./contribution-backfill.js');
+    const projects = listProjects();
+    if (projects.length === 0)
+        return;
+    const selfId = getLocalPeerId();
+    const approved = new Set(listPeers('approved').map((p) => p.id));
+    // Build the (project, peer) work list, capped at maxPeers total this pass.
+    const work = [];
+    for (const project of projects) {
+        for (const member of project.members) {
+            if (member === selfId)
+                continue;
+            if (!approved.has(member))
+                continue;
+            work.push({ projectId: project.id, peerId: member });
+            if (work.length >= maxPeers)
+                break;
+        }
+        if (work.length >= maxPeers)
+            break;
+    }
+    if (work.length === 0)
+        return;
+    const deps = {
+        query: async (peerId, projectId, lim) => {
+            const { federationSend } = await import('../cli/federation.js');
+            const res = await federationSend(peerId, 'project.query', JSON.stringify({ projectId, limit: lim }), 30000);
+            return res;
+        },
+        upsert: (projectId, record) => upsertContribution(projectId, record),
+    };
+    let merged = 0;
+    for (const { projectId, peerId } of work) {
+        const r = await backfillContributionsFromPeer(peerId, projectId, deps, { limit });
+        merged += r.inserted;
+    }
+    if (merged > 0) {
+        console.log(`[OGP Backfill] merged ${merged} new contribution(s) across ${work.length} peer-project pull(s)`);
+    }
 }
 /**
  * Remove expired resync snapshots from peers

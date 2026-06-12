@@ -20,11 +20,64 @@ import {
   type ProjectContribution
 } from '../daemon/projects.js';
 import { loadConfig } from '../shared/config.js';
-import { getPeer } from '../daemon/peers.js';
+import { getPeer, listPeers } from '../daemon/peers.js';
 import { federationSend } from './federation.js';
+import { backfillContributionsFromPeer, type BackfillDeps, type BackfillResult } from '../daemon/contribution-backfill.js';
 import { getPrivateKey, getPublicKey } from '../daemon/keypair.js';
 import { buildSignedContribution } from '../daemon/contribution-signing.js';
 import { buildSignedCreation, buildSignedGrant } from '../daemon/project-ownership.js';
+
+/**
+ * bd-53c: BackfillDeps wired to the real federation transport + local store. The
+ * `query` leg sends a signed `project.query` and shapes federationSend's result into
+ * the helper's QueryResponse; `upsert` is the idempotent, signature-verifying merge.
+ * Factored out so both on-join (CLI) and the periodic heartbeat pass reuse it.
+ */
+export function liveBackfillDeps(): BackfillDeps {
+  return {
+    query: async (peerId, projectId, limit) => {
+      const res = await federationSend(peerId, 'project.query', JSON.stringify({ projectId, limit }), 30000);
+      return res as Awaited<ReturnType<BackfillDeps['query']>>;
+    },
+    upsert: (projectId, record) => upsertContribution(projectId, record),
+  };
+}
+
+/**
+ * Pull + union-merge contributions for `projectId` from every OTHER project member
+ * that is an approved peer (bd-53c). Best-effort — offline / non-member peers are
+ * logged and skipped, never fatal. Returns the per-peer results for the caller to
+ * summarize. Shared by on-join and the periodic heartbeat pass.
+ */
+export async function backfillProjectFromMembers(
+  projectId: string,
+  selfId: string,
+  deps: BackfillDeps = liveBackfillDeps(),
+  opts: { limit?: number } = {}
+): Promise<BackfillResult[]> {
+  const project = getProject(projectId);
+  if (!project) return [];
+
+  const approved = new Set(listPeers('approved').map(p => p.id));
+  // Members are stored as emails and/or peer-id prefixes; only those we have an
+  // approved federation relationship with are reachable for a signed query.
+  const targets = project.members.filter(m => m !== selfId && approved.has(m));
+
+  const results: BackfillResult[] = [];
+  for (const peerId of targets) {
+    results.push(await backfillContributionsFromPeer(peerId, projectId, deps, opts));
+  }
+  return results;
+}
+
+/** One-line human summary of a backfill sweep. */
+function summarizeBackfill(results: BackfillResult[]): string {
+  const merged = results.reduce((n, r) => n + r.inserted, 0);
+  const dup = results.reduce((n, r) => n + r.duplicate, 0);
+  const errs = results.filter(r => r.error).length;
+  const peers = results.length;
+  return `backfill: pulled from ${peers} peer${peers === 1 ? '' : 's'}, merged ${merged} new (${dup} already had)${errs ? `, ${errs} unreachable` : ''}`;
+}
 
 /**
  * Format author display with 3-tier fallback:
@@ -258,6 +311,16 @@ export async function projectJoin(
   } else {
     console.error('Error: Failed to join project');
     process.exit(1);
+  }
+
+  // bd-53c: pull-on-join backfill. A fresh join sees only whatever contributions
+  // happen to be in the local mirror; sweep the other members for the signed union
+  // so the local slice converges immediately instead of looking stale. Best-effort.
+  try {
+    const results = await backfillProjectFromMembers(projectId, config.email);
+    if (results.length > 0) console.log(`  ${summarizeBackfill(results)}`);
+  } catch (err) {
+    console.warn(`  backfill skipped: ${(err as Error).message}`);
   }
 }
 
@@ -618,6 +681,21 @@ export async function projectRequestJoin(
       setPeerTopicPolicy(peer.id, projectId, 'summary');
 
       console.log(`✓ Successfully joined project '${responseProjectName || projectName}'`);
+
+      // bd-53c: pull-on-join backfill. We just joined a project that lives on the
+      // peer we joined through — pull their signed contributions and union-merge so
+      // our fresh local mirror holds the project's history instead of being empty.
+      // Best-effort; also sweep any other members we can reach.
+      try {
+        const fromOwner = await backfillContributionsFromPeer(peer.id, projectId, liveBackfillDeps());
+        const others = await backfillProjectFromMembers(projectId, config.email);
+        const all = [fromOwner, ...others.filter(r => r.peerId !== peer.id)];
+        const summary = summarizeBackfill(all);
+        if (all.some(r => r.pulled > 0 || r.error)) console.log(`  ${summary}`);
+      } catch (err) {
+        console.warn(`  backfill skipped: ${(err as Error).message}`);
+      }
+
       console.log(`  Run 'ogp project list' to see your projects`);
     } else if (response.success === false) {
       console.error(`Join request rejected: ${response.error || 'Unknown error'}`);
