@@ -77,12 +77,71 @@ export function validateTransportDescriptor(
   return { ok: false, error: `unknown transport mode: ${String(mode)}` };
 }
 
+/**
+ * Validate an optional transport LIST (bd-maas) from an already-verified payload.
+ * Each entry is validated by validateTransportDescriptor. Absent ⇒ undefined.
+ * The list rides inside the signed payload, so the rendezvous can't reorder/forge it.
+ */
+export function validateTransportList(
+  raw: unknown
+): { ok: true; transports?: TransportDescriptor[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true };
+  if (!Array.isArray(raw)) return { ok: false, error: 'transports must be an array' };
+  const out: TransportDescriptor[] = [];
+  for (const entry of raw) {
+    const r = validateTransportDescriptor(entry);
+    if (!r.ok) return { ok: false, error: `transports[]: ${r.error}` };
+    if (r.descriptor) out.push(r.descriptor);
+  }
+  return { ok: true, transports: out.length > 0 ? out : undefined };
+}
+
+/**
+ * Signed identity card (bd-maas Part B). Lets the rendezvous serve discovery info
+ * for relay-only peers (which have no public /.well-known/ogp). Validated from the
+ * verified payload only; its publicKey MUST equal the registration pubkey, so the
+ * rendezvous can never fabricate or swap identities.
+ */
+export interface RegistrationCard {
+  displayName?: string;
+  email?: string;
+  gatewayUrl?: string;
+  publicKey: string;
+  offeredIntents?: string[];
+}
+
+export function validateCard(
+  raw: unknown,
+  registrationPubkey: string
+): { ok: true; card?: RegistrationCard } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true };
+  if (typeof raw !== 'object') return { ok: false, error: 'card must be an object' };
+  const c = raw as Record<string, unknown>;
+  if (typeof c.publicKey !== 'string' || !c.publicKey) {
+    return { ok: false, error: 'card.publicKey is required' };
+  }
+  // TRUST: the card identity must match the key that signed the registration.
+  if (c.publicKey !== registrationPubkey) {
+    return { ok: false, error: 'card.publicKey does not match registration pubkey' };
+  }
+  const card: RegistrationCard = { publicKey: c.publicKey };
+  if (typeof c.displayName === 'string') card.displayName = c.displayName;
+  if (typeof c.email === 'string') card.email = c.email;
+  if (typeof c.gatewayUrl === 'string') card.gatewayUrl = c.gatewayUrl;
+  if (Array.isArray(c.offeredIntents) && c.offeredIntents.every((x) => typeof x === 'string')) {
+    card.offeredIntents = c.offeredIntents as string[];
+  }
+  return { ok: true, card };
+}
+
 interface PeerRecord {
   pubkey: string;
   ip: string;
   port: number;
   lastSeen: number; // unix timestamp ms
   transport?: TransportDescriptor;
+  transports?: TransportDescriptor[];
+  card?: RegistrationCard;
 }
 
 interface InviteRecord {
@@ -164,8 +223,12 @@ export interface RegistrationValidationOk {
   port: number;
   /** Optional public URL the peer wants other peers to use to reach them. */
   publicUrl?: string;
-  /** Optional transport descriptor (bd-b7em). Absent ⇒ direct. */
+  /** Optional transport descriptor (bd-b7em, legacy single). Absent ⇒ direct. */
   transport?: TransportDescriptor;
+  /** Optional transport list (bd-maas). */
+  transports?: TransportDescriptor[];
+  /** Optional signed identity card (bd-maas Part B). */
+  card?: RegistrationCard;
 }
 export interface RegistrationValidationErr {
   ok: false;
@@ -204,12 +267,20 @@ export function validateSignedRegistration(
     return { ok: false, status: 401, error: `Signature verification failed: ${verifyResult.reason}` };
   }
 
-  // Transport descriptor (bd-b7em): parsed ONLY from the now-verified inner
-  // payload. A `transport` field outside payloadStr is never read, so the
-  // rendezvous can't be tricked into advertising an unsigned transport.
+  // Transport descriptor/list/card (bd-b7em/bd-maas): parsed ONLY from the now-
+  // verified inner payload. Fields outside payloadStr are never read, so the
+  // rendezvous can't be tricked into advertising an unsigned transport or card.
   const transportResult = validateTransportDescriptor(parsed.transport);
   if (!transportResult.ok) {
     return { ok: false, status: 400, error: transportResult.error };
+  }
+  const transportsResult = validateTransportList(parsed.transports);
+  if (!transportsResult.ok) {
+    return { ok: false, status: 400, error: transportsResult.error };
+  }
+  const cardResult = validateCard(parsed.card, pubkey);
+  if (!cardResult.ok) {
+    return { ok: false, status: 400, error: cardResult.error };
   }
 
   return {
@@ -217,7 +288,9 @@ export function validateSignedRegistration(
     pubkey,
     port,
     ...(typeof publicUrl === 'string' && publicUrl ? { publicUrl } : {}),
-    ...(transportResult.descriptor ? { transport: transportResult.descriptor } : {})
+    ...(transportResult.descriptor ? { transport: transportResult.descriptor } : {}),
+    ...(transportsResult.transports ? { transports: transportsResult.transports } : {}),
+    ...(cardResult.card ? { card: cardResult.card } : {})
   };
 }
 
@@ -240,14 +313,21 @@ app.post('/register', (req: Request, res: Response) => {
     return;
   }
 
-  const { pubkey, port, transport } = validation;
+  const { pubkey, port, transport, transports, card } = validation;
   const ip = getCallerIp(req);
   const now = Date.now();
 
-  peers.set(pubkey, { pubkey, ip, port, lastSeen: now, ...(transport ? { transport } : {}) });
+  peers.set(pubkey, {
+    pubkey, ip, port, lastSeen: now,
+    ...(transport ? { transport } : {}),
+    ...(transports ? { transports } : {}),
+    ...(card ? { card } : {})
+  });
 
-  const transportLabel = transport ? transport.transport : 'direct';
-  console.log(`[rendezvous] Registered ${pubkey.slice(0, 8)}... from ${ip}:${port} (transport: ${transportLabel})`);
+  const transportLabel = transports
+    ? transports.map((t) => t.transport).join('+')
+    : (transport ? transport.transport : 'direct');
+  console.log(`[rendezvous] Registered ${pubkey.slice(0, 8)}... from ${ip}:${port} (transport: ${transportLabel}${card ? ', card' : ''})`);
 
   res.json({ ok: true, yourIp: ip });
 });
@@ -277,6 +357,8 @@ app.get('/peer/:pubkey', (req: Request, res: Response) => {
     port: peer.port,
     lastSeen: peer.lastSeen,
     ...(peer.transport ? { transport: peer.transport } : {}),
+    ...(peer.transports ? { transports: peer.transports } : {}),
+    ...(peer.card ? { card: peer.card } : {}),
   });
 });
 
