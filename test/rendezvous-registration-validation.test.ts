@@ -290,4 +290,71 @@ describe('transport descriptor (bd-b7em)', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.transport).toBeUndefined(); // attacker's transport not honored
   });
+
+  // ── bd-maas: multi-transport list + signed identity card ──────────────────
+
+  it('accepts a signed transport LIST and returns it', () => {
+    const kp = generateKeyPair();
+    const transports = [
+      { transport: 'direct', gatewayUrl: 'https://me.example' },
+      { transport: 'relay', relayUrl: 'wss://r/relay' }
+    ];
+    const env = signCanonical({ pubkey: kp.publicKey, port: 18790, transports }, kp.privateKey);
+    const result = validateSignedRegistration({ payloadStr: env.payloadStr, signature: env.signature }, realDeps);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.transports).toEqual(transports);
+  });
+
+  it('rejects a transport LIST with a malformed entry', () => {
+    const kp = generateKeyPair();
+    const env = signCanonical(
+      { pubkey: kp.publicKey, port: 18790, transports: [{ transport: 'relay' /* no relayUrl */ }] },
+      kp.privateKey
+    );
+    const result = validateSignedRegistration({ payloadStr: env.payloadStr, signature: env.signature }, realDeps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(400);
+  });
+
+  it('TRUST: a transports field OUTSIDE the signed payload is ignored', () => {
+    const kp = generateKeyPair();
+    const env = signCanonical({ pubkey: kp.publicKey, port: 18790 }, kp.privateKey);
+    const result = validateSignedRegistration(
+      { payloadStr: env.payloadStr, signature: env.signature, transports: [{ transport: 'relay', relayUrl: 'wss://evil/relay' }] } as any,
+      realDeps
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.transports).toBeUndefined();
+  });
+
+  it('accepts a signed identity card whose publicKey matches the registration', () => {
+    const kp = generateKeyPair();
+    const card = { displayName: 'Me', email: 'me@x.com', publicKey: kp.publicKey, offeredIntents: ['message'] };
+    const env = signCanonical({ pubkey: kp.publicKey, port: 18790, card }, kp.privateKey);
+    const result = validateSignedRegistration({ payloadStr: env.payloadStr, signature: env.signature }, realDeps);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.card).toEqual(card);
+  });
+
+  it('TRUST: rejects a card whose publicKey differs from the registration pubkey', () => {
+    const kp = generateKeyPair();
+    const other = generateKeyPair();
+    // The signer holds kp, but the card claims a DIFFERENT identity (other's key).
+    const card = { displayName: 'Imposter', publicKey: other.publicKey };
+    const env = signCanonical({ pubkey: kp.publicKey, port: 18790, card }, kp.privateKey);
+    const result = validateSignedRegistration({ payloadStr: env.payloadStr, signature: env.signature }, realDeps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(400);
+  });
+
+  it('TRUST: a card field OUTSIDE the signed payload is ignored', () => {
+    const kp = generateKeyPair();
+    const env = signCanonical({ pubkey: kp.publicKey, port: 18790 }, kp.privateKey);
+    const result = validateSignedRegistration(
+      { payloadStr: env.payloadStr, signature: env.signature, card: { displayName: 'Evil', publicKey: kp.publicKey } } as any,
+      realDeps
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.card).toBeUndefined();
+  });
 });
