@@ -71,7 +71,11 @@ defines the concrete schema, files, CLI surface, and wire changes to build. It d
 ```
 
 Reads are file-based and side-effect-free (companion reads this directly). Writes go
-through `ogp app` CLI subcommands holding the existing state-lock (`state-lock.ts`).
+through `ogp app` CLI subcommands. **Correction (found during P2):** `state-lock.ts`
+is a daemon-*singleton* lifetime lock (`daemon.lock`), not a per-write file mutex — the
+CLI runs as a separate process and cannot "hold" it. The registry therefore follows
+the lock-free `intent-registry.ts` pattern (single-writer in practice: writes originate
+from the `ogp app` CLI). Duplicate-id is rejected on `addApp` rather than overwritten.
 
 ### Advertisement: `AppAdvertisement` (in `/.well-known/ogp` + card)
 
