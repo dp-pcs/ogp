@@ -30,6 +30,7 @@ import {
 } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { tunnelCommand } from './cli/tunnel.js';
+import { appCommand } from './cli/app.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './cli/install.js';
 import { installCompletion } from './cli/completion.js';
 import {
@@ -826,6 +827,7 @@ federation
   });
 
 program.addCommand(tunnelCommand);
+program.addCommand(appCommand);
 
 program
   .command('expose', { hidden: true })
