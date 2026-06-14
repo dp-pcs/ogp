@@ -3,6 +3,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { randomBytes } from 'node:crypto';
 import {
   type DelegatedAuthorityConfig,
   type HumanSurfacingMode,
@@ -41,7 +42,15 @@ interface OpenClawConfig {
 }
 
 const DEFAULT_HERMES_WEBHOOK_URL = 'http://localhost:8644/webhooks/ogp_federation';
-const DEFAULT_HERMES_WEBHOOK_SECRET = 'ogp-test-secret-hermes-2026';
+
+// Per-install webhook secret. A shared hardcoded default would mean every Hermes
+// user who accepts defaults ships the SAME webhook auth secret, which defeats the
+// purpose of the secret (authenticating the sender) and is a trust-model regression
+// for a project whose value prop IS the trust model (see bd-l7x5). Generate a unique
+// secret per install instead; the user copies it into their Hermes-side config.
+function generateHermesWebhookSecret(): string {
+  return randomBytes(32).toString('hex');
+}
 
 export interface DelegatedAuthorityInterviewAnswers {
   humanDeliveryTarget?: string;
@@ -557,7 +566,13 @@ async function setupFramework(
     const useDefaults = await promptYesNo(rl, 'Use default Hermes webhook settings?', true);
     if (useDefaults) {
       hermesWebhookUrl = DEFAULT_HERMES_WEBHOOK_URL;
-      hermesWebhookSecret = DEFAULT_HERMES_WEBHOOK_SECRET;
+      hermesWebhookSecret = generateHermesWebhookSecret();
+      console.log('');
+      console.log('  Generated a unique per-install Hermes webhook secret:');
+      console.log(`    ${hermesWebhookSecret}`);
+      console.log('  Copy this value into your Hermes federation webhook config so');
+      console.log('  the receiver accepts messages from this OGP instance.');
+      console.log('');
     } else {
       hermesWebhookUrl = await rl.question('Hermes webhook URL: ');
       hermesWebhookSecret = await rl.question('Hermes webhook secret: ');
