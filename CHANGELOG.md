@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Security / Changed
+- **Hermes webhook secret is now per-install.** The setup wizard previously applied a shared
+  hardcoded default secret whenever a Hermes user accepted the default webhook settings, so every
+  such install shipped the same webhook auth secret. Setup now generates a unique random secret
+  (`crypto.randomBytes(32)` hex) per install and prints it so it can be mirrored into the Hermes
+  side. (bd-l7x5)
+  - **Migration:** existing installs are unaffected until they re-run `ogp setup`, at which point a
+    new unique secret is generated and must be mirrored into the Hermes federation webhook config.
+    No automatic rotation is performed; the old value was a placeholder string, not a live
+    credential.
+
 ## 0.4.2 (2026-04-09)
 
 ### Release Posture
