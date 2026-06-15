@@ -21,6 +21,57 @@ import { resolveOpenClawBin } from '../shared/openclaw-bin.js';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * bd-aiz: distinguish gateway auth (401) failures from generic transport
+ * failures so the daemon does not silently 401 forever after an OpenClaw token
+ * rotation that was not mirrored into OGP's own config. Scope is the
+ * gateway-auth path ONLY — this never touches the Ed25519 trust model.
+ */
+export function isGatewayAuthFailure(text: string | undefined | null): boolean {
+  if (!text) {
+    return false;
+  }
+  const haystack = text.toLowerCase();
+  return (
+    haystack.includes('401') ||
+    haystack.includes('unauthorized') ||
+    haystack.includes('invalid token') ||
+    haystack.includes('authentication failed') ||
+    haystack.includes('auth failed') ||
+    haystack.includes('forbidden') ||
+    haystack.includes('403')
+  );
+}
+
+// Consecutive gateway auth failures across calls. We WARN (instead of failing
+// silently) once this crosses the threshold so a rotated-out token is operator-
+// visible. Reset on any successful gateway call.
+const GATEWAY_AUTH_WARN_THRESHOLD = 3;
+let consecutiveGatewayAuthFailures = 0;
+
+export function __resetGatewayAuthFailureCount(): void {
+  consecutiveGatewayAuthFailures = 0;
+}
+
+export function __getGatewayAuthFailureCount(): number {
+  return consecutiveGatewayAuthFailures;
+}
+
+function noteGatewayAuthFailure(method: string): void {
+  consecutiveGatewayAuthFailures += 1;
+  if (consecutiveGatewayAuthFailures >= GATEWAY_AUTH_WARN_THRESHOLD) {
+    console.warn(
+      `[OGP Bridge] WARN: ${consecutiveGatewayAuthFailures} consecutive gateway auth failures on ${method}. ` +
+        'The OpenClaw gateway token may have rotated and is no longer mirrored into OGP config (openclawToken). ' +
+        're-check/re-auth required — the daemon will keep 401ing until the token is refreshed.'
+    );
+  }
+}
+
+function noteGatewayAuthSuccess(): void {
+  consecutiveGatewayAuthFailures = 0;
+}
+
 type DeliveryTarget = {
   channel?: string;
   to?: string;
@@ -199,7 +250,14 @@ async function callGatewayMethod(params: {
       );
 
       if (ok) {
+        noteGatewayAuthSuccess();
         return true;
+      }
+
+      // bd-aiz: a successful CLI invocation that still reports auth trouble in
+      // its output is an auth failure, not a transport hiccup.
+      if (isGatewayAuthFailure(stdout) || isGatewayAuthFailure(stderr)) {
+        noteGatewayAuthFailure(params.method);
       }
 
       console.error(
@@ -207,6 +265,12 @@ async function callGatewayMethod(params: {
         stdout.trim() || stderr.trim()
       );
     } catch (err: any) {
+      const detail = (err && (err.stderr || err.message)) || String(err);
+      // bd-aiz: classify 401/auth errors distinctly so they surface a WARN
+      // instead of being collapsed into a silent transport failure.
+      if (isGatewayAuthFailure(detail)) {
+        noteGatewayAuthFailure(params.method);
+      }
       console.error(`[OGP Bridge] ${params.method} failed via ${candidate}:`, err.message || err);
     }
   }
