@@ -449,33 +449,47 @@ pub fn start_tunnel(framework: &str, option_id: &str) -> Result<Value, OgpError>
 }
 
 pub fn stop_tunnel(framework: &str) -> Result<Value, OgpError> {
-    // bd-iakg: ask for structured output and report the REAL outcome. A no-op
-    // (gateway served by an externally-started tunnel ogp can't manage) exits
-    // non-zero, so run() returns Err — but that's an expected, non-fatal outcome
-    // we surface as { ok:false, status:"no-managed-tunnel" } rather than a green
-    // success or a scary error. Older CLIs (no --json) fall back to the old path.
-    let out = run(Some(framework), &["tunnel", "stop", "--json"]);
-    match out {
-        Ok(s) => {
-            // CLI succeeded (something was stopped). Parse status if present.
-            let parsed: Value = serde_json::from_str(s.trim()).unwrap_or(json!({ "ok": true }));
-            let stopped = parsed.get("stopped").and_then(|v| v.as_bool()).unwrap_or(true);
-            Ok(json!({ "ok": stopped, "status": parsed.get("status").cloned().unwrap_or(json!("stopped")) }))
-        }
-        Err(e) => {
-            // Non-zero exit. Distinguish the expected no-op from a real failure by
-            // looking for the structured marker in the error text.
-            let msg = e.0;
-            if msg.contains("no-managed-tunnel") || msg.contains("No ogp-managed tunnel") {
-                Ok(json!({
-                    "ok": false,
-                    "status": "no-managed-tunnel",
-                    "message": "No OGP-managed tunnel — your gateway is served by an external tunnel. Stop it with its own tooling."
-                }))
-            } else {
-                Err(OgpError(msg))
-            }
-        }
+    // `ogp tunnel stop --json` emits { stopped, status, message }. A managed
+    // tunnel that was actually stopped exits 0; the external/unmanaged case
+    // ("no-managed-tunnel") exits 2 by design. We tolerate exit 2 ONLY when the
+    // JSON confirms `status == "no-managed-tunnel"`; any other non-zero exit is
+    // a genuine error. This mirrors run()/run_json() (locate_ogp, augmented
+    // PATH, --for framework) but inspects the exit code locally instead of
+    // failing on every non-zero status.
+    let bin = locate_ogp().ok_or_else(|| OgpError("ogp binary not found".into()))?;
+    let mut cmd = Command::new(&bin);
+    cmd.env("PATH", augmented_path());
+    cmd.arg("--for").arg(framework);
+    cmd.args(["tunnel", "stop", "--json"]);
+    let out = cmd
+        .output()
+        .map_err(|e| OgpError(format!("failed to run ogp: {e}")))?;
+    let code = out.status.code().unwrap_or(-1);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: Option<Value> = serde_json::from_str(stdout.trim()).ok();
+    let status = parsed
+        .as_ref()
+        .and_then(|v| v.get("status"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let stopped = parsed
+        .as_ref()
+        .and_then(|v| v.get("stopped"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if out.status.success() {
+        // Managed tunnel actually stopped (or idempotent stop succeeded).
+        Ok(json!({ "ok": true, "stopped": stopped || status != "no-managed-tunnel" }))
+    } else if code == 2 && status == "no-managed-tunnel" {
+        // External / unmanaged tunnel — nothing was stopped. Surface cleanly.
+        Ok(json!({ "ok": true, "stopped": false, "status": "no-managed-tunnel" }))
+    } else {
+        Err(OgpError(format!(
+            "ogp tunnel stop exited {}: {}",
+            code,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )))
     }
 }
 
