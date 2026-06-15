@@ -13,6 +13,14 @@
     No automatic rotation is performed; the old value was a placeholder string, not a live
     credential.
 
+### Fixed
+- **Gateway auth failures now surface a WARN instead of looping silently.** `callGatewayMethod()`
+  previously collapsed every failure to a bare `false`, so a rotated-out OpenClaw gateway token
+  produced an indefinite silent 401. The daemon now classifies `401/403/unauthorized/invalid-token`
+  distinctly from transport errors, counts consecutive auth failures, and warns once the threshold
+  is crossed. Config is already re-read fresh on each call; the fix is in the failure classification.
+  (bd-aiz)
+
 ## 0.4.2 (2026-04-09)
 
 ### Release Posture
