@@ -46,6 +46,58 @@ function ActivityLine({ a, compact, onReply }) {
   );
 }
 
+// ── Chat-style activity bubble (used in grouped Messages view) ─────
+function ActivityBubble({ a, onReply }) {
+  const isOut = a.dir === "out";
+  const isIn = a.dir === "in";
+  const canReply = !!onReply && isIn && (a.kind === "agent" || a.kind === "message");
+  const m = ACT_META[a.kind] || ACT_META.message;
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: isOut ? "flex-end" : "flex-start",
+        gap: 8,
+        marginBottom: 8,
+      }}
+    >
+      {!isOut && (
+        <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: `var(--${m.tone}-soft, var(--accent-soft))`, color: `var(--${m.tone}, var(--accent))`, display: "grid", placeItems: "center" }}>
+          <Icon name={m.icon} size={14} />
+        </div>
+      )}
+      <div
+        onClick={canReply ? () => onReply(a) : undefined}
+        title={canReply ? "Reply to this message" : undefined}
+        style={{
+          maxWidth: "min(80%, 420px)",
+          padding: "10px 12px",
+          borderRadius: 12,
+          borderBottomRightRadius: isOut ? 3 : 12,
+          borderBottomLeftRadius: isIn ? 3 : 12,
+          background: isOut ? "var(--accent-soft)" : "var(--panel-2)",
+          color: "var(--text)",
+          cursor: canReply ? "pointer" : "default",
+        }}
+      >
+        <div style={{ fontSize: 13.5, lineHeight: 1.45, fontWeight: 500, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{a.text}</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            {a.topic && <span style={{ fontSize: 10.5, fontWeight: 600, padding: "1px 6px", borderRadius: 999, background: isOut ? "color-mix(in srgb, var(--accent) 18%, transparent)" : "var(--panel-3)", color: "var(--text-muted)" }}>{a.topic}</span>}
+            {a.level && <span style={{ fontSize: 10.5, color: "var(--text-faint)" }}>{a.level}</span>}
+          </div>
+          <span style={{ fontSize: 10.5, color: "var(--text-faint)", flexShrink: 0 }}>{relTime(a.t)}</span>
+        </div>
+      </div>
+      {isOut && (
+        <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: "var(--accent-soft)", color: "var(--accent)", display: "grid", placeItems: "center" }}>
+          <Icon name="arrowUp" size={14} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── TUNNELS ──────────────────────────────────────────────────────
 const TUNNEL_ICON = { cloudflareNamed: "shieldCheck", cloudflareFree: "zap", ngrok: "globe" };
 const TUNNEL_KIND = { cloudflareNamed: "Cloudflare · named", cloudflareFree: "Cloudflare · quick", ngrok: "ngrok" };
@@ -158,6 +210,30 @@ function ActivityView({ ctx }) {
     if (peer) ctx.actions.message?.({ ...peer, replyTopic: a.topic || undefined });
   }
 
+  // Group message/agent entries by peer + local target persona (toAgent). System
+  // entries (errors, tunnels, requests) stay in a flat chronological list.
+  const isGroupable = (a) => a.kind === "message" || a.kind === "agent";
+  const groups = React.useMemo(() => {
+    const map = new Map();
+    for (const a of items) {
+      if (!isGroupable(a)) continue;
+      const key = `${a.peer || "unknown"}|${a.agent || ""}`;
+      if (!map.has(key)) {
+        map.set(key, { key, peer: a.peer || "unknown", agent: a.agent || null, items: [], latest: a.t });
+      }
+      const g = map.get(key);
+      g.items.push(a);
+      if (a.t > g.latest) g.latest = a.t;
+    }
+    const arr = Array.from(map.values());
+    // Groups with the most recent activity first; items inside each group keep
+    // the newest-first order the backend already provides.
+    arr.sort((a, b) => (b.latest > a.latest ? 1 : b.latest < a.latest ? -1 : 0));
+    return arr;
+  }, [items]);
+
+  const systemItems = items.filter((a) => !isGroupable(a));
+
   return (
     <PageBody>
       <PageHeader title="Activity" sub="Federation events, agent-comms, and gateway changes.">
@@ -166,11 +242,39 @@ function ActivityView({ ctx }) {
           { value: "requests", label: "Requests" }, { value: "errors", label: "System" },
         ]} />
       </PageHeader>
-      <Card pad={8}>
-        {items.length === 0
-          ? <Empty icon="activity" title="Nothing here yet" sub="Activity will appear as peers exchange messages." />
-          : items.map((a) => <ActivityLine key={a.id} a={a} onReply={onReply} />)}
-      </Card>
+      {items.length === 0 ? (
+        <Card pad={8}>
+          <Empty icon="activity" title="Nothing here yet" sub="Activity will appear as peers exchange messages." />
+        </Card>
+      ) : filter === "messages" || filter === "all" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {groups.map((g) => (
+            <Card key={g.key} pad={12}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--border-soft)" }}>
+                <div style={{ width: 26, height: 26, borderRadius: 7, background: "var(--accent-soft)", color: "var(--accent)", display: "grid", placeItems: "center" }}>
+                  <Icon name="command" size={14} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.peer}</div>
+                  {g.agent && <div style={{ fontSize: 11, color: "var(--text-faint)", fontFamily: "var(--font-mono)" }}>→ {g.agent}</div>}
+                </div>
+              </div>
+              <div>
+                {g.items.map((a) => <ActivityBubble key={a.id} a={a} onReply={onReply} />)}
+              </div>
+            </Card>
+          ))}
+          {filter === "all" && systemItems.length > 0 && (
+            <Card pad={8}>
+              {systemItems.map((a) => <ActivityLine key={a.id} a={a} />)}
+            </Card>
+          )}
+        </div>
+      ) : (
+        <Card pad={8}>
+          {items.map((a) => <ActivityLine key={a.id} a={a} />)}
+        </Card>
+      )}
     </PageBody>
   );
 }

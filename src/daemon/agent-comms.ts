@@ -167,6 +167,8 @@ export interface ActivityEntry {
   intent?: string;
   /** Optional project context carried by the intent, for disambiguating usage. */
   projectId?: string;
+  /** The local target persona this message was routed to (bd-8rd.3 / B0032). */
+  toAgent?: string;
 }
 
 /**

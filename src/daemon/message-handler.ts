@@ -225,6 +225,7 @@ async function handleMessageImpl(
     message: formatNotification(message, peer.displayName),
     intent: message.intent,
     projectId: message.projectId,
+    toAgent: message.toAgent,
   });
 
   // 6. Execute intent handler if one is registered
@@ -444,6 +445,7 @@ async function handleAgentComms(
     level: policy.level,
     intent: 'agent-comms',
     projectId: message.projectId,
+    toAgent: message.toAgent,
   });
 
   // BUILD-101: If policy is 'off', send signed rejection with witty message

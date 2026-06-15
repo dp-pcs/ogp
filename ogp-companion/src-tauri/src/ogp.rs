@@ -396,6 +396,7 @@ fn map_activity(raw: &Value) -> Value {
             let topic = e.get("topic").and_then(|v| v.as_str());
             let level = e.get("level").and_then(|v| v.as_str());
             let text = e.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            let to_agent = e.get("toAgent").and_then(|v| v.as_str());
             // Stable-ish id from timestamp+peer+index (no nonce in the store).
             let id = format!("{timestamp}-{peer}-{i}");
             out.push(json!({
@@ -407,6 +408,7 @@ fn map_activity(raw: &Value) -> Value {
                 "topic": topic,
                 "level": level,
                 "text": text,
+                "agent": to_agent,
             }));
         }
     }

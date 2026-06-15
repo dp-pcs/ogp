@@ -1725,7 +1725,8 @@ export async function federationSendAgentComms(
       peerId,
       peerName: peer.displayName,
       topic,
-      message: messageText
+      message: messageText,
+      toAgent: options.toAgent,
     });
 
     await deliverLocalSessionText(
