@@ -163,6 +163,10 @@ export interface ActivityEntry {
   message: string;
   level?: ResponseLevel;
   truncated?: boolean;
+  /** The OGP intent that triggered this activity, for usage attribution (P4). */
+  intent?: string;
+  /** Optional project context carried by the intent, for disambiguating usage. */
+  projectId?: string;
 }
 
 /**

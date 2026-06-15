@@ -11,6 +11,7 @@
 
 import type { RendezvousConfig, TransportConfig, TransportMode } from '../shared/config.js';
 import { resolveTransportList } from '../shared/config.js';
+import type { AppAdvertisement } from '../shared/app-manifest.js';
 
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
 
@@ -190,6 +191,8 @@ export interface RegistrationCard {
   gatewayUrl?: string;
   publicKey: string;
   offeredIntents?: string[];
+  /** P5: Apps advertised by this peer, for relay-only discovery. */
+  apps?: AppAdvertisement[];
 }
 
 interface RegistrationAdvertisement {

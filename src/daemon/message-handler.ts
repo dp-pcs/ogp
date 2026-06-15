@@ -186,6 +186,18 @@ export async function handleMessage(
     return handleProjectIntent(message, peer.displayName, hookAgentId);
   }
 
+  // P4: Log all non-agent-comms intent dispatches for usage attribution.
+  // Agent-comms are logged inside handleAgentComms with their topic/level.
+  logActivity({
+    direction: 'in',
+    peerId: message.from,
+    peerName: peer.displayName,
+    topic: message.intent,
+    message: formatNotification(message, peer.displayName),
+    intent: message.intent,
+    projectId: message.projectId,
+  });
+
   // 6. Execute intent handler if one is registered
   if (intent.handler) {
     try {
@@ -400,7 +412,9 @@ async function handleAgentComms(
     peerName: displayName,
     topic,
     message: messageText,
-    level: policy.level
+    level: policy.level,
+    intent: 'agent-comms',
+    projectId: message.projectId,
   });
 
   // BUILD-101: If policy is 'off', send signed rejection with witty message

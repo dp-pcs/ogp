@@ -45,6 +45,16 @@ export interface AppManifest {
   [extra: string]: unknown;
 }
 
+/**
+ * P5: How an App is advertised to peers. Includes the full manifest plus the
+ * publisher's public key so browsers can verify the source before install.
+ */
+export interface AppAdvertisement {
+  manifest: AppManifest;
+  publisherKey: string;
+  advertisedAt: string;
+}
+
 export interface ValidationResult {
   ok: boolean;
   errors: string[];

@@ -35,6 +35,8 @@ import { connectBridge, disconnectBridge } from './openclaw-bridge.js';
 import type { ScopeBundle } from './scopes.js';
 import { loadIntents } from './intent-registry.js';
 import { acquireStateDirLock, StateDirLockedError, type StateDirLockHandle } from './state-lock.js';
+import { loadApps } from './app-registry.js';
+import type { AppAdvertisement } from '../shared/app-manifest.js';
 
 let server: any = null;
 let shutdownInProgress = false;
@@ -652,6 +654,8 @@ export interface WellKnownResponse {
   capabilities: {
     intents: string[];
     features: string[];
+    /** P5: Apps advertised by this peer. Absent when no Apps are advertised. */
+    apps?: AppAdvertisement[];
   };
   endpoints: {
     request: string;
@@ -682,6 +686,15 @@ export function buildWellKnownResponse(args: {
 }): WellKnownResponse {
   const { cfg, intentNames, publicKey, peerStatus } = args;
 
+  // P5: include advertised Apps in the well-known card.
+  const advertisedApps = loadApps()
+    .filter((a) => a.advertised)
+    .map((a): AppAdvertisement => ({
+      manifest: a.manifest,
+      publisherKey: a.manifest.publisher?.key ?? publicKey,
+      advertisedAt: a.installedAt,
+    }));
+
   return {
     version: OGP_VERSION,
     displayName: cfg.displayName,
@@ -690,7 +703,8 @@ export function buildWellKnownResponse(args: {
     publicKey,
     capabilities: {
       intents: intentNames,
-      features: ['scope-negotiation', 'reply-callback', 'bidirectional-health', 'multi-agent-personas']
+      features: ['scope-negotiation', 'reply-callback', 'bidirectional-health', 'multi-agent-personas'],
+      ...(advertisedApps.length > 0 ? { apps: advertisedApps } : {})
     },
     endpoints: {
       request: `${cfg.gatewayUrl}/federation/request`,
@@ -1270,12 +1284,21 @@ export function startServer(config?: OGPConfig, background = false): void {
     if (cfg.rendezvous?.enabled) {
       // bd-maas Part B: advertise a signed identity card so the rendezvous can
       // serve discovery info for relay-only peers (no public /.well-known/ogp).
+      // P5: include advertised Apps in the card so relay-only peers can browse them.
+      const advertisedApps = loadApps()
+        .filter((a) => a.advertised)
+        .map((a) => ({
+          manifest: a.manifest,
+          publisherKey: a.manifest.publisher?.key ?? getPublicKey(),
+          advertisedAt: a.installedAt,
+        }));
       const card = {
         displayName: cfg.displayName,
         email: cfg.email,
         gatewayUrl: cfg.gatewayUrl,
         publicKey: getPublicKey(),
-        offeredIntents: loadIntents().map((i) => i.name)
+        offeredIntents: loadIntents().map((i) => i.name),
+        ...(advertisedApps.length > 0 ? { apps: advertisedApps } : {})
       };
       startRendezvous(cfg.rendezvous, getPublicKey(), cfg.daemonPort, cfg.transport, {
         gatewayUrl: cfg.gatewayUrl,
