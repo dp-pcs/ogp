@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+- **OGP Apps Layer — P4/P5/P6**: The OGP companion Apps UI now has a complete CLI contract.
+  - P4 usage attribution: `ActivityEntry` records `intent` and `projectId` to `activity.jsonl`;
+    `ogp app usage [<id>] --json` maps intent dispatches to apps via `uses_intents`,
+    disambiguates by `projectId` in `uses_projects`, and flags shared intents when ambiguous.
+  - P5 peer-advertised discovery: Apps can advertise via the well-known endpoint and the
+    rendezvous `RegistrationCard`; `ogp app browse [peer]`, `ogp app advertise <id>`, and
+    `ogp app unadvertise <id>` are wired; `peer:<peerId>/<appId>` installs resolve the
+    manifest from the peer and verify the publisher key against the trusted peer record.
+  - P6 companion contract: `docs/ogp-apps-companion-contract.md` documents the exact JSON
+    contract for the gallery/installed/detail/usage screens, including the real Signal app
+    manifest values.
+  - Tests: `test/app-usage.test.ts` (6 tests), `test/app-advertise.test.ts` (4 tests).
+  - Beads: bd-8f2u (P4), bd-952s (P5), bd-eop0 (P6) closed.
+
 ### Security / Changed
 - **Hermes webhook secret is now per-install.** The setup wizard previously applied a shared
   hardcoded default secret whenever a Hermes user accepted the default webhook settings, so every
