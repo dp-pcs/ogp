@@ -16,6 +16,9 @@
     manifest values.
   - Tests: `test/app-usage.test.ts` (6 tests), `test/app-advertise.test.ts` (4 tests).
   - Beads: bd-8f2u (P4), bd-952s (P5), bd-eop0 (P6) closed.
+- **Signal ships the first real `ogp-app.json` manifest** in the `signal` repository
+  (`ogp-app.json` + `skills/*/install.sh`), making the OGP Apps layer usable end-to-end.
+  (bd-9xbp)
 
 ### Security / Changed
 - **Hermes webhook secret is now per-install.** The setup wizard previously applied a shared
