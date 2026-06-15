@@ -5,6 +5,7 @@ import { notifyOpenClaw } from './notify.js';
 import { checkAccess } from './doorman.js';
 import { handleReply, createReply } from './reply-handler.js';
 import { logActivity, getEffectivePolicy } from './agent-comms.js';
+import { getReplayResult, recordReplayResult } from './replay-dedup.js';
 import {
   getProject,
   joinProject,
@@ -91,6 +92,34 @@ export async function handleMessage(
   message: FederationMessage,
   signature: string,
   messageStr?: string  // raw JSON string used to sign — avoids key-order drift
+): Promise<MessageResponse> {
+  // bd-8rd.3: replay dedup. If we've already processed this nonce, return the
+  // cached result without re-executing the handler. This makes durable retries
+  // idempotent for every intent, not just project.contribute.
+  const cached = getReplayResult(message.nonce);
+  if (cached) {
+    return {
+      success: cached.success,
+      nonce: message.nonce,
+      ...(cached.success ? { response: cached.response } : {}),
+      ...(cached.error ? { error: cached.error, statusCode: cached.statusCode } : {}),
+    };
+  }
+
+  const result = await handleMessageImpl(message, signature, messageStr);
+  recordReplayResult(message.nonce, {
+    success: result.success,
+    response: result.response,
+    error: result.error,
+    statusCode: result.statusCode,
+  });
+  return result;
+}
+
+async function handleMessageImpl(
+  message: FederationMessage,
+  signature: string,
+  messageStr?: string
 ): Promise<MessageResponse> {
   // 1. Verify sender exists and is approved
   const peer = getPeer(message.from);

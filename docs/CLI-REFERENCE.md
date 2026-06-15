@@ -576,7 +576,7 @@ Send a message to an approved peer.
 
 **Syntax:**
 ```bash
-ogp federation send <peer-id> <intent> <payload> [--for <framework>]
+ogp federation send <peer-id> <intent> <payload> [options] [--for <framework>]
 ```
 
 **Arguments:**
@@ -585,6 +585,9 @@ ogp federation send <peer-id> <intent> <payload> [--for <framework>]
 - `<payload>` - JSON payload
 
 **Options:**
+- `--to-agent <persona>` - Target a specific persona on the peer (requires multi-agent-personas capability)
+- `--durable` - Queue for retry if delivery fails (bd-8rd.3)
+- `--best-effort` - Override `config.federation.durableDelivery` to false
 - `--for <framework>` - Framework to use (default: current/default)
 
 **Examples:**
@@ -606,6 +609,43 @@ ogp federation send apollo status-update '{
 
 # From specific framework
 ogp --for hermes federation send bob message '{"text":"Hello from Hermes!"}'
+
+# Durable delivery: retry until the peer accepts it
+ogp federation send apollo message '{"text":"Important"}' --durable
+
+# Force best-effort for this send even if durable is configured globally
+ogp federation send apollo message '{"text":"Ephemeral"}' --best-effort
+```
+
+### ogp federation reconcile
+
+Backfill project contributions from a peer. This is the manual recovery path for
+bd-8rd.3 durable delivery: when messages were queued while a peer was offline,
+run reconcile after the peer comes back online to fetch any contributions you
+may have missed.
+
+**Syntax:**
+```bash
+ogp federation reconcile <peer-id> [--project <project-id>] [--for <framework>]
+```
+
+**Arguments:**
+- `<peer-id>` - Peer identifier, alias, or display name
+
+**Options:**
+- `--project <project-id>` - Reconcile only a specific shared project
+- `--for <framework>` - Framework to use (default: current/default)
+
+**Examples:**
+```bash
+# Reconcile all shared projects with a peer
+ogp federation reconcile apollo
+
+# Reconcile a single project
+ogp federation reconcile apollo --project expense-app
+
+# From a specific framework
+ogp --for hermes federation reconcile apollo
 ```
 
 ### ogp federation agent
@@ -627,6 +667,9 @@ ogp federation agent <peer-id> <topic> <message> [options] [--for <framework>]
 - `--wait` - Wait for reply
 - `--timeout <ms>` - Reply timeout in milliseconds (default: 30000)
 - `--conversation <id>` - Conversation ID for threading
+- `--to-agent <persona>` - Target a specific persona on the peer (requires multi-agent-personas capability)
+- `--durable` - Queue for retry if delivery fails (bd-8rd.3)
+- `--best-effort` - Override `config.federation.durableDelivery` to false
 - `--for <framework>` - Framework to use (default: current/default)
 
 **Examples:**
@@ -642,7 +685,18 @@ ogp federation agent apollo queries "What's the status?" --wait --timeout 60000
 
 # Threaded conversation
 ogp federation agent apollo project-planning "Let's discuss sprint goals" --conversation sprint-42
+
+# Target a specific persona
+ogp federation agent apollo queries "hello specialist" --to-agent apollo --wait
+
+# Durable delivery
+ogp federation agent apollo task-delegation "Important task" --durable
+
+# Best-effort override
+ogp federation agent apollo memory-management "Quick question" --best-effort
 ```
+
+**Note:** `ogp agent-comms send` is an alias for this command and accepts the same options.
 
 ### ogp federation scopes
 
@@ -1120,9 +1174,11 @@ ogp project contribute <id> <type> <summary> [options] [--for <framework>]
 **Options:**
 - `--metadata <json>` - Additional structured data as JSON
 - `--local-only` - Skip auto-push to federated project members
+- `--durable` - Queue failed peer pushes for retry (bd-8rd.3)
+- `--best-effort` - Override `config.federation.durableDelivery` to false
 - `--for <framework>` - Framework to use (default: current/default)
 
-**Identity Snapshots (v0.6.0+):**
+**Identity Snapshots (v0.6.0+):
 
 Contributions automatically capture your identity at the time of contribution, including:
 - Human name
@@ -1149,6 +1205,12 @@ ogp project contribute expense-app progress "v1.0 shipped" \
 
 # Local only (no federation sync)
 ogp project contribute expense-app progress "WIP feature" --local-only
+
+# Durable delivery: retry if a project member is offline
+ogp project contribute expense-app progress "Shipped v1.0" --durable
+
+# Best-effort for this contribution even if durable is configured globally
+ogp project contribute expense-app progress "WIP feature" --best-effort
 ```
 
 ### ogp project query

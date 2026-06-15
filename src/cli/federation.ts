@@ -1,8 +1,9 @@
 import { listPeers, loadPeers, savePeers, getPeer, getPeerByUrl, getPeerByPublicKey, approvePeer, rejectPeer, updatePeer, updatePeerGrantedScopes, type Peer } from '../daemon/peers.js';
 import { requireConfig, loadConfig, type OGPConfig } from '../shared/config.js';
 import { lookupPeer, lookupPeerTransport, lookupPeerTransports, type ResolvedTransport } from '../daemon/rendezvous.js';
-import { deliverViaRelay, federationViaRelay } from '../daemon/relay-client.js';
 import { fetchPeerCard } from '../daemon/rendezvous.js';
+import { deliverFederationMessage } from '../daemon/federation-delivery.js';
+import { federationViaRelay } from '../daemon/relay-client.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject, sign } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
@@ -23,6 +24,12 @@ import { loadMetaConfig } from '../shared/meta-config.js';
 import { logActivity } from '../daemon/agent-comms.js';
 import { deliverLocalSessionText } from '../daemon/notify.js';
 import { validateTargetAgent } from './agent-targeting.js';
+import {
+  enqueueFrame,
+  shouldUseDurable,
+} from '../daemon/outbox.js';
+import { backfillContributionsFromPeer, type BackfillDeps } from '../daemon/contribution-backfill.js';
+import { upsertContribution, getProject } from '../daemon/projects.js';
 
 /**
  * Expand tilde in paths
@@ -1213,105 +1220,13 @@ export async function federationRemove(peerId: string): Promise<void> {
  * handling: { ok, status?, result }. `result` is the peer's MessageResponse
  * (or a synthesized failure for relay errors).
  */
-/** Deliver `frame` to `peer.gatewayUrl` over direct HTTP. Byte-identical to the
- * original send. Throws only on network/abort (caller maps that to try-next). */
-async function deliverDirect(
-  peer: Peer,
-  frame: { message: unknown; messageStr: string; signature: string },
-  timeoutMs?: number
-): Promise<{ ok: boolean; status?: number; result: any }> {
-  const controller = new AbortController();
-  const timeoutId = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
-  try {
-    const response = await fetch(`${peer.gatewayUrl}/federation/message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: frame.message,
-        messageStr: frame.messageStr,  // raw signed string for exact verification
-        signature: frame.signature
-      }),
-      signal: controller.signal
-    });
-    if (timeoutId) clearTimeout(timeoutId);
-    let result: any = null;
-    try { result = await response.json(); } catch { result = null; }
-    return { ok: response.ok, status: response.status, result };
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
-}
-
-/** Deliver `frame` to a peer over a relay WebSocket. Throws on relay/connection
- * failure (caller maps that to try-next / a synthesized failure). */
-async function deliverRelay(
-  relayUrl: string,
-  toPubkey: string,
-  frame: { message: unknown; messageStr: string; signature: string },
-  timeoutMs?: number
-): Promise<{ ok: boolean; status?: number; result: any }> {
-  const result = await deliverViaRelay(relayUrl, toPubkey, frame, timeoutMs);
-  const r = result as { success?: boolean; statusCode?: number };
-  return { ok: r?.success !== false, status: r?.statusCode, result };
-}
-
-export async function deliverFederationMessage(
-  peer: Peer,
-  frame: { message: unknown; messageStr: string; signature: string },
-  opts: { timeoutMs?: number; config: OGPConfig }
-): Promise<{ ok: boolean; status?: number; result: any }> {
-  // bd-maas: resolve the peer's advertised transport LIST and walk it by
-  // preference, using the first transport that delivers. Any rendezvous failure
-  // (disabled, lookup throws, empty list) ⇒ a single direct attempt, so the
-  // default path can never be broken by a flaky rendezvous.
-  let transports: ResolvedTransport[] = [];
-  if (opts.config.rendezvous?.enabled && peer.publicKey) {
-    try {
-      transports = await lookupPeerTransports(opts.config.rendezvous, peer.publicKey);
-    } catch {
-      transports = []; // fall through to direct
-    }
-  }
-
-  // No advertised list ⇒ exactly the original single direct send (byte-identical).
-  if (transports.length === 0) {
-    return deliverDirect(peer, frame, opts.timeoutMs);
-  }
-
-  // Walk the preference order; the first transport that delivers wins. A failed
-  // attempt (throw, or a relay error) falls through to the next entry; the last
-  // failure is returned so callers' existing error handling still fires.
-  let last: { ok: boolean; status?: number; result: any } | null = null;
-  for (const t of transports) {
-    try {
-      if (t.mode === 'relay') {
-        last = await deliverRelay(t.relayUrl, peer.publicKey as string, frame, opts.timeoutMs);
-      } else if (t.mode === 'direct') {
-        // Prefer the advertised direct url, else the peer record's gatewayUrl.
-        const target = t.url ? { ...peer, gatewayUrl: t.url } : peer;
-        last = await deliverDirect(target, frame, opts.timeoutMs);
-      } else {
-        continue; // iroh not deliverable yet (Phase 3) — skip this leg
-      }
-      if (last.ok) return last;
-      // Non-ok response (e.g. peer-not-connected via relay) ⇒ try the next leg.
-    } catch (err) {
-      last = {
-        ok: false,
-        result: { success: false, error: `${t.mode} delivery failed: ${(err as Error).message}` }
-      };
-    }
-  }
-
-  return last ?? deliverDirect(peer, frame, opts.timeoutMs);
-}
-
 export async function federationSend(
   peerId: string,
   intent: string,
   payloadJson: string,
   timeoutMs?: number,
-  toAgent?: string
+  toAgent?: string,
+  durable?: boolean
 ): Promise<any | null> {
   const config = requireConfig();
 
@@ -1364,6 +1279,9 @@ export async function federationSend(
   };
 
   const { payload: signedPayload, payloadStr, signature } = signObject(message, getPrivateKey());
+  const frame = { message: signedPayload, messageStr: payloadStr, signature, nonce: message.nonce };
+
+  const useDurable = shouldUseDurable(durable, config);
 
   try {
     const { ok, status, result } = await deliverFederationMessage(
@@ -1373,6 +1291,15 @@ export async function federationSend(
     );
 
     if (!ok) {
+      if (useDurable) {
+        enqueueFrame(peerId, frame, result?.error || `Send failed${status ? `: ${status}` : ''}`);
+        return {
+          success: false,
+          queued: true,
+          error: 'Send failed; message queued for retry.',
+          statusCode: status,
+        };
+      }
       if (result?.error) {
         console.error(`Send failed: ${status ? `${status} ` : ''}${result.error}`);
         return result;
@@ -1388,6 +1315,13 @@ export async function federationSend(
 
     return result;
   } catch (error: unknown) {
+    const errMsg = error instanceof Error && error.name === 'AbortError'
+      ? `Request timed out after ${timeoutMs}ms`
+      : `Failed to send message: ${error instanceof Error ? error.message : String(error)}`;
+    if (useDurable) {
+      enqueueFrame(peerId, frame, errMsg);
+      return { success: false, queued: true, error: `${errMsg}; message queued for retry.` };
+    }
     if (error instanceof Error && error.name === 'AbortError') {
       console.error(`Request timed out after ${timeoutMs}ms`);
     } else {
@@ -1687,15 +1621,16 @@ export async function federationSendAgentComms(
     waitForReply?: boolean;
     replyTimeout?: number;
     toAgent?: string;
+    durable?: boolean;
   } = {}
-): Promise<void> {
+): Promise<{ success: boolean; queued?: boolean; error?: string; statusCode?: number }> {
   const config = requireConfig();
 
   // Resolve peer identifier (alias, ID, or public key)
   const resolvedId = resolvePeerId(peerId);
   if (!resolvedId) {
     console.error(`Peer not found: ${peerId}`);
-    return;
+    return { success: false, error: `Peer not found: ${peerId}` };
   }
   peerId = resolvedId;
 
@@ -1703,12 +1638,12 @@ export async function federationSendAgentComms(
 
   if (!peer) {
     console.error(`Peer not found: ${peerId}`);
-    return;
+    return { success: false, error: `Peer not found: ${peerId}` };
   }
 
   if (peer.status !== 'approved') {
     console.error(`Peer ${peerId} is not approved`);
-    return;
+    return { success: false, error: `Peer ${peerId} is not approved` };
   }
 
   // B0032 P4: capability check before honoring --to-agent.
@@ -1719,7 +1654,7 @@ export async function federationSendAgentComms(
     );
     if (!targeting.ok) {
       console.error(targeting.reason);
-      return;
+      return { success: false, error: targeting.reason };
     }
   }
 
@@ -1751,6 +1686,8 @@ export async function federationSendAgentComms(
   };
 
   const { payload: signedPayload, payloadStr, signature } = signObject(message, getPrivateKey());
+  const frame = { message: signedPayload, messageStr: payloadStr, signature, nonce: message.nonce };
+  const useDurable = shouldUseDurable(options.durable, config);
 
   try {
     const { ok, status, result: delivered } = await deliverFederationMessage(
@@ -1761,6 +1698,15 @@ export async function federationSendAgentComms(
 
     if (!ok) {
       const body = delivered?.error ? String(delivered.error) : (delivered ? JSON.stringify(delivered) : '');
+      const errMsg = status === 403
+        ? `Access denied: ${body}`
+        : status === 429
+        ? `Rate limited: ${body}`
+        : `Send failed${status ? `: ${status}` : ''}${body ? ` - ${body}` : ''}`;
+      if (useDurable) {
+        enqueueFrame(peerId, frame, errMsg);
+        return { success: false, queued: true, error: `${errMsg}; message queued for retry.`, statusCode: status };
+      }
       if (status === 403) {
         console.error(`Access denied: ${body}`);
         console.log('Hint: Peer may not have granted you agent-comms scope for this topic.');
@@ -1769,7 +1715,7 @@ export async function federationSendAgentComms(
       } else {
         console.error(`Send failed${status ? `: ${status}` : ''}${body ? ` - ${body}` : ''}`);
       }
-      return;
+      return { success: false, error: errMsg, statusCode: status };
     }
 
     const result = (delivered ?? {}) as { received?: boolean; replyEndpoint?: string };
@@ -1807,7 +1753,7 @@ export async function federationSendAgentComms(
             if (replyData.status === 'complete' && replyData.reply) {
               console.log('\n✓ Reply received:');
               console.log(JSON.stringify(replyData.reply, null, 2));
-              return;
+              return { success: true };
             }
           }
         } catch {
@@ -1818,8 +1764,14 @@ export async function federationSendAgentComms(
       console.log('\n⏱ Reply timeout - no response received');
       process.exit(1);
     }
+    return { success: true };
   } catch (error) {
-    console.error('Failed to send agent-comms:', error);
+    const errMsg = `Failed to send agent-comms: ${error instanceof Error ? error.message : String(error)}`;
+    if (useDurable) {
+      enqueueFrame(peerId, frame, errMsg);
+      return { success: false, queued: true, error: `${errMsg}; message queued for retry.` };
+    }
+    console.error(errMsg);
     process.exit(1);
   }
 }
@@ -1995,4 +1947,78 @@ export async function federationSetAlias(peerId: string, alias: string): Promise
     console.error(`Failed to set alias for ${peerId}`);
     process.exit(1);
   }
+}
+
+/**
+ * Reconcile (backfill) project contributions from a peer.
+ *
+ * Usage: ogp federation reconcile <peer-id> [--project <project-id>]
+ *
+ * If --project is omitted, backfills every project that both this gateway and the
+ * peer are members of. Uses the signed project.query path; every merged record is
+ * re-verified against its author signature before being written locally.
+ */
+export async function federationReconcile(
+  peerId: string,
+  options: { projectId?: string } = {}
+): Promise<void> {
+  const resolvedId = resolvePeerId(peerId);
+  if (!resolvedId) {
+    console.error(`Peer not found: ${peerId}`);
+    process.exit(1);
+  }
+  peerId = resolvedId;
+
+  const peer = getPeer(peerId);
+  if (!peer) {
+    console.error(`Peer not found: ${peerId}`);
+    process.exit(1);
+  }
+
+  if (peer.status !== 'approved') {
+    console.error(`Peer ${peerId} is not approved`);
+    process.exit(1);
+  }
+
+  const { listProjectsForPeer } = await import('../daemon/projects.js');
+  const { listProjects } = await import('../daemon/projects.js');
+  const projects = options.projectId
+    ? [getProject(options.projectId)].filter((p): p is NonNullable<typeof p> => p !== null)
+    : listProjects().filter((p) => p.members.includes(peerId) || p.members.includes(peer.publicKey));
+
+  if (projects.length === 0) {
+    console.log(`No shared projects with ${peer.displayName || peerId} to reconcile.`);
+    return;
+  }
+
+  const deps: BackfillDeps = {
+    query: async (pid, projectId, limit) => {
+      const res = await federationSend(pid, 'project.query', JSON.stringify({ projectId, limit }), 30000);
+      return res as Awaited<ReturnType<BackfillDeps['query']>>;
+    },
+    upsert: (projectId, record) => upsertContribution(projectId, record),
+  };
+
+  let totalInserted = 0;
+  let totalDuplicate = 0;
+  let totalRejected = 0;
+
+  for (const project of projects) {
+    const result = await backfillContributionsFromPeer(peerId, project.id, deps, { limit: 500 });
+    totalInserted += result.inserted;
+    totalDuplicate += result.duplicate;
+    totalRejected += result.rejected;
+    if (result.error) {
+      console.error(`  ✗ ${project.id}: ${result.error}`);
+    } else {
+      const parts = [`pulled ${result.pulled}`];
+      if (result.inserted) parts.push(`merged ${result.inserted}`);
+      if (result.duplicate) parts.push(`${result.duplicate} already had`);
+      if (result.rejected) parts.push(`${result.rejected} rejected`);
+      console.log(`  ✓ ${project.id}: ${parts.join(', ')}`);
+    }
+  }
+
+  console.log(`\nReconcile complete for ${peer.displayName || peerId}:`);
+  console.log(`  Merged: ${totalInserted} | Already had: ${totalDuplicate} | Rejected: ${totalRejected}`);
 }

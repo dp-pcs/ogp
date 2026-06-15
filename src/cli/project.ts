@@ -139,6 +139,7 @@ interface ProjectContributeOptions {
   metadata?: string; // JSON string
   localOnly?: boolean; // skip auto-push to peers
   toAgent?: string; // B0032 P4: target persona on peer (requires multi-agent-personas capability)
+  durable?: boolean; // bd-8rd.3: queue for retry if delivery fails
 }
 
 interface ProjectQueryOptions {
@@ -460,7 +461,7 @@ export async function projectContribute(
           // bd-egmt: 30000ms (was 5000) — cross-gateway acks routinely run 5-10s,
           // matching the bd-ogwd query-peer timeout. federationSend returns null on
           // timeout (it does not throw), so classify the return rather than assume success.
-          const result = await federationSend(peer.id, 'project.contribute', payload, 30000, options.toAgent);
+          const result = await federationSend(peer.id, 'project.contribute', payload, 30000, options.toAgent, options.durable);
           if (result && result.success === false) {
             rejected++;
           } else if (result) {

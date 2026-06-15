@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateKeyPair } from '../src/shared/signing.js';
 import { buildSignedContribution, canonicalPayloadStr, verifySignedContribution } from '../src/daemon/contribution-signing.js';
 import { backfillContributionsFromPeer } from '../src/daemon/contribution-backfill.js';
+import { clearReplayCache } from '../src/daemon/replay-dedup.js';
 
 /**
  * bd-53c end-to-end at the unit level: the project.query RESPONDER emits the signed
@@ -49,13 +50,17 @@ vi.mock('../src/shared/signing.js', async (orig) => {
 });
 vi.mock('../src/daemon/doorman.js', () => ({ checkAccess: mocks.checkAccess }));
 vi.mock('../src/daemon/intent-registry.js', () => ({ getIntent: mocks.getIntent }));
-vi.mock('../src/shared/config.js', () => ({
-  loadConfig: vi.fn(() => ({ email: 'owner@example.com' })),
-  requireConfig: vi.fn(() => ({ email: 'owner@example.com' })),
-  synthesizePersonas: vi.fn(() => [{ id: 'main', role: 'primary' }]),
-  resolveTargetPersona: vi.fn(() => ({ id: 'main', role: 'primary' })),
-  effectiveHookAgentId: vi.fn(() => 'main'),
-}));
+vi.mock('../src/shared/config.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/shared/config.js')>('../src/shared/config.js');
+  return {
+    ...actual,
+    loadConfig: vi.fn(() => ({ email: 'owner@example.com' })),
+    requireConfig: vi.fn(() => ({ email: 'owner@example.com' })),
+    synthesizePersonas: vi.fn(() => [{ id: 'main', role: 'primary' }]),
+    resolveTargetPersona: vi.fn(() => ({ id: 'main', role: 'primary' })),
+    effectiveHookAgentId: vi.fn(() => 'main'),
+  };
+});
 vi.mock('../src/daemon/notify.js', () => ({ notifyOpenClaw: vi.fn(async () => {}) }));
 
 const { handleMessage } = await import('../src/daemon/message-handler.js');
@@ -70,6 +75,7 @@ function queryMsg() {
 describe('project.query responder emits the signed envelope (bd-53c)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearReplayCache();
     mocks.getProject.mockReturnValue({
       id: 'proj', name: 'Proj', members: [author.publicKey],
       topics: [{ name: 'note', contributions: [storedA, storedB], lastUpdated: storedB.timestamp }],

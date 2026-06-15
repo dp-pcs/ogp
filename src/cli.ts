@@ -26,7 +26,8 @@ import {
   federationSetAlias,
   federationTagPeer,
   federationUntagPeer,
-  federationUpdateIdentity
+  federationUpdateIdentity,
+  federationReconcile
 } from './cli/federation.js';
 import { expose, stopExpose } from './cli/expose.js';
 import { tunnelCommand } from './cli/tunnel.js';
@@ -777,8 +778,20 @@ federation
   .argument('<intent>', 'Intent name')
   .argument('<payload>', 'Payload as JSON string')
   .option('--to-agent <persona>', 'Target a specific persona on the peer (requires multi-agent-personas capability)')
+  .option('--durable', 'Queue for retry if delivery fails')
+  .option('--best-effort', 'Override config.durableDelivery to false')
   .action(async (peerId, intent, payload, options) => {
-    await federationSend(peerId, intent, payload, undefined, options.toAgent);
+    const durable = options.durable ? true : options.bestEffort ? false : undefined;
+    await federationSend(peerId, intent, payload, undefined, options.toAgent, durable);
+  });
+
+federation
+  .command('reconcile')
+  .description('Backfill project contributions from a peer')
+  .argument('<peer-id>', 'Peer ID')
+  .option('--project <project-id>', 'Reconcile only a specific shared project')
+  .action(async (peerId, options) => {
+    await federationReconcile(peerId, { projectId: options.project });
   });
 
 federation
@@ -816,13 +829,16 @@ federation
   .option('-w, --wait', 'Wait for reply')
   .option('-t, --timeout <ms>', 'Reply timeout in milliseconds', '30000')
   .option('--to-agent <persona>', 'Target a specific persona on the peer (requires multi-agent-personas capability)')
+  .option('--durable', 'Queue for retry if delivery fails')
+  .option('--best-effort', 'Override config.durableDelivery to false')
   .action(async (peerId, topic, message, options) => {
     await federationSendAgentComms(peerId, topic, message, {
       priority: options.priority as 'low' | 'normal' | 'high',
       conversationId: options.conversation,
       waitForReply: options.wait,
       replyTimeout: parseInt(options.timeout, 10),
-      toAgent: options.toAgent
+      toAgent: options.toAgent,
+      durable: options.durable ? true : options.bestEffort ? false : undefined,
     });
   });
 
@@ -898,13 +914,16 @@ agentComms
   .option('-w, --wait', 'Wait for reply')
   .option('-t, --timeout <ms>', 'Reply timeout in milliseconds', '30000')
   .option('--to-agent <persona>', 'Target a specific persona on the peer (requires multi-agent-personas capability)')
+  .option('--durable', 'Queue for retry if delivery fails')
+  .option('--best-effort', 'Override config.durableDelivery to false')
   .action(async (peerId, topic, message, options) => {
     await federationSendAgentComms(peerId, topic, message, {
       priority: options.priority as 'low' | 'normal' | 'high',
       conversationId: options.conversation,
       waitForReply: options.wait,
       replyTimeout: parseInt(options.timeout, 10),
-      toAgent: options.toAgent
+      toAgent: options.toAgent,
+      durable: options.durable ? true : options.bestEffort ? false : undefined,
     });
   });
 
@@ -1106,11 +1125,14 @@ project
   .option('--metadata <json>', 'Additional structured data as JSON')
   .option('--local-only', 'Skip auto-push to federated peers')
   .option('--to-agent <persona>', 'Target a specific persona on each peer auto-push target (requires multi-agent-personas capability)')
+  .option('--durable', 'Queue failed peer pushes for retry')
+  .option('--best-effort', 'Override config.durableDelivery to false')
   .action(async (projectId, entryType, summary, options) => {
     await projectContribute(projectId, entryType, summary, {
       ...options,
       localOnly: options.localOnly,
-      toAgent: options.toAgent
+      toAgent: options.toAgent,
+      durable: options.durable ? true : options.bestEffort ? false : undefined,
     });
   });
 

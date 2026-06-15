@@ -37,6 +37,7 @@ import { loadIntents } from './intent-registry.js';
 import { acquireStateDirLock, StateDirLockedError, type StateDirLockHandle } from './state-lock.js';
 import { loadApps } from './app-registry.js';
 import type { AppAdvertisement } from '../shared/app-manifest.js';
+import { startOutboxRetryScheduler, stopOutboxRetryScheduler } from './outbox-retry.js';
 
 let server: any = null;
 let shutdownInProgress = false;
@@ -724,6 +725,7 @@ interface ShutdownDeps {
   stopRendezvous: () => Promise<void>;
   stopRelayClient: () => Promise<void>;
   stopHeartbeat: () => void;
+  stopOutboxRetryScheduler: () => void;
   getServer: () => { close: (cb: (error?: Error) => void) => void } | null;
   exit: (code: number) => never;
   setTimer: typeof setTimeout;
@@ -742,6 +744,7 @@ export function createGracefulShutdownHandler(deps: ShutdownDeps) {
     deps.stopDoormanCleanup();
     deps.stopReplyCleanup();
     deps.stopHeartbeat();
+    deps.stopOutboxRetryScheduler();
     await deps.stopRendezvous().catch(() => {});
     await deps.stopRelayClient().catch(() => {});
 
@@ -1272,7 +1275,8 @@ export function startServer(config?: OGPConfig, background = false): void {
     startDoormanCleanup();
     startReplyCleanup();
     startHeartbeat();
-    console.log(`[OGP] Started doorman and reply cleanup timers`);
+    startOutboxRetryScheduler();
+    console.log(`[OGP] Started doorman, reply cleanup, and outbox retry timers`);
     console.log(`[OGP] Started peer heartbeat monitoring`);
 
     // Start OpenClaw WebSocket bridge (if using OpenClaw platform)
@@ -1332,6 +1336,7 @@ export function startServer(config?: OGPConfig, background = false): void {
     stopRendezvous,
     stopRelayClient,
     stopHeartbeat,
+    stopOutboxRetryScheduler,
     getServer: () => server,
     exit: (code: number) => { stateDirLock?.release(); stateDirLock = null; process.exit(code); },
     setTimer: setTimeout,
@@ -1347,6 +1352,8 @@ export function stopServer(): void {
   // Stop cleanup timers
   stopDoormanCleanup();
   stopReplyCleanup();
+  stopHeartbeat();
+  stopOutboxRetryScheduler();
   // Deregister from rendezvous + tear down relay socket (fire-and-forget)
   stopRendezvous().catch(() => {});
   stopRelayClient().catch(() => {});

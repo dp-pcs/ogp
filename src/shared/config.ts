@@ -374,6 +374,12 @@ export interface OGPConfig {
   // Health check configuration (optional)
   healthCheck?: HealthCheckConfig;
 
+  // bd-8rd.3: durable delivery opt-in. When true, failed project.contribute and
+  // agent-comms sends are queued for retry with backoff. Best-effort remains default.
+  federation?: {
+    durableDelivery?: boolean;
+  };
+
   // bd-53c: cross-member contribution backfill (anti-entropy). On-join backfill
   // always runs; this gates the PERIODIC pass that piggybacks on the heartbeat.
   // Default enabled. `maxPeersPerPass` caps fan-out so a large project can't flood

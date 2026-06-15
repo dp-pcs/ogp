@@ -11,7 +11,7 @@ vi.mock('../src/daemon/relay-client.js', () => ({
   deliverViaRelay: vi.fn(),
 }));
 
-import { deliverFederationMessage } from '../src/cli/federation.js';
+import { deliverFederationMessage } from '../src/daemon/federation-delivery.js';
 import { lookupPeerTransports } from '../src/daemon/rendezvous.js';
 import { deliverViaRelay } from '../src/daemon/relay-client.js';
 
