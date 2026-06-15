@@ -40,7 +40,11 @@ Shape:
         "description": "Federated AI-CoE knowledge hub",
         "uses_intents": ["project.contribute", "project.query"],
         "uses_projects": ["signal"],
-        "installs_skills": ["signal-contribute", "signal-query", "signal-refresh"],
+        "installs_skills": [
+          { "name": "signal-contribute", "install": "skills/signal-contribute/install.sh" },
+          { "name": "signal-query", "install": "skills/signal-query/install.sh" },
+          { "name": "signal-refresh", "install": "skills/signal-refresh/install.sh" }
+        ],
         "published_output": "https://aicoe.elelem.expert",
         "publisher": { "name": "AI CoE", "key": "<ed25519 pubkey>" }
       },
