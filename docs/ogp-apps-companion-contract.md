@@ -46,7 +46,7 @@ Shape:
           { "name": "signal-refresh", "install": "skills/signal-refresh/install.sh" }
         ],
         "published_output": "https://aicoe.elelem.expert",
-        "publisher": { "name": "AI CoE", "key": "<ed25519 pubkey>" }
+        "publisher": { "name": "AI CoE Team - Cosmo", "key": "302a300506032b657003210075ffa868b9242c6f815f27b3aacffe6b61d440b3d302ed42c02b2532b8bbba80" }
       },
       "source": "file:/Users/.../signal/ogp-app.json",
       "installedAt": "2026-06-13T...",
