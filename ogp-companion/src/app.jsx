@@ -201,10 +201,22 @@ function App() {
     stopTunnel() {
       setBusy((b) => ({ ...b, tunnel: true }));
       if (LIVE) {
+        const activeName = st.tunnel?.active?.name;
         Promise.resolve(BK.stopTunnel(fwId))
-          .then(() => hydrate())
+          .then((res) => {
+            // Backend returns { ok, stopped, status }. An external/unmanaged
+            // tunnel reports stopped:false + status:"no-managed-tunnel" — in
+            // that case OGP stopped nothing, so don't claim success or clear
+            // the active-tunnel state.
+            if (res && res.stopped === false && res.status === "no-managed-tunnel") {
+              patch((s) => { pushActivity(s, { kind: "tunnel", dir: null, peer: null, text: "Stop ignored — external (unmanaged) tunnel" }); });
+              showToast("External tunnel — not managed by OGP. Stop it with its own tooling.", { icon: "globe", tone: "warn" });
+            } else {
+              showToast(`Tunnel${activeName ? ` '${activeName}'` : ""} stopped`, { icon: "globeOff", tone: "danger" });
+            }
+          })
           .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }))
-          .finally(() => setBusy((b) => ({ ...b, tunnel: false, startingId: null })));
+          .finally(() => { hydrate(); setBusy((b) => ({ ...b, tunnel: false, startingId: null })); });
         showToast("Stopping tunnel…", { icon: "globeOff", tone: "danger" });
         return;
       }

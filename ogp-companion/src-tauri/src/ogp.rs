@@ -393,8 +393,48 @@ pub fn start_tunnel(framework: &str, option_id: &str) -> Result<Value, OgpError>
 }
 
 pub fn stop_tunnel(framework: &str) -> Result<Value, OgpError> {
-    run(Some(framework), &["tunnel", "stop"])?;
-    Ok(json!({ "ok": true }))
+    // `ogp tunnel stop --json` emits { stopped, status, message }. A managed
+    // tunnel that was actually stopped exits 0; the external/unmanaged case
+    // ("no-managed-tunnel") exits 2 by design. We tolerate exit 2 ONLY when the
+    // JSON confirms `status == "no-managed-tunnel"`; any other non-zero exit is
+    // a genuine error. This mirrors run()/run_json() (locate_ogp, augmented
+    // PATH, --for framework) but inspects the exit code locally instead of
+    // failing on every non-zero status.
+    let bin = locate_ogp().ok_or_else(|| OgpError("ogp binary not found".into()))?;
+    let mut cmd = Command::new(&bin);
+    cmd.env("PATH", augmented_path());
+    cmd.arg("--for").arg(framework);
+    cmd.args(["tunnel", "stop", "--json"]);
+    let out = cmd
+        .output()
+        .map_err(|e| OgpError(format!("failed to run ogp: {e}")))?;
+    let code = out.status.code().unwrap_or(-1);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: Option<Value> = serde_json::from_str(stdout.trim()).ok();
+    let status = parsed
+        .as_ref()
+        .and_then(|v| v.get("status"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let stopped = parsed
+        .as_ref()
+        .and_then(|v| v.get("stopped"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if out.status.success() {
+        // Managed tunnel actually stopped (or idempotent stop succeeded).
+        Ok(json!({ "ok": true, "stopped": stopped || status != "no-managed-tunnel" }))
+    } else if code == 2 && status == "no-managed-tunnel" {
+        // External / unmanaged tunnel — nothing was stopped. Surface cleanly.
+        Ok(json!({ "ok": true, "stopped": false, "status": "no-managed-tunnel" }))
+    } else {
+        Err(OgpError(format!(
+            "ogp tunnel stop exited {}: {}",
+            code,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )))
+    }
 }
 
 pub fn toggle_daemon(framework: &str, run_it: bool) -> Result<Value, OgpError> {
