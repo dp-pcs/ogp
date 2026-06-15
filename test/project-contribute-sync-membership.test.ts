@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   ensureProjectTopic: vi.fn(),
-  contributeToProject: vi.fn(() => 'contrib-1'),
   upsertContribution: vi.fn(() => 'inserted'),
   getProject: vi.fn(() => ({
     id: 'apollo',
@@ -36,7 +35,6 @@ vi.mock('../src/daemon/projects.js', () => ({
   listProjectsForPeer: mocks.listProjectsForPeer,
   joinProject: vi.fn(),
   isProjectMember: mocks.isProjectMember,
-  contributeToProject: mocks.contributeToProject,
   upsertContribution: mocks.upsertContribution,
   getTopicContributions: vi.fn(),
   getAuthorContributions: vi.fn(),
@@ -84,7 +82,6 @@ describe('projectContribute membership-scoped sync', () => {
       updatedAt: '2026-04-13T00:00:00Z'
     });
     mocks.isProjectMember.mockReturnValue(true);
-    mocks.contributeToProject.mockReturnValue('contrib-1');
     mocks.listPeers.mockReturnValue([
       { id: 'member-peer', status: 'approved' },
       { id: 'non-member-peer', status: 'approved' }

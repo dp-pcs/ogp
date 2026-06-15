@@ -29,7 +29,6 @@ vi.mock('../src/daemon/projects.js', () => ({
   addProject: mocks.addProject,
   ensureProjectTopic: vi.fn(),
   upsertContribution: vi.fn(() => 'inserted'),
-  contributeToProject: vi.fn(),
   joinProject: vi.fn(),
   getTopicContributions: vi.fn(() => []),
   getAuthorContributions: vi.fn(() => []),

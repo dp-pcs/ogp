@@ -288,65 +288,21 @@ export function ensureProjectTopic(
   return true;
 }
 
-/**
- * Add a contribution to a project entry type
- */
-export function contributeToProject(
-  projectId: string,
-  entryTypeName: string,
-  authorId: string,
-  summary: string,
-  metadata?: Record<string, any>,
-  authorIdentity?: AuthorIdentity
-): string | null {
-  const projects = loadProjects();
-  const project = projects.find(p => p.id === projectId);
-  if (!project) return null;
-
-  // Ensure the author is a project member
-  if (!project.members.includes(authorId)) {
-    return null;
-  }
-
-  // Keep the existing topic bucket structure on disk; user-facing terminology is "entry type".
-  let topic = project.topics.find(t => t.name === entryTypeName);
-  if (!topic) {
-    topic = {
-      name: entryTypeName,
-      contributions: [],
-      lastUpdated: new Date().toISOString()
-    };
-    project.topics.push(topic);
-  }
-
-  // Create the contribution
-  const now = new Date().toISOString();
-  const contributionId = `${projectId}-${entryTypeName}-${Date.now()}`;
-  const contribution: ProjectContribution = {
-    id: contributionId,
-    timestamp: now,
-    authorId,
-    authorIdentity,
-    entryType: entryTypeName,
-    topic: entryTypeName,
-    summary,
-    metadata
-  };
-
-  topic.contributions.push(contribution);
-  topic.lastUpdated = now;
-  project.updatedAt = now;
-
-  saveProjects(projects);
-  return contributionId;
-}
+// NOTE: The legacy contributeToProject() unsigned-write primitive was removed
+// (bd-mrxy). After bd-6twb (signed contributions, PR #29) it had no live caller:
+// the CLI local-contribute path and the project.contribute receiver both go
+// through upsertContribution() with signed records. It minted receiver-side ids
+// for UNSIGNED writes — the exact anti-pattern signed contributions replaced — so
+// it was deleted rather than left as "a loaded gun in the drawer." Use
+// upsertContribution() (verified-signature provenance) for all contribution writes.
 
 export type UpsertResult = 'inserted' | 'duplicate' | 'rejected' | 'not-found';
 
 /**
  * Merge a fully-formed contribution into a project by id. Idempotent: a record
  * whose id already exists is a no-op ('duplicate'). A signed record is verified
- * before insert. Unlike contributeToProject, this does NOT require the author to
+ * before insert. Unlike the old (removed) unsigned contributeToProject path,
+ * this does NOT require the author to
  * be a project member — a verified signature is sufficient provenance, which is
  * what lets bd-53c (Story B) merge relayed contributions. Records lacking a
  * signature are rejected here (only the migration path may store unsigned/legacy).

@@ -15,14 +15,13 @@ const mocks = vi.hoisted(() => ({
   getIntent: vi.fn(() => ({ name: 'project.contribute' })),
 }));
 
-// projects.js — store side. Keep contributeToProject present in case other
-// handlers reference it; the handler under test now uses upsertContribution.
+// projects.js — store side. The handler under test uses upsertContribution
+// (signed writes only); the old unsigned contributeToProject path was removed (bd-mrxy).
 vi.mock('../src/daemon/projects.js', () => ({
   getProject: mocks.getProject,
   isProjectMember: mocks.isProjectMember,
   ensureProjectTopic: mocks.ensureProjectTopic,
   upsertContribution: mocks.upsertContribution,
-  contributeToProject: vi.fn(),
   joinProject: vi.fn(),
   getTopicContributions: vi.fn(() => []),
   getAuthorContributions: vi.fn(() => []),
