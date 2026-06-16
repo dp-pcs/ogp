@@ -8,6 +8,7 @@ const ICON_PATHS = {
   activity: '<path d="M3 12h3.5l2.5-7 4 14 2.5-7H21"/>',
   settings: '<path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2.2"/><circle cx="8" cy="16" r="2.2"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v5h-5"/>',
+  download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   check: '<path d="M5 12.5 10 17.5 19 6.5"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
@@ -52,6 +53,7 @@ const ICON_PATHS = {
   pause: '<path d="M8 5v14M16 5v14"/>',
   shieldCheck: '<path d="M12 3 5 6v5c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/><path d="M9 12l2 2 4-4"/>',
   network: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M12 12H6v4M12 12h6v4"/>',
+  apps: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M17 13v8M13 17h8"/>',
 };
 
 function Icon({ name, size = 20, stroke = 1.75, fill = "none", style = {}, className = "" }) {

@@ -52,13 +52,31 @@ export interface RendezvousConfig {
 export type TransportMode = 'direct' | 'relay' | 'iroh';
 
 export interface TransportConfig {
-  mode: TransportMode;            // default 'direct'
+  mode: TransportMode;            // default 'direct' — the simple single-mode path (bd-26fg)
   relay?: {
     url: string;                  // websocket relay endpoint; default wss://<rendezvous>/relay
   };
   iroh?: {
     relayUrl?: string;            // dedicated/self-hosted iroh relay; omit = public dev relays
   };
+  /**
+   * bd-maas: multi-transport advertisement (opt-in). When set, the daemon
+   * advertises EACH of these modes (a peer reaches us on whichever it prefers),
+   * instead of the single `mode`. Absent ⇒ fall back to `mode` (one-element list).
+   */
+  advertise?: TransportMode[];
+  /**
+   * bd-maas: preferred mode when WE deliver to a peer that advertises several with
+   * no preference of its own is handled by the SENDER default (direct-first). This
+   * field orders OUR OWN advertised list so peers know which transport we'd rather
+   * receive on. Must be a member of `advertise` (or `mode`); otherwise ignored.
+   */
+  prefer?: TransportMode;
+}
+
+/** One entry in a resolved transport advertisement list (bd-maas). */
+export interface TransportEntry {
+  mode: TransportMode;
 }
 
 export type InboundFederationMode =
@@ -356,6 +374,22 @@ export interface OGPConfig {
   // Health check configuration (optional)
   healthCheck?: HealthCheckConfig;
 
+  // bd-8rd.3: durable delivery opt-in. When true, failed project.contribute and
+  // agent-comms sends are queued for retry with backoff. Best-effort remains default.
+  federation?: {
+    durableDelivery?: boolean;
+  };
+
+  // bd-53c: cross-member contribution backfill (anti-entropy). On-join backfill
+  // always runs; this gates the PERIODIC pass that piggybacks on the heartbeat.
+  // Default enabled. `maxPeersPerPass` caps fan-out so a large project can't flood
+  // federation traffic on one tick.
+  backfill?: {
+    enabled?: boolean;          // default true
+    maxPeersPerPass?: number;   // default 10
+    limit?: number;             // per-query contribution cap (default 500)
+  };
+
   // macOS dedicated-keychain support for headless deployments.
   // When set, all `security` invocations target this keychain instead of the
   // login keychain. If keychainPasswordFile is also set, the keychain is
@@ -378,6 +412,42 @@ export function getConfigDir(): string {
  */
 export function getTransportMode(config: Pick<OGPConfig, 'transport'>): TransportMode {
   return config.transport?.mode ?? 'direct';
+}
+
+/**
+ * Resolve the ordered transport advertisement list (bd-maas). This is the internal
+ * source of truth; `mode`/`advertise`/`prefer` are the user-facing knobs over it.
+ *
+ * Precedence (Option A, settled 2026-06-11):
+ *   1. `transport.advertise` set ⇒ that list, de-duplicated, with `prefer` (if a
+ *      member) hoisted to the front and the rest in declaration order.
+ *   2. else `transport.mode` ⇒ a one-element list (today's behavior, byte-identical).
+ *   3. absent ⇒ `[{ mode: 'direct' }]`.
+ *
+ * Pure — exported for testing. Never throws; ignores an out-of-list `prefer`.
+ */
+export function resolveTransportList(config: Pick<OGPConfig, 'transport'>): TransportEntry[] {
+  const t = config.transport;
+  const advertise = t?.advertise;
+
+  if (advertise && advertise.length > 0) {
+    // De-dup preserving declaration order.
+    const seen = new Set<TransportMode>();
+    const ordered: TransportMode[] = [];
+    for (const m of advertise) {
+      if (!seen.has(m)) { seen.add(m); ordered.push(m); }
+    }
+    // Hoist `prefer` to the front when it's actually in the advertised set.
+    const prefer = t?.prefer;
+    if (prefer && seen.has(prefer)) {
+      const rest = ordered.filter((m) => m !== prefer);
+      return [prefer, ...rest].map((mode) => ({ mode }));
+    }
+    return ordered.map((mode) => ({ mode }));
+  }
+
+  const mode = t?.mode ?? 'direct';
+  return [{ mode }];
 }
 
 /**

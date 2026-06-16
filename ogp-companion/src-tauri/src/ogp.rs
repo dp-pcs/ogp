@@ -174,6 +174,8 @@ pub fn snapshot() -> Result<Value, OgpError> {
     let mut tunnels = Map::new();
     let mut daemon = Map::new();
     let mut activity = Map::new();
+    let mut transport = Map::new();
+    let mut apps = Map::new();
 
     for fw in &frameworks {
         let id = fw.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -186,10 +188,12 @@ pub fn snapshot() -> Result<Value, OgpError> {
         merge_comms_policy(&mut plist, state_dir_for_policy);
         peers.insert(id.clone(), plist);
 
-        // daemon: cheap liveness via the state dir's daemon.pid (no subprocess).
+        // daemon: cheap liveness via the state dir's daemon.pid, with a port-probe
+        // fallback when the pid file is absent (bd-kl7w).
         let port = fw.get("daemonPort").cloned().unwrap_or(json!(18790));
+        let port_num = port.as_u64().and_then(|n| u16::try_from(n).ok());
         let state_dir = fw.get("stateDir").and_then(|v| v.as_str());
-        let (running, pid) = daemon_state(state_dir);
+        let (running, pid) = daemon_state(state_dir, port_num);
         daemon.insert(
             id.clone(),
             json!({ "running": running, "port": port, "version": ogp_version(), "uptimeMs": 0, "pid": pid }),
@@ -205,6 +209,27 @@ pub fn snapshot() -> Result<Value, OgpError> {
         let araw = run_json(fwref, &["agent-comms", "activity", "--json", "--last", "100"])
             .unwrap_or(json!([]));
         activity.insert(id.clone(), map_activity(&araw));
+
+        // transport: config transport show --json → { mode, relayUrl, irohRelayUrl }.
+        // Graceful fallback to direct if the installed CLI predates --json.
+        let tmode = transport_show(&id)
+            .unwrap_or_else(|_| json!({ "mode": "direct", "relayUrl": Value::Null, "irohRelayUrl": Value::Null }));
+        transport.insert(id.clone(), tmode);
+
+        // apps: installed registry (from file) + browse + usage (from CLI).
+        // All are cheap to compute and change infrequently; fold into the poll.
+        let installed_raw = app_list(&id).unwrap_or_else(|_| json!({ "apps": [] }));
+        let installed = installed_raw
+            .get("apps")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let browse = app_browse(&id).unwrap_or_else(|_| json!([]));
+        let usage = app_usage(&id, "").unwrap_or_else(|_| json!([]));
+        apps.insert(id.clone(), json!({
+            "installed": installed,
+            "browse": browse,
+            "usage": usage,
+        }));
     }
 
     Ok(json!({
@@ -213,6 +238,8 @@ pub fn snapshot() -> Result<Value, OgpError> {
         "tunnels": tunnels,
         "daemon": daemon,
         "activity": activity,
+        "transport": transport,
+        "apps": apps,
     }))
 }
 
@@ -265,20 +292,41 @@ fn merge_comms_policy(plist: &mut Value, state_dir: Option<&str>) {
 /// Cheap daemon state: read <stateDir>/daemon.pid and probe with kill(pid,0).
 /// Avoids spawning `ogp status` (a node process) on every 5s poll. Returns
 /// (running, pid).
-fn daemon_state(state_dir: Option<&str>) -> (bool, Value) {
-    let Some(dir) = state_dir else { return (false, Value::Null) };
-    // expand a leading ~ to $HOME
-    let dir = if let Some(rest) = dir.strip_prefix("~") {
-        format!("{}{}", std::env::var("HOME").unwrap_or_default(), rest)
-    } else {
-        dir.to_string()
-    };
-    let pid_path = std::path::Path::new(&dir).join("daemon.pid");
-    let Ok(s) = std::fs::read_to_string(&pid_path) else { return (false, Value::Null) };
-    let Ok(pid) = s.trim().parse::<i32>() else { return (false, Value::Null) };
-    // signal 0 = liveness probe (no signal sent)
-    let alive = unsafe { libc_kill(pid, 0) == 0 };
-    if alive { (true, json!(pid)) } else { (false, Value::Null) }
+fn daemon_state(state_dir: Option<&str>, port: Option<u16>) -> (bool, Value) {
+    // Primary: daemon.pid in the state dir + a kill(pid,0) liveness probe.
+    if let Some(dir) = state_dir {
+        let dir = if let Some(rest) = dir.strip_prefix("~") {
+            format!("{}{}", std::env::var("HOME").unwrap_or_default(), rest)
+        } else {
+            dir.to_string()
+        };
+        let pid_path = std::path::Path::new(&dir).join("daemon.pid");
+        if let Ok(s) = std::fs::read_to_string(&pid_path) {
+            if let Ok(pid) = s.trim().parse::<i32>() {
+                if unsafe { libc_kill(pid, 0) == 0 } {
+                    return (true, json!(pid));
+                }
+            }
+        }
+    }
+    // bd-kl7w fallback: the pid file can be absent even when the daemon is up
+    // (e.g. started in the foreground, which doesn't fork+write daemon.pid).
+    // Mirror `ogp status`: probe the daemon port before declaring it down.
+    if let Some(p) = port {
+        if port_is_listening(p) {
+            return (true, Value::Null); // running, pid unknown (started externally)
+        }
+    }
+    (false, Value::Null)
+}
+
+/// TCP connect probe to 127.0.0.1:port with a short timeout — a cheap liveness
+/// check that doesn't depend on a pid file.
+fn port_is_listening(port: u16) -> bool {
+    use std::net::{TcpStream, SocketAddr};
+    use std::time::Duration;
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
 }
 
 extern "C" {
@@ -365,6 +413,7 @@ fn map_activity(raw: &Value) -> Value {
             let topic = e.get("topic").and_then(|v| v.as_str());
             let level = e.get("level").and_then(|v| v.as_str());
             let text = e.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            let to_agent = e.get("toAgent").and_then(|v| v.as_str());
             // Stable-ish id from timestamp+peer+index (no nonce in the store).
             let id = format!("{timestamp}-{peer}-{i}");
             out.push(json!({
@@ -376,6 +425,7 @@ fn map_activity(raw: &Value) -> Value {
                 "topic": topic,
                 "level": level,
                 "text": text,
+                "agent": to_agent,
             }));
         }
     }
@@ -393,47 +443,33 @@ pub fn start_tunnel(framework: &str, option_id: &str) -> Result<Value, OgpError>
 }
 
 pub fn stop_tunnel(framework: &str) -> Result<Value, OgpError> {
-    // `ogp tunnel stop --json` emits { stopped, status, message }. A managed
-    // tunnel that was actually stopped exits 0; the external/unmanaged case
-    // ("no-managed-tunnel") exits 2 by design. We tolerate exit 2 ONLY when the
-    // JSON confirms `status == "no-managed-tunnel"`; any other non-zero exit is
-    // a genuine error. This mirrors run()/run_json() (locate_ogp, augmented
-    // PATH, --for framework) but inspects the exit code locally instead of
-    // failing on every non-zero status.
-    let bin = locate_ogp().ok_or_else(|| OgpError("ogp binary not found".into()))?;
-    let mut cmd = Command::new(&bin);
-    cmd.env("PATH", augmented_path());
-    cmd.arg("--for").arg(framework);
-    cmd.args(["tunnel", "stop", "--json"]);
-    let out = cmd
-        .output()
-        .map_err(|e| OgpError(format!("failed to run ogp: {e}")))?;
-    let code = out.status.code().unwrap_or(-1);
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let parsed: Option<Value> = serde_json::from_str(stdout.trim()).ok();
-    let status = parsed
-        .as_ref()
-        .and_then(|v| v.get("status"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let stopped = parsed
-        .as_ref()
-        .and_then(|v| v.get("stopped"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    if out.status.success() {
-        // Managed tunnel actually stopped (or idempotent stop succeeded).
-        Ok(json!({ "ok": true, "stopped": stopped || status != "no-managed-tunnel" }))
-    } else if code == 2 && status == "no-managed-tunnel" {
-        // External / unmanaged tunnel — nothing was stopped. Surface cleanly.
-        Ok(json!({ "ok": true, "stopped": false, "status": "no-managed-tunnel" }))
-    } else {
-        Err(OgpError(format!(
-            "ogp tunnel stop exited {}: {}",
-            code,
-            String::from_utf8_lossy(&out.stderr).trim()
-        )))
+    // bd-iakg: ask for structured output and report the REAL outcome. A no-op
+    // (gateway served by an externally-started tunnel ogp can't manage) exits
+    // non-zero, so run() returns Err — but that's an expected, non-fatal outcome
+    // we surface as { ok:false, status:"no-managed-tunnel" } rather than a green
+    // success or a scary error. Older CLIs (no --json) fall back to the old path.
+    let out = run(Some(framework), &["tunnel", "stop", "--json"]);
+    match out {
+        Ok(s) => {
+            // CLI succeeded (something was stopped). Parse status if present.
+            let parsed: Value = serde_json::from_str(s.trim()).unwrap_or(json!({ "ok": true }));
+            let stopped = parsed.get("stopped").and_then(|v| v.as_bool()).unwrap_or(true);
+            Ok(json!({ "ok": stopped, "status": parsed.get("status").cloned().unwrap_or(json!("stopped")) }))
+        }
+        Err(e) => {
+            // Non-zero exit. Distinguish the expected no-op from a real failure by
+            // looking for the structured marker in the error text.
+            let msg = e.0;
+            if msg.contains("no-managed-tunnel") || msg.contains("No ogp-managed tunnel") {
+                Ok(json!({
+                    "ok": false,
+                    "status": "no-managed-tunnel",
+                    "message": "No OGP-managed tunnel — your gateway is served by an external tunnel. Stop it with its own tooling."
+                }))
+            } else {
+                Err(OgpError(msg))
+            }
+        }
     }
 }
 
@@ -572,6 +608,66 @@ pub fn set_identity(
     run(Some(framework), &argrefs)?;
     clear_framework_cache();
     Ok(json!({ "ok": true }))
+}
+
+/// Read the current transport config for a framework (bd-b7em Phase 2).
+/// Returns { mode, relayUrl, irohRelayUrl }. Falls back to direct if the CLI is
+/// older than 0.10.1 (no `--json`) so the UI degrades gracefully.
+pub fn transport_show(framework: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["config", "transport", "show", "--json"])
+        .or_else(|_| Ok(json!({ "mode": "direct", "relayUrl": Value::Null, "irohRelayUrl": Value::Null })))
+}
+
+/// Set the transport mode (and optionally the relay URL) for a framework.
+/// Mirrors `ogp config transport set-mode <mode>` (+ `set-relay-url <url>`).
+/// The daemon must be restarted for relay to take effect — the UI surfaces that.
+pub fn set_transport(framework: &str, mode: &str, relay_url: Option<String>) -> Result<Value, OgpError> {
+    run(Some(framework), &["config", "transport", "set-mode", mode])?;
+    if let Some(url) = relay_url.filter(|s| !s.is_empty()) {
+        run(Some(framework), &["config", "transport", "set-relay-url", &url])?;
+    }
+    Ok(json!({ "ok": true }))
+}
+
+// ── OGP Apps ──────────────────────────────────────────────────────
+/// Read the installed apps registry for a framework directly from its state dir.
+/// No CLI call — reads the JSON file the daemon writes. Returns { installed, peers }.
+pub fn app_list(framework: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["app", "list", "--json"])
+        .or_else(|_| Ok(json!({ "apps": [] })))
+}
+
+/// Browse apps advertised by peers via `ogp app browse --json`.
+pub fn app_browse(framework: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["app", "browse", "--json"])
+        .or_else(|_| Ok(json!([])))
+}
+
+/// Show manifest details for a single app.
+pub fn app_show(framework: &str, id: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["app", "show", id, "--json"])
+}
+
+/// Install an app (passes --yes because the companion UI already collected consent).
+/// ref can be file:<path>, peer:<peer-id>/<app-id>, or github:<owner>/<repo>.
+pub fn app_install(framework: &str, app_ref: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["app", "install", app_ref, "--yes", "--json"])
+}
+
+/// Remove an installed app by id.
+pub fn app_remove(framework: &str, id: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["app", "remove", id, "--json"])
+}
+
+/// Show usage attribution for an app (or all if id is empty).
+pub fn app_usage(framework: &str, id: &str) -> Result<Value, OgpError> {
+    if id.is_empty() {
+        run_json(Some(framework), &["app", "usage", "--json"])
+            .or_else(|_| Ok(json!([])))
+    } else {
+        run_json(Some(framework), &["app", "usage", id, "--json"])
+            .or_else(|_| Ok(json!([])))
+    }
 }
 
 /// Open Terminal.app with a prompt pre-filled (not executed) for this framework.

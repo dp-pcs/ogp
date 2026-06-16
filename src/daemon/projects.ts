@@ -4,7 +4,7 @@ import {
   getConfigDir,
   ensureConfigDir
 } from '../shared/config.js';
-import { verifySignedContribution } from './contribution-signing.js';
+import { verifySignedContribution, canonicalPayloadStr } from './contribution-signing.js';
 import {
   type ProjectCreation,
   type OwnerGrant,
@@ -324,12 +324,8 @@ export function upsertContribution(
     id: record.id,
     authorId: record.authorId,
     timestamp: record.timestamp,
-    payloadStr: JSON.stringify({
-      id: record.id, projectId, authorId: record.authorId,
-      entryType: record.entryType, summary: record.summary,
-      ...(record.metadata !== undefined && { metadata: record.metadata }),
-      timestamp: record.timestamp
-    }),
+    // Shared canonical reconstruction (bd-53c) — identical bytes to the signer side.
+    payloadStr: canonicalPayloadStr(record, projectId),
     signature: record.signature
   });
   if (!check.ok) return 'rejected';

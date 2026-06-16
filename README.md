@@ -1315,6 +1315,96 @@ On non-macOS, OGP prefers this secret source order for encrypting the private ke
 
 If no encryption secret is available, OGP falls back to legacy plaintext key storage and logs a warning. Set one of the secrets above, then run `ogp setup --reset-keypair` to harden the instance.
 
+## OGP Apps
+
+OGP Apps are declarative bundles (`ogp-app.json`) that describe a piece of software in terms of the OGP capabilities it uses — what intents it fires, what skills it installs into your AI agent, and where its output lives. Apps are discovered through your federation: peers advertise the apps they publish, you browse and install them with a consent gate.
+
+### App manifest (`ogp-app.json`)
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "my-app",
+  "name": "My App",
+  "version": "1.0.0",
+  "description": "What this app does.",
+  "uses_intents": ["project.contribute", "message"],
+  "uses_projects": ["my-project"],
+  "installs_skills": [
+    { "name": "my-skill", "install": "scripts/install-my-skill.sh" }
+  ],
+  "published_output": "https://my-app.example.com",
+  "publisher": {
+    "name": "Your Name / Org",
+    "key": "<your-ogp-ed25519-public-key-hex>"
+  }
+}
+```
+
+Get your public key with `ogp whoami --json | jq .publicKey`.
+
+### Publishing an app
+
+```bash
+# 1. Write ogp-app.json in your app's repo (see manifest shape above)
+
+# 2. Install it locally — validates the manifest, runs install scripts, registers it
+ogp app install file:/path/to/my-app-dir
+
+# 3. Advertise it so approved peers can discover it
+ogp app advertise my-app
+
+# 4. To stop advertising
+ogp app unadvertise my-app
+```
+
+Once advertised, the app appears in `/.well-known/ogp` and your rendezvous card. Any approved peer can browse and install it.
+
+### Subscribing to an app (as a user)
+
+```bash
+# Browse apps advertised by all approved peers
+ogp app browse
+
+# Browse a specific peer's apps
+ogp app browse <peerId>
+
+# Install from a peer — triggers consent gate (shows scripts + intents before running)
+ogp app install peer:<peerId>/<appId>
+
+# Install from a local directory (same flow, no peer lookup)
+ogp app install file:/path/to/app-dir
+
+# Skip the consent prompt (automation / --yes flows)
+ogp app install peer:<peerId>/<appId> --yes
+```
+
+The consent gate shows exactly which install scripts will run and which intents the app will call — nothing executes until you confirm.
+
+### Managing installed apps
+
+```bash
+ogp app list                    # List installed apps
+ogp app show <appId>            # Manifest, skills, project join status, output link
+ogp app usage [appId]           # Intent call attribution (how much is this app doing?)
+ogp app remove <appId>          # Remove an app
+```
+
+### Usage attribution
+
+Once an app is installed, the OGP daemon starts attributing observed intent calls to it. The daemon logs every intent call to `activity.jsonl`; `ogp app usage` maps intent names back to installed apps via `uses_intents` and disambiguates by `projectId` where possible. No backfill — attribution starts from install time.
+
+### Companion app (GUI)
+
+The [OGP Companion app](./ogp-companion/) exposes the full Apps workflow in a desktop UI:
+
+- **Gallery tab** — browse apps advertised by your peers, with search and peer filter
+- **Installed tab** — manage what's installed; sort by name, install date, or usage
+- **Usage tab** — attributed intent call counts per app, with shared-intent warnings
+- **Detail slide-over** — manifest, publisher trust, project join status, usage bars
+- **Consent modal** — same consent gate as the CLI, surfaced as a modal before install
+- **Add from ref** — install any app by pasting a `peer:` or `file:` ref directly in the UI
+
 ## Skills (Claude Code)
 
 OGP includes skills for Claude Code agents. Install them with:
@@ -1358,6 +1448,8 @@ Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill no
 - [Scope Negotiation](./docs/scopes.md) - Per-peer scope configuration (v0.2.0)
 - [Agent Communications](./docs/agent-comms.md) - Agent-to-agent messaging (v0.2.0)
 - [Rendezvous & Invite Flow](./docs/rendezvous.md) - Optional discovery and invite service (v0.2.14+)
+- [OGP Apps Spec](./docs/superpowers/specs/2026-06-13-ogp-apps-layer-spec.md) - Apps layer design and manifest schema
+- [Apps Companion Contract](./docs/ogp-apps-companion-contract.md) - GUI/CLI contract for the companion app
 
 ### Advanced
 - [Multi-Framework Design](./docs/MULTI-FRAMEWORK-DESIGN.md) - Design principles for multi-framework support

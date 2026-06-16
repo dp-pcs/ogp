@@ -66,6 +66,13 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ github.workspace }}/api_key.p8
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # bd-mmx7: Tauri UPDATE signing (separate from the Apple Developer ID cert
+          # — Apple's cert is for Gatekeeper, this signs the updater bundle so the
+          # installed app can verify integrity before applying an update). With
+          # bundle.createUpdaterArtifacts=true, tauri-action emits the signed
+          # *.app.tar.gz + .sig and a latest.json manifest into the release.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # GitHub release upload
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

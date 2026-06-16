@@ -91,14 +91,57 @@ async fn ogp_set_identity(
 }
 
 #[tauri::command]
+async fn ogp_set_transport(
+    framework: String,
+    mode: String,
+    relay_url: Option<String>,
+) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::set_transport(&framework, &mode, relay_url)).await
+}
+
+#[tauri::command]
 async fn ogp_refresh_frameworks() -> Result<Value, ogp::OgpError> {
     ogp::clear_framework_cache();
     Ok(serde_json::json!({ "ok": true }))
 }
 
+#[tauri::command]
+async fn ogp_app_list(framework: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_list(&framework)).await
+}
+
+#[tauri::command]
+async fn ogp_app_browse(framework: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_browse(&framework)).await
+}
+
+#[tauri::command]
+async fn ogp_app_show(framework: String, id: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_show(&framework, &id)).await
+}
+
+#[tauri::command]
+async fn ogp_app_install(framework: String, app_ref: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_install(&framework, &app_ref)).await
+}
+
+#[tauri::command]
+async fn ogp_app_remove(framework: String, id: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_remove(&framework, &id)).await
+}
+
+#[tauri::command]
+async fn ogp_app_usage(framework: String, id: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_usage(&framework, &id)).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // bd-mmx7: in-app auto-update. The updater plugin powers check()/
+        // downloadAndInstall() from the frontend; process provides relaunch().
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             ogp_snapshot,
             ogp_start_tunnel,
@@ -111,7 +154,14 @@ pub fn run() {
             ogp_set_policy,
             ogp_open_terminal,
             ogp_set_identity,
+            ogp_set_transport,
             ogp_refresh_frameworks,
+            ogp_app_list,
+            ogp_app_browse,
+            ogp_app_show,
+            ogp_app_install,
+            ogp_app_remove,
+            ogp_app_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

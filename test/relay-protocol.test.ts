@@ -4,6 +4,7 @@ import {
   isChallengeFrame,
   isAuthFrame,
   isDeliverFrame,
+  isFederationFrame,
   isResponseFrame,
   MAX_FRAME_BYTES,
   HEARTBEAT_MS,
@@ -43,6 +44,14 @@ describe('relay-protocol frame parsing/guards', () => {
   it('isResponseFrame requires reqId', () => {
     expect(isResponseFrame({ type: 'response', reqId: 'r', result: {} } as never)).toBe(true);
     expect(isResponseFrame({ type: 'response' } as never)).toBe(false);
+  });
+
+  it('isFederationFrame requires a valid op + reqId + frame{payloadStr,signature} (bd-63bs)', () => {
+    expect(isFederationFrame({ type: 'federation', op: 'request', reqId: 'r', frame: { payloadStr: '{}', signature: 's' } } as never)).toBe(true);
+    expect(isFederationFrame({ type: 'federation', op: 'approve', reqId: 'r', frame: { payloadStr: '{}', signature: 's' } } as never)).toBe(true);
+    expect(isFederationFrame({ type: 'federation', op: 'bogus', reqId: 'r', frame: { payloadStr: '{}', signature: 's' } } as never)).toBe(false);
+    expect(isFederationFrame({ type: 'federation', op: 'request', reqId: 'r' } as never)).toBe(false);
+    expect(isFederationFrame({ type: 'deliver', reqId: 'r', frame: { messageStr: 'm', signature: 's' } } as never)).toBe(false);
   });
 
   it('exposes sane protocol constants', () => {

@@ -5,6 +5,7 @@ import { notifyOpenClaw } from './notify.js';
 import { checkAccess } from './doorman.js';
 import { handleReply, createReply } from './reply-handler.js';
 import { logActivity, getEffectivePolicy } from './agent-comms.js';
+import { getReplayResult, recordReplayResult } from './replay-dedup.js';
 import {
   getProject,
   joinProject,
@@ -91,6 +92,34 @@ export async function handleMessage(
   message: FederationMessage,
   signature: string,
   messageStr?: string  // raw JSON string used to sign — avoids key-order drift
+): Promise<MessageResponse> {
+  // bd-8rd.3: replay dedup. If we've already processed this nonce, return the
+  // cached result without re-executing the handler. This makes durable retries
+  // idempotent for every intent, not just project.contribute.
+  const cached = getReplayResult(message.nonce);
+  if (cached) {
+    return {
+      success: cached.success,
+      nonce: message.nonce,
+      ...(cached.success ? { response: cached.response } : {}),
+      ...(cached.error ? { error: cached.error, statusCode: cached.statusCode } : {}),
+    };
+  }
+
+  const result = await handleMessageImpl(message, signature, messageStr);
+  recordReplayResult(message.nonce, {
+    success: result.success,
+    response: result.response,
+    error: result.error,
+    statusCode: result.statusCode,
+  });
+  return result;
+}
+
+async function handleMessageImpl(
+  message: FederationMessage,
+  signature: string,
+  messageStr?: string
 ): Promise<MessageResponse> {
   // 1. Verify sender exists and is approved
   const peer = getPeer(message.from);
@@ -185,6 +214,19 @@ export async function handleMessage(
   if (message.intent.startsWith('project.')) {
     return handleProjectIntent(message, peer.displayName, hookAgentId);
   }
+
+  // P4: Log all non-agent-comms intent dispatches for usage attribution.
+  // Agent-comms are logged inside handleAgentComms with their topic/level.
+  logActivity({
+    direction: 'in',
+    peerId: message.from,
+    peerName: peer.displayName,
+    topic: message.intent,
+    message: formatNotification(message, peer.displayName),
+    intent: message.intent,
+    projectId: message.projectId,
+    toAgent: message.toAgent,
+  });
 
   // 6. Execute intent handler if one is registered
   if (intent.handler) {
@@ -400,7 +442,10 @@ async function handleAgentComms(
     peerName: displayName,
     topic,
     message: messageText,
-    level: policy.level
+    level: policy.level,
+    intent: 'agent-comms',
+    projectId: message.projectId,
+    toAgent: message.toAgent,
   });
 
   // BUILD-101: If policy is 'off', send signed rejection with witty message
@@ -1021,6 +1066,12 @@ async function handleProjectQuery(
     }
   });
 
+  // bd-53c: include the signed envelope ({ signature, payloadStr }) for signed
+  // contributions so a member peer can trust-MERGE them (not just display them) via
+  // the existing upsertContribution verifier. payloadStr is reconstructed by the
+  // shared canonicalPayloadStr helper — byte-identical to what the author signed, so
+  // it re-verifies. Legacy unsigned records carry no envelope and are display-only.
+  const { canonicalPayloadStr } = await import('./contribution-signing.js');
   return {
     success: true,
     nonce: message.nonce,
@@ -1034,7 +1085,8 @@ async function handleProjectQuery(
         entryType: c.entryType || c.topic,
         topic: c.entryType || c.topic,
         summary: c.summary,
-        metadata: c.metadata
+        metadata: c.metadata,
+        ...(c.signature ? { signature: c.signature, payloadStr: canonicalPayloadStr(c, projectId) } : {})
       })),
       timestamp: new Date().toISOString()
     }

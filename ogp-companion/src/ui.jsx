@@ -214,14 +214,14 @@ function Mono({ children, style = {} }) {
 }
 
 // ── Avatar (monogram) ────────────────────────────────────────────
-function Avatar({ name, size = 36, tone }) {
+function Avatar({ name, size = 36, tone, square = false }) {
   const initials = (name || "?").replace(/[^a-zA-Z0-9 ]/g, "").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
   const palette = ["#1E72E0", "#35D6FF", "#2E7DDB", "#149A63", "#D69100", "#5B8DEF"];
   const idx = (name || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0) % palette.length;
   const bg = tone ? `var(--${tone})` : palette[idx];
   return (
     <span style={{
-      width: size, height: size, borderRadius: "30%", background: `color-mix(in srgb, ${bg} 18%, transparent)`,
+      width: size, height: size, borderRadius: square ? "26%" : "30%", background: `color-mix(in srgb, ${bg} 18%, transparent)`,
       color: bg, display: "inline-flex", alignItems: "center", justifyContent: "center",
       fontWeight: 700, fontSize: size * 0.38, flexShrink: 0, border: `1px solid color-mix(in srgb, ${bg} 30%, transparent)`,
     }}>{initials}</span>
@@ -242,4 +242,20 @@ function Empty({ icon, title, sub, action }) {
   );
 }
 
-Object.assign(window, { cx, relTime, fmtUptime, StatusDot, Button, Badge, Card, Eyebrow, Segmented, Switch, Sparkline, Mono, Avatar, Empty });
+function IntentChips({ intents, max = 4, tone }) {
+  if (!intents || !intents.length) return <span style={{ fontSize: 12, color: "var(--text-faint)" }}>none</span>;
+  const show = intents.slice(0, max), extra = intents.length - max;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+      {show.map((i) => (
+        <span key={i} style={{
+          fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999,
+          background: tone ? `var(--${tone}-soft)` : "var(--panel-3)", color: tone ? `var(--${tone})` : "var(--text-muted)", fontFamily: "var(--font-mono)",
+        }}>{i}</span>
+      ))}
+      {extra > 0 && <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "var(--panel-3)", color: "var(--text-faint)" }}>+{extra}</span>}
+    </div>
+  );
+}
+
+Object.assign(window, { cx, relTime, fmtUptime, StatusDot, Button, Badge, Card, Eyebrow, Segmented, Switch, Sparkline, Mono, Avatar, Empty, IntentChips });

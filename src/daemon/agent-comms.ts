@@ -163,6 +163,12 @@ export interface ActivityEntry {
   message: string;
   level?: ResponseLevel;
   truncated?: boolean;
+  /** The OGP intent that triggered this activity, for usage attribution (P4). */
+  intent?: string;
+  /** Optional project context carried by the intent, for disambiguating usage. */
+  projectId?: string;
+  /** The local target persona this message was routed to (bd-8rd.3 / B0032). */
+  toAgent?: string;
 }
 
 /**
@@ -206,7 +212,10 @@ export function logActivity(entry: Omit<ActivityEntry, 'timestamp'>): void {
     peerName: entry.peerName,
     topic: entry.topic,
     message: entry.message,
-    ...(entry.level ? { level: entry.level } : {})
+    ...(entry.level ? { level: entry.level } : {}),
+    ...(entry.intent ? { intent: entry.intent } : {}),
+    ...(entry.projectId ? { projectId: entry.projectId } : {}),
+    ...(entry.toAgent ? { toAgent: entry.toAgent } : {})
   };
   fs.appendFileSync(getActivityJsonlFile(), JSON.stringify(jsonlEntry) + '\n', 'utf-8');
 

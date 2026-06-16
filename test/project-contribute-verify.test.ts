@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateKeyPair } from '../src/shared/signing.js';
 import { buildSignedContribution } from '../src/daemon/contribution-signing.js';
+import { clearReplayCache } from '../src/daemon/replay-dedup.js';
 
 const author = generateKeyPair();
 
@@ -56,13 +57,17 @@ vi.mock('../src/daemon/intent-registry.js', () => ({
 }));
 
 // config.js — persona resolution + loadConfig (used by handleProjectIntent).
-vi.mock('../src/shared/config.js', () => ({
-  loadConfig: vi.fn(() => ({ email: 'owner@example.com' })),
-  requireConfig: vi.fn(() => ({ email: 'owner@example.com' })),
-  synthesizePersonas: vi.fn(() => [{ id: 'main', role: 'primary' }]),
-  resolveTargetPersona: vi.fn(() => ({ id: 'main', role: 'primary' })),
-  effectiveHookAgentId: vi.fn(() => 'main'),
-}));
+vi.mock('../src/shared/config.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/shared/config.js')>('../src/shared/config.js');
+  return {
+    ...actual,
+    loadConfig: vi.fn(() => ({ email: 'owner@example.com' })),
+    requireConfig: vi.fn(() => ({ email: 'owner@example.com' })),
+    synthesizePersonas: vi.fn(() => [{ id: 'main', role: 'primary' }]),
+    resolveTargetPersona: vi.fn(() => ({ id: 'main', role: 'primary' })),
+    effectiveHookAgentId: vi.fn(() => 'main'),
+  };
+});
 
 vi.mock('../src/daemon/notify.js', () => ({ notifyOpenClaw: vi.fn(async () => {}) }));
 
@@ -88,6 +93,7 @@ function msg(contribution: any, from = author.publicKey) {
 describe('handleProjectContribute signature gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearReplayCache();
     mocks.upsertContribution.mockReturnValue('inserted');
     mocks.getProject.mockReturnValue({
       id: 'proj', name: 'Proj', members: [author.publicKey],

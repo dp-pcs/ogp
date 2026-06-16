@@ -76,22 +76,30 @@ export function resolveOpenClawBin(deps: ResolveOpenClawBinDeps = {}): string {
     // discovery rather than guaranteeing an ENOENT.
   }
 
-  // 2. Sibling of the running node binary. In a Homebrew/npm-global layout the
-  //    `openclaw` symlink lives in the same bin dir as the `node` that runs us.
-  if (execPath) {
-    const sibling = pathDefault.join(pathDefault.dirname(execPath), binName);
-    if (safeExists(existsSync, sibling)) {
-      return sibling;
-    }
-  }
-
-  // 3. Well-known install locations (unix only).
+  // 2. Canonical well-known install locations (unix only). These are checked by
+  //    absolute path via existsSync, so they work even under the stripped PATH a
+  //    LaunchAgent inherits (the bd-bq1 failure mode). The package-manager-managed
+  //    symlink (/opt/homebrew/bin/openclaw) is the user's REAL, current binary, so
+  //    it MUST win over an incidental node-sibling — on a machine with a leftover
+  //    `openclaw` next to an old node Cellar build, sibling-first would silently
+  //    pin the daemon to a stale openclaw (observed: Cellar sibling = 2026.4.15 vs
+  //    canonical /opt/homebrew/bin = 2026.6.1).
   if (platform !== 'win32') {
     for (const dir of WELL_KNOWN_UNIX_BIN_DIRS) {
       const candidate = pathDefault.join(dir, 'openclaw');
       if (safeExists(existsSync, candidate)) {
         return candidate;
       }
+    }
+  }
+
+  // 3. Sibling of the running node binary. Fallback for non-standard layouts where
+  //    openclaw isn't in a well-known dir but lives in the same bin dir as the node
+  //    that runs us (self-contained node/npm-global prefixes).
+  if (execPath) {
+    const sibling = pathDefault.join(pathDefault.dirname(execPath), binName);
+    if (safeExists(existsSync, sibling)) {
+      return sibling;
     }
   }
 

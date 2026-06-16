@@ -25,11 +25,14 @@ function clone(x) { return JSON.parse(JSON.stringify(x)); }
 function initStore() {
   const s = {};
   for (const fw of D.FRAMEWORKS) {
+    const appsData = (window.OGP_APPS_DATA && window.OGP_APPS_DATA[fw.id]) || { installed: [], browse: [], usage: [], peers: {} };
     s[fw.id] = {
       daemon: clone(D.DAEMON[fw.id]),
       tunnel: clone(D.TUNNELS[fw.id]),
       peers: clone(D.PEERS[fw.id]),
       activity: clone(D.ACTIVITY[fw.id]),
+      transport: clone((D.TRANSPORT && D.TRANSPORT[fw.id]) || { mode: "direct", relayUrl: null, irohRelayUrl: null }),
+      apps: clone(appsData),
     };
   }
   return s;
@@ -68,6 +71,9 @@ function App() {
   const [busy, setBusy] = useState({ daemon: false, tunnel: false, startingId: null });
   const [toast, setToast] = useState(null);
   const [scale, setScale] = useState(1);
+  // bd-mmx7: in-app update state. status: idle | checking | available | downloading
+  // | installing | ready | uptodate | error. handle holds the live updater object.
+  const [update, setUpdate] = useState({ status: "idle", version: null, notes: "", progress: null, handle: null, error: null });
   const toastTimer = useRef(null);
 
   // theme + accent + density → CSS vars
@@ -92,6 +98,25 @@ function App() {
     return () => window.removeEventListener("resize", fit);
   }, []);
 
+  // bd-mmx7: silent update check shortly after launch. Surfaces a non-blocking
+  // "update available" affordance in Settings; never auto-installs. No-op in the
+  // browser preview (isLive() false ⇒ checkForUpdate resolves not-available).
+  useEffect(() => {
+    if (!LIVE) return;
+    const timer = setTimeout(() => {
+      Promise.resolve(window.OGP_BACKEND.checkForUpdate?.())
+        .then((res) => {
+          if (res && res.available) {
+            setUpdate({ status: "available", version: res.version, notes: res.notes, progress: null, handle: res._handle, error: null });
+            showToast(`Update available: v${res.version}`, { icon: "download", tone: "ok" });
+          }
+        })
+        .catch(() => { /* silent — the manual Check button surfaces errors */ });
+    }, 4000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [LIVE]);
+
   // hydrate from the real OGP backend (Tauri). Falls back to mock data in a
   // plain browser where window.OGP_BACKEND.isLive() is false.
   const hydrate = useCallback(async () => {
@@ -99,14 +124,17 @@ function App() {
     try {
       const snap = await window.OGP_BACKEND.fetchSnapshot();
       if (snap.frameworks?.length) setFrameworks(snap.frameworks);
-      setStore(() => {
+      setStore((prev) => {
         const s = {};
         for (const fwk of snap.frameworks) {
+          const appsSave = prev?.[fwk.id]?.apps;
           s[fwk.id] = {
             daemon: snap.daemon[fwk.id] || { running: false, port: fwk.daemonPort, version: null, uptimeMs: 0 },
             tunnel: snap.tunnels[fwk.id] || { active: null, options: [] },
             peers: snap.peers[fwk.id] || [],
             activity: snap.activity[fwk.id] || [],
+            transport: snap.transport?.[fwk.id] || { mode: "direct", relayUrl: null, irohRelayUrl: null },
+            apps: snap.apps?.[fwk.id] || appsSave || { installed: [], browse: [], usage: [], peers: {} },
           };
         }
         return s;
@@ -138,6 +166,7 @@ function App() {
   const daemons = Object.fromEntries(Object.entries(store).map(([k, v]) => [k, v.daemon]));
   const gatewayUp = st.daemon.running && !!st.tunnel.active;
   const pendingCount = st.peers.filter((p) => p.status === "pending").length;
+  const installedCount = (st.apps && st.apps.installed) ? st.apps.installed.length : 0;
 
   const showToast = useCallback((msg, opts = {}) => {
     setToast({ msg, ...opts });
@@ -201,22 +230,19 @@ function App() {
     stopTunnel() {
       setBusy((b) => ({ ...b, tunnel: true }));
       if (LIVE) {
-        const activeName = st.tunnel?.active?.name;
         Promise.resolve(BK.stopTunnel(fwId))
           .then((res) => {
-            // Backend returns { ok, stopped, status }. An external/unmanaged
-            // tunnel reports stopped:false + status:"no-managed-tunnel" — in
-            // that case OGP stopped nothing, so don't claim success or clear
-            // the active-tunnel state.
-            if (res && res.stopped === false && res.status === "no-managed-tunnel") {
-              patch((s) => { pushActivity(s, { kind: "tunnel", dir: null, peer: null, text: "Stop ignored — external (unmanaged) tunnel" }); });
-              showToast("External tunnel — not managed by OGP. Stop it with its own tooling.", { icon: "globe", tone: "warn" });
+            // bd-iakg: report the real outcome. A no-op (gateway served by an
+            // external tunnel ogp can't manage) must NOT show as success.
+            if (res && res.ok === false) {
+              showToast(res.message || "No OGP-managed tunnel to stop", { icon: "alertTriangle", tone: "warn" });
             } else {
-              showToast(`Tunnel${activeName ? ` '${activeName}'` : ""} stopped`, { icon: "globeOff", tone: "danger" });
+              showToast("Tunnel stopped", { icon: "globeOff", tone: "danger" });
             }
+            return hydrate();
           })
           .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }))
-          .finally(() => { hydrate(); setBusy((b) => ({ ...b, tunnel: false, startingId: null })); });
+          .finally(() => setBusy((b) => ({ ...b, tunnel: false, startingId: null })));
         showToast("Stopping tunnel…", { icon: "globeOff", tone: "danger" });
         return;
       }
@@ -308,6 +334,86 @@ function App() {
       showToast("Identity updated", { icon: "user", tone: "ok" });
       return Promise.resolve();
     },
+    // bd-b7em: set transport mode (+ relay URL). Daemon restart applies it; the
+    // Settings UI shows a Restart button rather than auto-bouncing the gateway.
+    setTransport(mode, relayUrl) {
+      if (LIVE) {
+        return Promise.resolve(BK.setTransport(fwId, mode, relayUrl))
+          .then(() => hydrate())
+          .then(() => showToast(`Transport set to ${mode}`, { icon: "cpu", tone: "ok" }))
+          .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }));
+      }
+      patch((s) => { s.transport = { ...(s.transport || {}), mode, relayUrl: relayUrl || s.transport?.relayUrl || null }; });
+      showToast(`Transport set to ${mode}`, { icon: "cpu", tone: "ok" });
+      return Promise.resolve();
+    },
+    // Restart the daemon (stop→start) so a transport change takes effect without
+    // leaving the app. Used by the Settings transport row's "Restart" button.
+    restartDaemon() {
+      if (LIVE) {
+        setBusy((b) => ({ ...b, daemon: true }));
+        showToast("Restarting daemon…", { icon: "cpu", tone: "ok" });
+        return Promise.resolve(BK.toggleDaemon(fwId, false))
+          .then(() => BK.toggleDaemon(fwId, true))
+          .then(() => hydrate())
+          .then(() => showToast("Daemon restarted", { icon: "cpu", tone: "ok" }))
+          .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }))
+          .finally(() => setBusy((b) => ({ ...b, daemon: false })));
+      }
+      showToast("Daemon restarted", { icon: "cpu", tone: "ok" });
+      return Promise.resolve();
+    },
+
+    // bd-mmx7: manual "Check for updates". Surfaces available/up-to-date/error.
+    checkForUpdates() {
+      if (!LIVE) { showToast("Updates are only available in the desktop app", { icon: "alertTriangle", tone: "warn" }); return Promise.resolve(); }
+      setUpdate((u) => ({ ...u, status: "checking", error: null }));
+      return Promise.resolve(BK.checkForUpdate())
+        .then((res) => {
+          if (res && res.available) {
+            setUpdate({ status: "available", version: res.version, notes: res.notes, progress: null, handle: res._handle, error: null });
+          } else {
+            setUpdate((u) => ({ ...u, status: "uptodate", error: null }));
+            showToast("You're on the latest version", { icon: "check", tone: "ok" });
+          }
+        })
+        .catch((e) => {
+          setUpdate((u) => ({ ...u, status: "error", error: String(e.message || e) }));
+          showToast(`Update check failed: ${String(e.message || e)}`, { icon: "alertTriangle", tone: "danger" });
+        });
+    },
+
+    // Download + install the pending update, then relaunch into the new version.
+    installUpdate() {
+      if (!LIVE) return Promise.resolve();
+      setUpdate((u) => ({ ...u, status: "downloading", progress: 0, error: null }));
+      showToast("Downloading update…", { icon: "download", tone: "ok" });
+      return Promise.resolve(
+        BK.installUpdate(update.handle, (phase, pct) => {
+          setUpdate((u) => ({ ...u, status: phase === "done" ? "ready" : phase, progress: pct }));
+        })
+      )
+        .then(() => {
+          setUpdate((u) => ({ ...u, status: "ready", progress: 100 }));
+          showToast("Update installed — restarting…", { icon: "check", tone: "ok" });
+          return BK.relaunchApp();
+        })
+        .catch((e) => {
+          setUpdate((u) => ({ ...u, status: "error", error: String(e.message || e) }));
+          showToast(`Update failed: ${String(e.message || e)}`, { icon: "alertTriangle", tone: "danger" });
+        });
+    },
+    // OGP Apps
+    installApp(ref) {
+      if (LIVE) return Promise.resolve(BK.installApp(fwId, ref)).then(() => hydrate());
+      patch((s) => { s.apps = s.apps || { installed: [], browse: [], usage: [], peers: {} }; });
+      return Promise.resolve();
+    },
+    removeApp(id) {
+      if (LIVE) return Promise.resolve(BK.removeApp(fwId, id)).then(() => hydrate());
+      patch((s) => { s.apps = s.apps || { installed: [], browse: [], usage: [], peers: {} }; s.apps.installed = s.apps.installed.filter((a) => a.id !== id); });
+      return Promise.resolve();
+    },
   };
 
   function refresh() {
@@ -317,15 +423,24 @@ function App() {
   }
   function switchFw(id) { setFwId(id); setSelected(null); setRoute("overview"); }
 
+  const appsData = st.apps || { installed: [], browse: [], usage: [], peers: {} };
   const ctx = {
     framework: fw, identity: fw.identity, theme: t.theme,
-    daemon: st.daemon, tunnel: st.tunnel, peers: st.peers, activity: st.activity,
-    gatewayUp, busy, actions, setRoute, setSelected, selectedPeerId,
+    daemon: st.daemon, tunnel: st.tunnel, peers: st.peers, activity: st.activity, transport: st.transport,
+    gatewayUp, busy, actions, setRoute, setSelected, selectedPeerId, update,
+    appVersion: (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : null),
     peerStyle: t.peerStyle, setPeerStyle: (v) => setTweak("peerStyle", v),
     tunnelStyle: t.tunnelStyle, openWizard: () => setWizardOpen(true),
+    apps: {
+      ...appsData,
+      peers: appsData.peers || Object.fromEntries(st.peers.filter((p) => p.status === "approved").map((p) => [p.id, p])),
+      trustedKeys: window.OGP_APP_TRUSTED_KEYS || new Set(st.peers.filter((p) => p.status === "approved").map((p) => p.publicKey)),
+    },
+    consentTone: "calm",
+    showToast,
   };
 
-  const View = { overview: OverviewView, federation: FederationView, tunnels: TunnelsView, activity: ActivityView, settings: SettingsView }[route];
+  const View = { overview: OverviewView, federation: FederationView, tunnels: TunnelsView, activity: ActivityView, settings: SettingsView, apps: AppsView }[route];
 
   // In the Tauri desktop shell the OS window IS the chrome — fill it. In a
   // plain browser (design preview) keep the scaled 1180×768 desktop card.
@@ -353,7 +468,7 @@ function App() {
 
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
           <Sidebar route={route} setRoute={(r) => { setRoute(r); }} frameworks={frameworks} framework={fw}
-            setFramework={switchFw} daemons={daemons} pendingCount={pendingCount} identity={fw.identity} gatewayUp={gatewayUp} />
+            setFramework={switchFw} daemons={daemons} pendingCount={pendingCount} identity={fw.identity} gatewayUp={gatewayUp} installedCount={installedCount} />
 
           <main className="ogp-main" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, background: "var(--bg)" }}>
             <View ctx={ctx} />

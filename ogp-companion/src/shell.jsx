@@ -147,7 +147,7 @@ function NavItem({ icon, label, active, onClick, badge, badgeTone = "warn" }) {
 }
 
 // ── Sidebar ──────────────────────────────────────────────────────
-function Sidebar({ route, setRoute, frameworks, framework, setFramework, daemons, pendingCount, identity, gatewayUp }) {
+function Sidebar({ route, setRoute, frameworks, framework, setFramework, daemons, pendingCount, identity, gatewayUp, installedCount }) {
   return (
     <aside style={{
       width: 244, flexShrink: 0, background: "var(--sidebar)", borderRight: "1px solid var(--border)",
@@ -161,6 +161,9 @@ function Sidebar({ route, setRoute, frameworks, framework, setFramework, daemons
         <NavItem icon="federation" label="Federation" active={route === "federation"} onClick={() => setRoute("federation")} badge={pendingCount} badgeTone="warn" />
         <NavItem icon="tunnel" label="Tunnels" active={route === "tunnels"} onClick={() => setRoute("tunnels")} badge={gatewayUp ? 0 : 1} badgeTone="danger" />
         <NavItem icon="activity" label="Activity" active={route === "activity"} onClick={() => setRoute("activity")} />
+        <div style={{ height: 6 }} />
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--text-faint)", padding: "4px 11px 4px" }}>Extend</div>
+        <NavItem icon="apps" label="Apps" active={route === "apps"} onClick={() => setRoute("apps")} badge={installedCount} badgeTone="accent" />
         <div style={{ height: 6 }} />
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--text-faint)", padding: "4px 11px 4px" }}>Configure</div>
         <NavItem icon="settings" label="Settings" active={route === "settings"} onClick={() => setRoute("settings")} />

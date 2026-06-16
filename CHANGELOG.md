@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **OGP Apps Layer — P4/P5/P6**: The OGP companion Apps UI now has a complete CLI contract.
+  - P4 usage attribution: `ActivityEntry` records `intent` and `projectId` to `activity.jsonl`;
+    `ogp app usage [<id>] --json` maps intent dispatches to apps via `uses_intents`,
+    disambiguates by `projectId` in `uses_projects`, and flags shared intents when ambiguous.
+  - P5 peer-advertised discovery: Apps can advertise via the well-known endpoint and the
+    rendezvous `RegistrationCard`; `ogp app browse [peer]`, `ogp app advertise <id>`, and
+    `ogp app unadvertise <id>` are wired; `peer:<peerId>/<appId>` installs resolve the
+    manifest from the peer and verify the publisher key against the trusted peer record.
+  - P6 companion contract: `docs/ogp-apps-companion-contract.md` documents the exact JSON
+    contract for the gallery/installed/detail/usage screens, including the real Signal app
+    manifest values.
+  - Tests: `test/app-usage.test.ts` (6 tests), `test/app-advertise.test.ts` (4 tests).
+  - Beads: bd-8f2u (P4), bd-952s (P5), bd-eop0 (P6) closed.
+- **Signal ships the first real `ogp-app.json` manifest** in the `signal` repository
+  (`ogp-app.json` + `skills/*/install.sh`), making the OGP Apps layer usable end-to-end.
+  (bd-9xbp)
+
+### Security / Changed
+- **Hermes webhook secret is now per-install.** The setup wizard previously applied a shared
+  hardcoded default secret whenever a Hermes user accepted the default webhook settings, so every
+  such install shipped the same webhook auth secret. Setup now generates a unique random secret
+  (`crypto.randomBytes(32)` hex) per install and prints it so it can be mirrored into the Hermes
+  side. (bd-l7x5)
+  - **Migration:** existing installs are unaffected until they re-run `ogp setup`, at which point a
+    new unique secret is generated and must be mirrored into the Hermes federation webhook config.
+    No automatic rotation is performed; the old value was a placeholder string, not a live
+    credential.
+
+### Fixed
+- **Gateway auth failures now surface a WARN instead of looping silently.** `callGatewayMethod()`
+  previously collapsed every failure to a bare `false`, so a rotated-out OpenClaw gateway token
+  produced an indefinite silent 401. The daemon now classifies `401/403/unauthorized/invalid-token`
+  distinctly from transport errors, counts consecutive auth failures, and warns once the threshold
+  is crossed. Config is already re-read fresh on each call; the fix is in the failure classification.
+  (bd-aiz)
+
 ## 0.4.2 (2026-04-09)
 
 ### Release Posture

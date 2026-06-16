@@ -45,11 +45,13 @@ vi.mock('../src/daemon/projects.js', () => ({
   getContributionEntryType: vi.fn()
 }));
 
-vi.mock('../src/shared/config.js', () => ({
-  loadConfig: vi.fn(() => ({
-    email: 'owner@example.com'
-  }))
-}));
+vi.mock('../src/shared/config.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/shared/config.js')>('../src/shared/config.js');
+  return {
+    ...actual,
+    loadConfig: vi.fn(() => ({ email: 'owner@example.com' }))
+  };
+});
 
 vi.mock('../src/daemon/peers.js', () => ({
   listPeers: mocks.listPeers
@@ -106,6 +108,7 @@ describe('projectContribute membership-scoped sync', () => {
       'project.contribute',
       expect.stringContaining('"entryType":"progress"'),
       30000, // bd-egmt: raised from 5000 to match bd-ogwd query-peer parity (cross-gateway acks run 5-10s)
+      undefined,
       undefined
     );
     expect(mocks.federationSend).not.toHaveBeenCalledWith(

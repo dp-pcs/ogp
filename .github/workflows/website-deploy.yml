@@ -52,11 +52,15 @@ jobs:
 
       - name: Sync static assets (long cache)
         # Everything except index.html gets a long immutable cache.
+        # `download/*` is excluded from --delete: the Companion .dmg lives in S3
+        # (uploaded out-of-band by the release process, not committed to git), so
+        # the sync must not purge it. It is still served same-origin from the site.
         run: |
           aws s3 sync website/ "s3://${S3_BUCKET}/" \
             --delete \
             --exclude ".DS_Store" \
             --exclude "index.html" \
+            --exclude "download/*" \
             --cache-control "public,max-age=31536000,immutable"
 
       - name: Sync index.html (no cache)

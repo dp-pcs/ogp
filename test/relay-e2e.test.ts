@@ -37,10 +37,17 @@ const peerA = {
   grantedScopes: { scopes: [{ intent: 'agent-comms', enabled: true }], grantedAt: '2026-01-01T00:00:00Z' },
 };
 
+// Captures peers created by the federation handshake handler (request core).
+const addedPeers: any[] = [];
+
 vi.mock('../src/daemon/peers.js', () => ({
   getPeer: vi.fn((id: string) => (id === aId ? peerA : null)),
   getPeerByPublicKey: vi.fn(() => peerA),
+  getPeerByUrl: vi.fn(() => null),
   updatePeer: vi.fn(),
+  addPeer: vi.fn((p: any) => { addedPeers.push(p); }),
+  createPendingPeerRecord: vi.fn((p: any) => ({ ...p, status: 'pending', requestedAt: '2026-01-01T00:00:00Z' })),
+  derivePeerIdFromPublicKey: vi.fn((pk: string) => pk.substring(0, 32)),
 }));
 
 vi.mock('../src/shared/config.js', async () => {
@@ -149,6 +156,39 @@ async function sendFromA(frame: { message: unknown; messageStr: string; signatur
   });
 }
 
+/** A's sender leg for a federation handshake frame (request/approve). */
+async function sendFederationFromA(op: 'request' | 'approve', frame: { payloadStr: string; signature: string }, timeoutMs = 5000) {
+  const { default: WS } = await import('ws');
+  const ws = new WS(`ws://localhost:${port}/relay`);
+  const reqId = crypto.randomUUID();
+  return await new Promise<any>((resolve, reject) => {
+    const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, timeoutMs);
+    ws.on('message', (data: Buffer) => {
+      const f = JSON.parse(data.toString());
+      if (f.type === 'challenge') {
+        const { payloadStr, signature } = signCanonical(
+          { pubkey: A.publicKey, challengeId: f.challengeId, nonce: f.nonce, role: 'sender' }, A.privateKey);
+        ws.send(JSON.stringify({ type: 'auth', pubkey: A.publicKey, challengeId: f.challengeId, payloadStr, signature }));
+      } else if (f.type === 'auth-ok') {
+        ws.send(JSON.stringify({ type: 'federation', op, reqId, to: B.publicKey, frame }));
+      } else if (f.type === 'response' && f.reqId === reqId) {
+        clearTimeout(timer); ws.close(); resolve(f.result);
+      } else if (f.type === 'error') {
+        clearTimeout(timer); ws.close(); reject(new Error(`${f.code}: ${f.message}`));
+      }
+    });
+    ws.on('error', (e: Error) => { clearTimeout(timer); reject(e); });
+  });
+}
+
+/** Build a signed federation request envelope from A (peer + offeredIntents). */
+function buildFederationRequest() {
+  const peer = {
+    displayName: 'A', email: 'a@example.com', gatewayUrl: '', publicKey: A.publicKey,
+  };
+  return signCanonical({ peer, offeredIntents: ['agent-comms'] }, A.privateKey);
+}
+
 function buildSignedEnvelope(text: string) {
   const message = {
     intent: 'agent-comms', from: aId, to: B.publicKey.substring(0, 32),
@@ -191,5 +231,40 @@ describe('relay end-to-end loop', () => {
   it('offline peer: sending to an unconnected receiver errors peer-not-connected', async () => {
     // Do NOT start B's relay client → B has no receiver socket.
     await expect(sendFromA(buildSignedEnvelope('nobody home'))).rejects.toThrow(/peer-not-connected/);
+  });
+});
+
+describe('relay federation handshake (bd-63bs)', () => {
+  it('routes a federation REQUEST A→relay→B, B runs the request core, response returns', async () => {
+    addedPeers.length = 0;
+    const { startRelayClient } = await import('../src/daemon/relay-client.js');
+    await startRelayClient(`ws://localhost:${port}/relay`);
+    await new Promise((r) => setTimeout(r, 100));
+
+    const result = await sendFederationFromA('request', buildFederationRequest());
+
+    // B's handleFederationRequestCore ran over the relay frame (no HTTP gateway)
+    // and returned {statusCode, body}, proving the handshake completed over relay.
+    // (A is a pre-approved peer in this fixture, so the core correctly reports
+    // 'already-pending-or-approved' rather than creating a fresh pending record —
+    // the transport round-trip is what we're asserting here.)
+    expect(result).toBeTruthy();
+    expect(result.statusCode).toBe(200);
+    expect(['pending', 'already-pending-or-approved']).toContain(result.body?.status);
+  });
+
+  it('E2E trust: a tampered federation request signature is rejected by B', async () => {
+    const { startRelayClient } = await import('../src/daemon/relay-client.js');
+    await startRelayClient(`ws://localhost:${port}/relay`);
+    await new Promise((r) => setTimeout(r, 100));
+
+    const env = buildFederationRequest();
+    env.payloadStr = env.payloadStr.replace('agent-comms', 'evil-intent'); // breaks the signature
+    const result = await sendFederationFromA('request', env);
+    expect(result.statusCode).toBe(401); // signature verification failed inside the core
+  });
+
+  it('offline peer: a federation frame to an unconnected receiver errors peer-not-connected', async () => {
+    await expect(sendFederationFromA('request', buildFederationRequest())).rejects.toThrow(/peer-not-connected/);
   });
 });

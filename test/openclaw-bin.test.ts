@@ -31,7 +31,7 @@ describe('resolveOpenClawBin', () => {
     expect(result).toBe('/opt/homebrew/bin/openclaw');
   });
 
-  it('prefers the sibling of the running node binary', () => {
+  it('resolves the canonical Homebrew binary', () => {
     const result = resolveOpenClawBin({
       env: {},
       execPath: '/opt/homebrew/bin/node',
@@ -39,6 +39,35 @@ describe('resolveOpenClawBin', () => {
       existsSync: (p) => p === '/opt/homebrew/bin/openclaw',
     });
     expect(result).toBe('/opt/homebrew/bin/openclaw');
+  });
+
+  it('prefers the canonical Homebrew symlink over a stale node-Cellar sibling (bd-bq1 regression)', () => {
+    // Real machine state: node runs from a Cellar dir that has a LEFTOVER older
+    // `openclaw` sibling, while the user's current, package-manager-managed binary
+    // is /opt/homebrew/bin/openclaw. Sibling-first would silently pin the daemon to
+    // the stale build; the canonical well-known dir must win.
+    const cellarSibling = '/opt/homebrew/Cellar/node/25.6.1/bin/openclaw'; // stale
+    const canonical = '/opt/homebrew/bin/openclaw';                        // current
+    const result = resolveOpenClawBin({
+      env: {},
+      execPath: '/opt/homebrew/Cellar/node/25.6.1/bin/node',
+      platform: 'darwin',
+      existsSync: (p) => p === cellarSibling || p === canonical, // BOTH exist
+    });
+    expect(result).toBe(canonical);
+  });
+
+  it('falls back to the node sibling when openclaw is in no well-known dir', () => {
+    // Non-standard layout: a self-contained prefix where openclaw sits next to node
+    // but not in /opt/homebrew/bin or /usr/local/bin.
+    const sibling = '/custom/prefix/bin/openclaw';
+    const result = resolveOpenClawBin({
+      env: {},
+      execPath: '/custom/prefix/bin/node',
+      platform: 'darwin',
+      existsSync: (p) => p === sibling,
+    });
+    expect(result).toBe(sibling);
   });
 
   it('recovers the Homebrew path when PATH is stripped (the bd-bq1 case)', () => {

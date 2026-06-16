@@ -79,6 +79,27 @@ export interface DeliverFrame {
   frame: RelayFrame;
 }
 
+/** The opaque, end-to-end-signed handshake unit the relay forwards verbatim for a
+ *  `federation` frame. Identical to the JSON body POSTed to /federation/request or
+ *  /federation/approve in direct mode (a signCanonical envelope). */
+export interface FederationRelayFrame {
+  payloadStr: string;   // exact signed bytes
+  signature: string;    // hex Ed25519 over payloadStr
+}
+
+/** Federation handshake over relay (bd-63bs). One frame, `op` selects request vs
+ *  approve. Routes through the SAME untrusted forward-by-pubkey + reqId↔response
+ *  path as `deliver`; the relay never inspects `frame`. Lets two relay-only peers
+ *  complete the request/approve handshake with no public HTTP gateway. */
+export interface FederationFrame {
+  type: 'federation';
+  op: 'request' | 'approve';
+  reqId: string;
+  to?: string;          // recipient pubkey (sender→relay)
+  from?: string;        // sender pubkey, logging only (relay→recipient)
+  frame: FederationRelayFrame;
+}
+
 /** (6) C→S / (7) S→C response leg. `result` is the recipient's MessageResponse. */
 export interface ResponseFrame {
   type: 'response';
@@ -98,9 +119,9 @@ export interface ErrorFrame {
 export interface PingFrame { type: 'ping'; }
 export interface PongFrame { type: 'pong'; }
 
-export type RelayClientFrame = AuthFrame | DeliverFrame | ResponseFrame | PingFrame | PongFrame;
+export type RelayClientFrame = AuthFrame | DeliverFrame | FederationFrame | ResponseFrame | PingFrame | PongFrame;
 export type RelayServerFrame =
-  | ChallengeFrame | AuthOkFrame | AuthErrFrame | DeliverFrame | ResponseFrame | ErrorFrame | PingFrame | PongFrame;
+  | ChallengeFrame | AuthOkFrame | AuthErrFrame | DeliverFrame | FederationFrame | ResponseFrame | ErrorFrame | PingFrame | PongFrame;
 export type RelayAnyFrame = RelayClientFrame | RelayServerFrame;
 
 // ── Parsing / guards ─────────────────────────────────────────────────────────
@@ -141,6 +162,16 @@ export function isDeliverFrame(f: RelayAnyFrame): f is DeliverFrame {
     && !!d.frame && typeof d.frame === 'object'
     && typeof d.frame.messageStr === 'string'
     && typeof d.frame.signature === 'string';
+}
+
+export function isFederationFrame(f: RelayAnyFrame): f is FederationFrame {
+  const x = f as FederationFrame;
+  return f.type === 'federation'
+    && (x.op === 'request' || x.op === 'approve')
+    && typeof x.reqId === 'string'
+    && !!x.frame && typeof x.frame === 'object'
+    && typeof x.frame.payloadStr === 'string'
+    && typeof x.frame.signature === 'string';
 }
 
 export function isResponseFrame(f: RelayAnyFrame): f is ResponseFrame {

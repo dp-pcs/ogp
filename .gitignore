@@ -2,19 +2,25 @@
 node_modules/
 
 # Build output
-# Note: dist/ is NOT ignored because it needs to be published to npm
+# dist/ is rebuilt on publish (prepublishOnly) and on git installs (prepare),
+# so it does not need to be tracked.
+dist/
 
 # Logs
 *.log
 daemon.log
 tunnel.log
 *.tgz
+*.zip
 
 # macOS
 .DS_Store
 
 # Environment
 .env
+
+# aicoe-code local logs
+.aicoe-code/
 
 # OGP state directory (test config)
 .ogp/
@@ -48,3 +54,22 @@ security_fix_plan.md
 
 # Patent disclosures — keep OUT of this public repo (sensitive IP)
 patent-disclosures/
+
+# Agent operating context — private scaffolding, NOT part of the OGP product.
+# Contains personality rules, operator profile (USER.md), lessons, and memory.
+.agent/
+.superpowers/
+.tmp/
+
+# Synapse org-memory instructions — leak internal infra (tailnet host, team IDs).
+# Keep local only.
+SOUL.md
+scripts/synapse.sh
+
+# Large binary assets — host via releases, not git.
+ogp-assets.zip
+OGP_Signal Path.png
+
+# Local agent rule mirrors (point at private .agent/ scaffolding)
+.cursorrules
+.windsurfrules

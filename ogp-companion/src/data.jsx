@@ -166,4 +166,16 @@ const ACTIVITY = {
 
 function relAgo(ms) { return new Date(Date.now() - ms).toISOString(); }
 
-window.OGP_DATA = { FRAMEWORKS, PEERS, TUNNELS, DAEMON, ACTIVITY, ALL_INTENTS, scopeBundle };
+// ── Transport mode (bd-b7em) ──────────────────────────────────────
+// How this daemon is reached: direct (default) | relay | iroh.
+const TRANSPORT = {
+  openclaw: { mode: "direct", relayUrl: null, irohRelayUrl: null },
+  hermes:   { mode: "direct", relayUrl: null, irohRelayUrl: null },
+};
+
+window.OGP_DATA = { FRAMEWORKS, PEERS, TUNNELS, DAEMON, ACTIVITY, TRANSPORT, ALL_INTENTS, scopeBundle };
+
+// OGP Apps data: populated at runtime by the Tauri backend (ogp app list/browse/usage --json).
+// No mock data — the gallery/installed/usage views show real state or empty states.
+window.OGP_APPS_DATA = null;
+window.OGP_APP_TRUSTED_KEYS = null;

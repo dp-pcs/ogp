@@ -164,6 +164,28 @@ function getLocalPeerId(): string | null {
  * health in `peerStatus`, parsed and returned alongside the boolean reachability.
  */
 async function checkPeerHealth(peer: Peer): Promise<HealthCheckResult> {
+  // bd-uiwr: a relay-only peer has no reachable HTTP gateway, so the direct probe
+  // below would always fail and show them perpetually "unhealthy" even when they
+  // are reachable via the relay. If the peer is currently registered at rendezvous
+  // advertising a relay descriptor, treat that registration (fresh by the server's
+  // 90s TTL) as the liveness signal instead of probing their dead gatewayUrl.
+  try {
+    const cfg = loadConfig();
+    if (cfg?.rendezvous?.enabled && peer.publicKey) {
+      const { lookupPeerTransports } = await import('./rendezvous.js');
+      const resolved = await lookupPeerTransports(cfg.rendezvous, peer.publicKey);
+      // bd-maas: a peer is reachable if ANY advertised transport is reachable.
+      // A relay entry means they're registered (TTL-fresh) and holding a relay
+      // socket ⇒ reachable without probing their (possibly absent) gateway.
+      if (resolved.some((t) => t.mode === 'relay')) {
+        return { reachable: true };
+      }
+    }
+  } catch {
+    // Rendezvous unavailable or lookup failed — fall through to the HTTP probe so
+    // a flaky rendezvous never makes a directly-reachable peer look unhealthy.
+  }
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), activeConfig.timeoutMs);
@@ -339,6 +361,66 @@ async function runHealthChecks(): Promise<void> {
 
   // Cleanup expired resync snapshots (older than 7 days)
   cleanupExpiredSnapshots();
+
+  // bd-53c: periodic contribution backfill (anti-entropy). Pull peers' signed
+  // contributions and union-merge by id so fragmented mirrors converge over time.
+  // Idempotent (re-pulls are no-op duplicates); best-effort; capped per pass.
+  await runContributionBackfill().catch((err) => {
+    console.warn(`[OGP Backfill] error: ${(err as Error).message}`);
+  });
+}
+
+/**
+ * Periodic anti-entropy pass (bd-53c). For each local project, pull contributions
+ * from the project's other members (approved peers) over the signed project.query
+ * path and union-merge by id. Capped fan-out so large projects can't flood a tick.
+ */
+async function runContributionBackfill(): Promise<void> {
+  const cfg = loadConfig();
+  if (cfg?.backfill?.enabled === false) return;
+
+  const maxPeers = cfg?.backfill?.maxPeersPerPass ?? 10;
+  const limit = cfg?.backfill?.limit ?? 500;
+
+  const { listProjects } = await import('./projects.js');
+  const { upsertContribution } = await import('./projects.js');
+  const { backfillContributionsFromPeer } = await import('./contribution-backfill.js');
+  const projects = listProjects();
+  if (projects.length === 0) return;
+
+  const selfId = getLocalPeerId();
+  const approved = new Set(listPeers('approved').map((p) => p.id));
+
+  // Build the (project, peer) work list, capped at maxPeers total this pass.
+  const work: Array<{ projectId: string; peerId: string }> = [];
+  for (const project of projects) {
+    for (const member of project.members) {
+      if (member === selfId) continue;
+      if (!approved.has(member)) continue;
+      work.push({ projectId: project.id, peerId: member });
+      if (work.length >= maxPeers) break;
+    }
+    if (work.length >= maxPeers) break;
+  }
+  if (work.length === 0) return;
+
+  const deps = {
+    query: async (peerId: string, projectId: string, lim: number) => {
+      const { federationSend } = await import('../cli/federation.js');
+      const res = await federationSend(peerId, 'project.query', JSON.stringify({ projectId, limit: lim }), 30000);
+      return res as any;
+    },
+    upsert: (projectId: string, record: any) => upsertContribution(projectId, record),
+  };
+
+  let merged = 0;
+  for (const { projectId, peerId } of work) {
+    const r = await backfillContributionsFromPeer(peerId, projectId, deps, { limit });
+    merged += r.inserted;
+  }
+  if (merged > 0) {
+    console.log(`[OGP Backfill] merged ${merged} new contribution(s) across ${work.length} peer-project pull(s)`);
+  }
 }
 
 /**
