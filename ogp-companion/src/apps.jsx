@@ -466,12 +466,100 @@ function ConsentModal({ ctx, pending, onCancel, onConfirm }) {
   );
 }
 
+// ── ADD FROM REF modal ───────────────────────────────────────────
+// Lets users type a peer:<peerId>/<appId> or file:/path ref and feed it into
+// the existing consent flow — identical to the CLI's `ogp app install <ref>`.
+function AddFromRefModal({ ctx, onCancel, onConfirm }) {
+  const [ref, setRef] = useStateApps("");
+  const [busy, setBusy] = useStateApps(false);
+  const [err, setErr] = useStateApps(null);
+  const inputRef = React.useRef(null);
+
+  // Auto-focus on mount
+  React.useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const isValid = ref.trim().startsWith("peer:") || ref.trim().startsWith("file:");
+  const hint = ref.trim()
+    ? isValid ? null : "Must start with peer:<peerId>/<appId> or file:/abs/path"
+    : null;
+
+  function submit(e) {
+    e.preventDefault();
+    if (!isValid || busy) return;
+    setBusy(true);
+    setErr(null);
+    // Resolve the manifest from the backend (Tauri) or treat as opaque ref for
+    // the consent modal. For now, we pass the raw ref to onConfirm which calls
+    // ctx.actions.installApp(ref) — same path as installing from the gallery.
+    Promise.resolve(onConfirm(ref.trim()))
+      .catch((e) => { setErr(String(e?.message || e)); setBusy(false); });
+  }
+
+  return (
+    <div onClick={busy ? undefined : onCancel}
+      style={{ position: "absolute", inset: 0, zIndex: 200, background: "color-mix(in srgb, var(--text) 38%, transparent)", display: "grid", placeItems: "center", padding: 24 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ width: 480, maxWidth: "100%", background: "var(--panel)", borderRadius: 16, boxShadow: "var(--shadow-pop)", animation: "ogp-fade-up 180ms ease" }}>
+        <div style={{ padding: "20px 22px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 12, background: "var(--accent-soft)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+            <Icon name="download" size={20} style={{ color: "var(--accent)" }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 17, fontWeight: 700, color: "var(--text)" }}>Add app from ref</div>
+            <div style={{ fontSize: 12, color: "var(--text-faint)", marginTop: 2 }}>Paste a peer: or file: ref — the same format as the CLI</div>
+          </div>
+          <IconBtn name="x" title="Close" onClick={onCancel} />
+        </div>
+        <form onSubmit={submit}>
+          <div style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginBottom: 8 }}>App ref</div>
+              <input
+                ref={inputRef}
+                value={ref}
+                onChange={(e) => { setRef(e.target.value); setErr(null); }}
+                placeholder="peer:apollo/signal  or  file:/Users/you/my-app"
+                style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: `1px solid ${hint || err ? "var(--warn)" : "var(--border)"}`, outline: "none", background: "var(--panel-2)", fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text)", boxSizing: "border-box" }}
+              />
+              {(hint || err) && (
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, fontSize: 12, color: "var(--warn)" }}>
+                  <Icon name="alertCircle" size={14} />{hint || err}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-faint)", letterSpacing: "0.05em", textTransform: "uppercase" }}>Examples</div>
+              {[
+                { ref: "peer:apollo/signal", desc: "Install from an approved peer" },
+                { ref: "file:/path/to/my-app", desc: "Install from a local directory" },
+              ].map(({ ref: ex, desc }) => (
+                <button key={ex} type="button" onClick={() => { setRef(ex); setErr(null); inputRef.current?.focus(); }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 9, background: "var(--panel-3)", border: "1px solid transparent", cursor: "pointer", textAlign: "left" }}>
+                  <Mono style={{ fontSize: 12, color: "var(--accent-ink)", flex: 1 }}>{ex}</Mono>
+                  <span style={{ fontSize: 11.5, color: "var(--text-faint)", flexShrink: 0 }}>{desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ padding: "14px 22px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</Button>
+            <Button variant="pink" type="submit" icon={busy ? undefined : "download"} disabled={!isValid || busy}>
+              {busy ? "Resolving…" : "Continue"}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Top-level view (sub-tabs: gallery / installed / usage) ───────
 function AppsView({ ctx }) {
   const [sub, setSub] = useStateApps("gallery");
   const [layout, setLayout] = useStateApps("grid");
   const [selectedId, setSelectedId] = useStateApps(null);
   const [pending, setPending] = useStateApps(null);
+  const [addRefOpen, setAddRefOpen] = useStateApps(false);
 
   const installed = ctx.apps.installed || [];
   const installedIds = useMemoApps(() => new Set(installed.map((a) => a.id)), [installed]);
@@ -496,6 +584,21 @@ function AppsView({ ctx }) {
     const m = manifestOf(id);
     setPending({ manifest: m, ref: appRef(ctx, id), framework: ctx.framework.displayName, tone: ctx.consentTone || "calm" });
   }
+  // Install from an arbitrary ref typed in AddFromRefModal. We don't have a
+  // manifest to preview yet — pass the ref straight to the backend and let the
+  // CLI consent gate handle it. The modal transitions to busy until the
+  // backend call resolves (success or error).
+  function installFromRef(ref) {
+    return Promise.resolve(ctx.actions.installApp?.(ref))
+      .then(() => {
+        setAddRefOpen(false);
+        ctx.showToast?.("App installed", { icon: "check", tone: "ok" });
+      })
+      .catch((e) => {
+        // Re-throw so AddFromRefModal can surface the error inline.
+        throw e;
+      });
+  }
   function confirmInstall(p, done) {
     Promise.resolve(ctx.actions.installApp?.(p.ref))
       .then(() => { setPending(null); ctx.showToast?.(`${p.manifest.name} installed`, { icon: "check", tone: "ok" }); })
@@ -515,6 +618,7 @@ function AppsView({ ctx }) {
     <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
       <div className="scroll" style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "22px 26px 28px", minWidth: 0 }}>
         <PageHeader title="Apps" sub="Discover, install, and manage apps advertised across your federation.">
+          <Button variant="outline" size="sm" icon="download" onClick={() => setAddRefOpen(true)}>Add from ref</Button>
           <Segmented size="sm" value={sub} onChange={setSub} options={[
             { value: "gallery", label: "Gallery" }, { value: "installed", label: "Installed" }, { value: "usage", label: "Usage" },
           ]} />
@@ -525,6 +629,7 @@ function AppsView({ ctx }) {
       </div>
       {detail && <AppDetail ctx={ctx} view={detail} onClose={() => setSelectedId(null)} onInstall={openInstall} onRemove={removeApp} />}
       {pending && <ConsentModal ctx={ctx} pending={pending} onCancel={() => setPending(null)} onConfirm={confirmInstall} />}
+      {addRefOpen && <AddFromRefModal ctx={ctx} onCancel={() => setAddRefOpen(false)} onConfirm={installFromRef} />}
     </div>
   );
 }

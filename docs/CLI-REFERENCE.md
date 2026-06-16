@@ -1415,6 +1415,184 @@ ogp intent remove <name> [--for <framework>]
 ogp intent remove deployment
 ```
 
+## App Management
+
+OGP Apps are declarative bundles (`ogp-app.json`) that describe a piece of software in terms of what OGP intents it uses, what skills it installs, and where its output lives. Apps are published via `advertise` and discovered through federation; each install triggers a consent gate before any scripts run.
+
+### ogp app list
+
+List installed apps on this machine.
+
+```
+ogp app list [--json] [--for <framework>]
+```
+
+**Options:**
+- `--json` — machine-readable JSON output
+
+**Example:**
+```bash
+ogp app list
+ogp app list --json
+```
+
+---
+
+### ogp app show
+
+Show the full record for an installed app: manifest, installed skills, project join status, published output link.
+
+```
+ogp app show <id> [--json] [--for <framework>]
+```
+
+**Arguments:**
+- `<id>` — App id (from `ogp app list`)
+
+**Example:**
+```bash
+ogp app show signal
+ogp app show signal --json
+```
+
+---
+
+### ogp app install
+
+Install an app from a ref. Validates the manifest, shows a consent gate (unless `--yes`), runs install scripts, and registers the app locally.
+
+```
+ogp app install <ref> [-y|--yes] [--for <framework>]
+```
+
+**Arguments:**
+- `<ref>` — One of:
+  - `file:/abs/path` — local directory containing `ogp-app.json` and install scripts
+  - `peer:<peerId>/<appId>` — app advertised by an approved peer (fetched, publisher-key verified, then installed)
+
+**Options:**
+- `-y, --yes` — skip the consent prompt (for automation)
+
+**Examples:**
+```bash
+# Install from a local directory
+ogp app install file:/Users/you/projects/my-app
+
+# Install from an approved peer
+ogp app install peer:apollo/signal
+
+# Non-interactive (e.g. in CI)
+ogp app install file:/projects/my-app --yes
+```
+
+The consent gate shows:
+- Which install scripts will run (arbitrary shell — no sandbox)
+- Which intents the app will call
+- Which projects it wants to use
+- Publisher key and trust status
+
+Nothing executes until you type `y`.
+
+---
+
+### ogp app remove
+
+Remove an installed app. Reverses installed skills and drops the registry entry.
+
+```
+ogp app remove <id> [--for <framework>]
+```
+
+**Arguments:**
+- `<id>` — App id
+
+**Example:**
+```bash
+ogp app remove signal
+```
+
+---
+
+### ogp app usage
+
+Show intent call attribution for installed apps. Attribution starts at install time — there is no backfill.
+
+```
+ogp app usage [id] [--json] [--for <framework>]
+```
+
+**Arguments:**
+- `[id]` — Optional. App id to scope to one app; omit for all installed apps.
+
+**How attribution works:** The daemon logs every observed intent call. `ogp app usage` maps intent names back to installed apps via `uses_intents`. If multiple apps claim the same intent, `projectId` in the activity log disambiguates; if it still can't resolve, the call is counted for all claimants and flagged as ambiguous.
+
+**Example:**
+```bash
+ogp app usage
+ogp app usage signal --json
+```
+
+---
+
+### ogp app advertise
+
+Advertise an installed app on `/.well-known/ogp` and your rendezvous card. Approved peers can then discover and install it via `ogp app browse` / `ogp app install peer:<you>/<appId>`.
+
+```
+ogp app advertise <id> [--for <framework>]
+```
+
+**Arguments:**
+- `<id>` — App id (must already be installed)
+
+**Example:**
+```bash
+ogp app advertise signal
+```
+
+---
+
+### ogp app unadvertise
+
+Stop advertising an installed app. It remains installed locally but disappears from your well-known response.
+
+```
+ogp app unadvertise <id> [--for <framework>]
+```
+
+**Example:**
+```bash
+ogp app unadvertise signal
+```
+
+---
+
+### ogp app browse
+
+Browse apps advertised by approved peers. Fetches from each peer's `/.well-known/ogp` (direct) or rendezvous card (fallback), verifies publisher key against the trusted peer record, and lists what's available.
+
+```
+ogp app browse [peerId] [--json] [--for <framework>]
+```
+
+**Arguments:**
+- `[peerId]` — Optional. Browse one specific peer; omit for all approved peers.
+
+**Options:**
+- `--json` — machine-readable JSON output
+
+**Examples:**
+```bash
+# Browse all approved peers
+ogp app browse
+
+# Browse a single peer
+ogp app browse apollo
+
+# Machine-readable
+ogp app browse --json
+```
+
 ## Tunnel Management
 
 ### ogp expose
