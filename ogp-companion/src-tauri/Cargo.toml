@@ -1,6 +1,6 @@
 [package]
 name = "ogp-companion"
-version = "0.3.0"
+version = "0.3.1"
 description = "OGP Companion — desktop UI for the OGP federation gateway"
 authors = ["David Proctor"]
 edition = "2021"
