@@ -224,11 +224,6 @@ async function callGatewayMethod(params: {
   // which made every `spawn openclaw` fail with ENOENT (100% sessions.send loss).
   const openclawBin = resolveOpenClawBin();
 
-  // bd-bq1: resolve `openclaw` explicitly instead of relying on PATH. The
-  // LaunchAgent-spawned daemon has a minimal PATH without /opt/homebrew/bin,
-  // which made every `spawn openclaw` fail with ENOENT (100% sessions.send loss).
-  const openclawBin = resolveOpenClawBin();
-
   for (const candidate of candidates) {
     try {
       const { stdout, stderr } = await execFileAsync(openclawBin, [
