@@ -212,7 +212,10 @@ export function logActivity(entry: Omit<ActivityEntry, 'timestamp'>): void {
     peerName: entry.peerName,
     topic: entry.topic,
     message: entry.message,
-    ...(entry.level ? { level: entry.level } : {})
+    ...(entry.level ? { level: entry.level } : {}),
+    ...(entry.intent ? { intent: entry.intent } : {}),
+    ...(entry.projectId ? { projectId: entry.projectId } : {}),
+    ...(entry.toAgent ? { toAgent: entry.toAgent } : {})
   };
   fs.appendFileSync(getActivityJsonlFile(), JSON.stringify(jsonlEntry) + '\n', 'utf-8');
 

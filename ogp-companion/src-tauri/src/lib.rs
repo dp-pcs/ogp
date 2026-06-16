@@ -105,6 +105,36 @@ async fn ogp_refresh_frameworks() -> Result<Value, ogp::OgpError> {
     Ok(serde_json::json!({ "ok": true }))
 }
 
+#[tauri::command]
+async fn ogp_app_list(framework: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_list(&framework)).await
+}
+
+#[tauri::command]
+async fn ogp_app_browse(framework: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_browse(&framework)).await
+}
+
+#[tauri::command]
+async fn ogp_app_show(framework: String, id: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_show(&framework, &id)).await
+}
+
+#[tauri::command]
+async fn ogp_app_install(framework: String, app_ref: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_install(&framework, &app_ref)).await
+}
+
+#[tauri::command]
+async fn ogp_app_remove(framework: String, id: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_remove(&framework, &id)).await
+}
+
+#[tauri::command]
+async fn ogp_app_usage(framework: String, id: String) -> Result<Value, ogp::OgpError> {
+    blocking(move || ogp::app_usage(&framework, &id)).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -126,6 +156,12 @@ pub fn run() {
             ogp_set_identity,
             ogp_set_transport,
             ogp_refresh_frameworks,
+            ogp_app_list,
+            ogp_app_browse,
+            ogp_app_show,
+            ogp_app_install,
+            ogp_app_remove,
+            ogp_app_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

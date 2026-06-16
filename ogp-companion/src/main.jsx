@@ -26,6 +26,7 @@ import "./graph.jsx";
 import "./peers.jsx";
 import "./views1.jsx";
 import "./views2.jsx";
+import "./apps.jsx";
 import "./wizard.jsx";
 import "./comms.jsx";
 import "./identity.jsx";

@@ -19,6 +19,9 @@ tunnel.log
 # Environment
 .env
 
+# aicoe-code local logs
+.aicoe-code/
+
 # OGP state directory (test config)
 .ogp/
 

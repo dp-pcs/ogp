@@ -192,4 +192,15 @@ window.OGP_BACKEND = {
     const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();
   },
+
+  // ── OGP Apps ─────────────────────────────────────────────────────
+  // Six backend methods matching the companion contract
+  // (docs/ogp-apps-companion-contract.md). The Rust side shells out to
+  // `ogp app <cmd> --json`, maps CLIPayload, and feeds into the snapshot.
+  appList: (fw) => invoke("ogp_app_list", { framework: fw }),
+  appBrowse: (fw) => invoke("ogp_app_browse", { framework: fw }),
+  appShow: (fw, id) => invoke("ogp_app_show", { framework: fw, id }),
+  installApp: (fw, appRef) => invoke("ogp_app_install", { framework: fw, appRef }),
+  removeApp: (fw, id) => invoke("ogp_app_remove", { framework: fw, id }),
+  appUsage: (fw, id) => invoke("ogp_app_usage", { framework: fw, id }),
 };

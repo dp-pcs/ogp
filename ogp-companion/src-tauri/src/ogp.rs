@@ -175,6 +175,7 @@ pub fn snapshot() -> Result<Value, OgpError> {
     let mut daemon = Map::new();
     let mut activity = Map::new();
     let mut transport = Map::new();
+    let mut apps = Map::new();
 
     for fw in &frameworks {
         let id = fw.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -214,6 +215,21 @@ pub fn snapshot() -> Result<Value, OgpError> {
         let tmode = transport_show(&id)
             .unwrap_or_else(|_| json!({ "mode": "direct", "relayUrl": Value::Null, "irohRelayUrl": Value::Null }));
         transport.insert(id.clone(), tmode);
+
+        // apps: installed registry (from file) + browse + usage (from CLI).
+        // All are cheap to compute and change infrequently; fold into the poll.
+        let installed_raw = app_list(&id).unwrap_or_else(|_| json!({ "apps": [] }));
+        let installed = installed_raw
+            .get("apps")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let browse = app_browse(&id).unwrap_or_else(|_| json!([]));
+        let usage = app_usage(&id, "").unwrap_or_else(|_| json!([]));
+        apps.insert(id.clone(), json!({
+            "installed": installed,
+            "browse": browse,
+            "usage": usage,
+        }));
     }
 
     Ok(json!({
@@ -223,6 +239,7 @@ pub fn snapshot() -> Result<Value, OgpError> {
         "daemon": daemon,
         "activity": activity,
         "transport": transport,
+        "apps": apps,
     }))
 }
 
@@ -610,6 +627,47 @@ pub fn set_transport(framework: &str, mode: &str, relay_url: Option<String>) -> 
         run(Some(framework), &["config", "transport", "set-relay-url", &url])?;
     }
     Ok(json!({ "ok": true }))
+}
+
+// ── OGP Apps ──────────────────────────────────────────────────────
+/// Read the installed apps registry for a framework directly from its state dir.
+/// No CLI call — reads the JSON file the daemon writes. Returns { installed, peers }.
+pub fn app_list(framework: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["app", "list", "--json"])
+        .or_else(|_| Ok(json!({ "apps": [] })))
+}
+
+/// Browse apps advertised by peers via `ogp app browse --json`.
+pub fn app_browse(framework: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["app", "browse", "--json"])
+        .or_else(|_| Ok(json!([])))
+}
+
+/// Show manifest details for a single app.
+pub fn app_show(framework: &str, id: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["app", "show", id, "--json"])
+}
+
+/// Install an app (passes --yes because the companion UI already collected consent).
+/// ref can be file:<path>, peer:<peer-id>/<app-id>, or github:<owner>/<repo>.
+pub fn app_install(framework: &str, app_ref: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["app", "install", app_ref, "--yes", "--json"])
+}
+
+/// Remove an installed app by id.
+pub fn app_remove(framework: &str, id: &str) -> Result<Value, OgpError> {
+    run_json(Some(framework), &["app", "remove", id, "--json"])
+}
+
+/// Show usage attribution for an app (or all if id is empty).
+pub fn app_usage(framework: &str, id: &str) -> Result<Value, OgpError> {
+    if id.is_empty() {
+        run_json(Some(framework), &["app", "usage", "--json"])
+            .or_else(|_| Ok(json!([])))
+    } else {
+        run_json(Some(framework), &["app", "usage", id, "--json"])
+            .or_else(|_| Ok(json!([])))
+    }
 }
 
 /// Open Terminal.app with a prompt pre-filled (not executed) for this framework.

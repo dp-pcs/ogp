@@ -25,12 +25,14 @@ function clone(x) { return JSON.parse(JSON.stringify(x)); }
 function initStore() {
   const s = {};
   for (const fw of D.FRAMEWORKS) {
+    const appsData = (window.OGP_APPS_DATA && window.OGP_APPS_DATA[fw.id]) || { installed: [], browse: [], usage: [], peers: {} };
     s[fw.id] = {
       daemon: clone(D.DAEMON[fw.id]),
       tunnel: clone(D.TUNNELS[fw.id]),
       peers: clone(D.PEERS[fw.id]),
       activity: clone(D.ACTIVITY[fw.id]),
       transport: clone((D.TRANSPORT && D.TRANSPORT[fw.id]) || { mode: "direct", relayUrl: null, irohRelayUrl: null }),
+      apps: clone(appsData),
     };
   }
   return s;
@@ -122,15 +124,17 @@ function App() {
     try {
       const snap = await window.OGP_BACKEND.fetchSnapshot();
       if (snap.frameworks?.length) setFrameworks(snap.frameworks);
-      setStore(() => {
+      setStore((prev) => {
         const s = {};
         for (const fwk of snap.frameworks) {
+          const appsSave = prev?.[fwk.id]?.apps;
           s[fwk.id] = {
             daemon: snap.daemon[fwk.id] || { running: false, port: fwk.daemonPort, version: null, uptimeMs: 0 },
             tunnel: snap.tunnels[fwk.id] || { active: null, options: [] },
             peers: snap.peers[fwk.id] || [],
             activity: snap.activity[fwk.id] || [],
             transport: snap.transport?.[fwk.id] || { mode: "direct", relayUrl: null, irohRelayUrl: null },
+            apps: snap.apps?.[fwk.id] || appsSave || { installed: [], browse: [], usage: [], peers: {} },
           };
         }
         return s;
@@ -162,6 +166,7 @@ function App() {
   const daemons = Object.fromEntries(Object.entries(store).map(([k, v]) => [k, v.daemon]));
   const gatewayUp = st.daemon.running && !!st.tunnel.active;
   const pendingCount = st.peers.filter((p) => p.status === "pending").length;
+  const installedCount = (st.apps && st.apps.installed) ? st.apps.installed.length : 0;
 
   const showToast = useCallback((msg, opts = {}) => {
     setToast({ msg, ...opts });
@@ -398,6 +403,17 @@ function App() {
           showToast(`Update failed: ${String(e.message || e)}`, { icon: "alertTriangle", tone: "danger" });
         });
     },
+    // OGP Apps
+    installApp(ref) {
+      if (LIVE) return Promise.resolve(BK.installApp(fwId, ref)).then(() => hydrate());
+      patch((s) => { s.apps = s.apps || { installed: [], browse: [], usage: [], peers: {} }; });
+      return Promise.resolve();
+    },
+    removeApp(id) {
+      if (LIVE) return Promise.resolve(BK.removeApp(fwId, id)).then(() => hydrate());
+      patch((s) => { s.apps = s.apps || { installed: [], browse: [], usage: [], peers: {} }; s.apps.installed = s.apps.installed.filter((a) => a.id !== id); });
+      return Promise.resolve();
+    },
   };
 
   function refresh() {
@@ -407,6 +423,7 @@ function App() {
   }
   function switchFw(id) { setFwId(id); setSelected(null); setRoute("overview"); }
 
+  const appsData = st.apps || { installed: [], browse: [], usage: [], peers: {} };
   const ctx = {
     framework: fw, identity: fw.identity, theme: t.theme,
     daemon: st.daemon, tunnel: st.tunnel, peers: st.peers, activity: st.activity, transport: st.transport,
@@ -414,9 +431,16 @@ function App() {
     appVersion: (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : null),
     peerStyle: t.peerStyle, setPeerStyle: (v) => setTweak("peerStyle", v),
     tunnelStyle: t.tunnelStyle, openWizard: () => setWizardOpen(true),
+    apps: {
+      ...appsData,
+      peers: appsData.peers || Object.fromEntries(st.peers.filter((p) => p.status === "approved").map((p) => [p.id, p])),
+      trustedKeys: window.OGP_APP_TRUSTED_KEYS || new Set(st.peers.filter((p) => p.status === "approved").map((p) => p.publicKey)),
+    },
+    consentTone: "calm",
+    showToast,
   };
 
-  const View = { overview: OverviewView, federation: FederationView, tunnels: TunnelsView, activity: ActivityView, settings: SettingsView }[route];
+  const View = { overview: OverviewView, federation: FederationView, tunnels: TunnelsView, activity: ActivityView, settings: SettingsView, apps: AppsView }[route];
 
   // In the Tauri desktop shell the OS window IS the chrome — fill it. In a
   // plain browser (design preview) keep the scaled 1180×768 desktop card.
@@ -444,7 +468,7 @@ function App() {
 
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
           <Sidebar route={route} setRoute={(r) => { setRoute(r); }} frameworks={frameworks} framework={fw}
-            setFramework={switchFw} daemons={daemons} pendingCount={pendingCount} identity={fw.identity} gatewayUp={gatewayUp} />
+            setFramework={switchFw} daemons={daemons} pendingCount={pendingCount} identity={fw.identity} gatewayUp={gatewayUp} installedCount={installedCount} />
 
           <main className="ogp-main" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, background: "var(--bg)" }}>
             <View ctx={ctx} />
