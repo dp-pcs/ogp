@@ -372,7 +372,8 @@ appCommand
   .description('Install an app from a ref (file:/abs/path or peer:<peerId>/<appId>)')
   .argument('<ref>', 'App source: file:/path or peer:<peerId>/<appId>')
   .option('-y, --yes', 'Skip the install consent prompt (for automation)')
-  .action(async (ref: string, options: { yes?: boolean }) => {
+  .option('--json', 'Output machine-readable JSON')
+  .action(async (ref: string, options: { yes?: boolean; json?: boolean }) => {
     try {
       let effectiveRef = ref;
       const peerRef = parsePeerRef(ref);
@@ -387,6 +388,15 @@ appCommand
         confirm: realConfirm,
         runScript: realRunScript,
       });
+      if (options.json) {
+        console.log(JSON.stringify({
+          status: result.status,
+          id: result.app?.id ?? null,
+          skills: result.app?.installedSkills ?? [],
+        }));
+        if (result.status === 'declined') process.exitCode = 1;
+        return;
+      }
       switch (result.status) {
         case 'installed':
           console.log(`✓ Installed ${result.app!.id} (${result.app!.installedSkills.length} skill(s))`);
@@ -400,7 +410,11 @@ appCommand
           break;
       }
     } catch (err) {
-      console.error(`Install failed: ${(err as Error).message}`);
+      if (options.json) {
+        console.log(JSON.stringify({ status: 'error', error: (err as Error).message }));
+      } else {
+        console.error(`Install failed: ${(err as Error).message}`);
+      }
       process.exitCode = 1;
     }
   });
@@ -409,8 +423,14 @@ appCommand
   .command('remove')
   .description('Remove an installed app')
   .argument('<id>', 'App id')
-  .action((id: string) => {
+  .option('--json', 'Output machine-readable JSON')
+  .action((id: string, options: { json?: boolean }) => {
     const result = uninstallApp(id);
+    if (options.json) {
+      console.log(JSON.stringify({ status: result.status, id }));
+      if (result.status === 'not-installed') process.exitCode = 1;
+      return;
+    }
     if (result.status === 'not-installed') {
       console.error(`App not installed: ${id}`);
       process.exitCode = 1;
