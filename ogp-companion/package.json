@@ -1,7 +1,7 @@
 {
   "name": "ogp-companion",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "description": "OGP Companion — desktop UI for the OGP federation gateway (Tauri + React)",
   "scripts": {
