@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { generateKeyPair, type KeyPair } from '../shared/signing.js';
+import { generateKeyPair, derivePublicKeyFromPrivate, type KeyPair } from '../shared/signing.js';
 import { getConfigDir, ensureConfigDir, loadConfig } from '../shared/config.js';
 
 const KEYCHAIN_ACCOUNT = 'private-key';
@@ -393,6 +393,140 @@ export function loadOrGenerateKeyPair(): KeyPair {
 export function getPublicKey(): string {
   const keypair = loadOrGenerateKeyPair();
   return keypair.publicKey;
+}
+
+// --- Read-only identity diagnostics (for `ogp doctor`) ---
+
+export interface StaleKeychainEntry {
+  service: string;
+  isCurrent: boolean;
+}
+
+export interface IdentityDiagnostics {
+  configDir: string;
+  keypairFile: string;
+  keypairFileExists: boolean;
+  /** publicKey as cached in keypair.json (null if absent/unreadable) */
+  cachedPublicKey: string | null;
+  /** publicKey derived from the private key (source of truth); null if private key unavailable */
+  derivedPublicKey: string | null;
+  /** true when cache matches derived truth; null when one side is unavailable */
+  cacheMatchesDerived: boolean | null;
+  privateKeyAvailable: boolean;
+  privateKeySource: 'keychain' | 'encrypted-file' | 'plaintext-file' | 'unavailable';
+  keychainService: string | null;
+  /** all ogp-federation-* keychain services found (macOS only) */
+  staleKeychainEntries: StaleKeychainEntry[];
+  platform: NodeJS.Platform;
+}
+
+/**
+ * Gather a read-only snapshot of the identity chain WITHOUT mutating or auto-healing
+ * any stored key material. Reads the keypair.json cache directly so drift between the
+ * cached public key and the private-key-derived truth is detectable.
+ */
+export function getIdentityDiagnostics(): IdentityDiagnostics {
+  const configDir = getConfigDir();
+  const keypairFile = getKeypairFile();
+  const keypairFileExists = fs.existsSync(keypairFile);
+  const platform = process.platform;
+
+  // Read the cache directly (do NOT go through loadOrGenerateKeyPair, which auto-heals).
+  let cachedPublicKey: string | null = null;
+  let fileData: any = null;
+  if (keypairFileExists) {
+    try {
+      fileData = JSON.parse(fs.readFileSync(keypairFile, 'utf-8'));
+      cachedPublicKey = typeof fileData?.publicKey === 'string' ? fileData.publicKey : null;
+    } catch {
+      cachedPublicKey = null;
+    }
+  }
+
+  // Resolve the private key read-only, tracking its source, without writing anything back.
+  let privateKey: string | null = null;
+  let privateKeySource: IdentityDiagnostics['privateKeySource'] = 'unavailable';
+  try {
+    if (isMacOS()) {
+      const fromKeychain = keychainLoad();
+      if (fromKeychain) {
+        privateKey = fromKeychain;
+        privateKeySource = 'keychain';
+      } else if (fileData && isEncryptedKeypairRecord(fileData)) {
+        const secretConfig = getKeyEncryptionSecret();
+        if (secretConfig) {
+          privateKey = decryptPrivateKey(fileData, secretConfig.secret);
+          privateKeySource = 'encrypted-file';
+        }
+      } else if (fileData?.privateKey) {
+        privateKey = fileData.privateKey;
+        privateKeySource = 'plaintext-file';
+      }
+    } else {
+      if (fileData && isEncryptedKeypairRecord(fileData)) {
+        const secretConfig = getKeyEncryptionSecret();
+        if (secretConfig) {
+          privateKey = decryptPrivateKey(fileData, secretConfig.secret);
+          privateKeySource = 'encrypted-file';
+        }
+      } else if (fileData?.privateKey) {
+        privateKey = fileData.privateKey;
+        privateKeySource = 'plaintext-file';
+      }
+    }
+  } catch {
+    privateKey = null;
+    privateKeySource = 'unavailable';
+  }
+
+  let derivedPublicKey: string | null = null;
+  if (privateKey) {
+    try {
+      derivedPublicKey = derivePublicKeyFromPrivate(privateKey);
+    } catch {
+      derivedPublicKey = null;
+    }
+  }
+
+  let cacheMatchesDerived: boolean | null = null;
+  if (cachedPublicKey && derivedPublicKey) {
+    cacheMatchesDerived = cachedPublicKey === derivedPublicKey;
+  }
+
+  // Stale-keychain audit (macOS only): list all ogp-federation-* generic-password services.
+  const staleKeychainEntries: StaleKeychainEntry[] = [];
+  const keychainService = isMacOS() ? getKeychainService() : null;
+  if (isMacOS()) {
+    try {
+      // `security dump-keychain` lists all entries; filter to our service prefix.
+      const dump = execFileSync('security', ['dump-keychain'], { stdio: 'pipe' }).toString();
+      const services = new Set<string>();
+      const re = /"svce"<blob>="(ogp-federation-[0-9a-f]+)"/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(dump)) !== null) {
+        services.add(m[1]);
+      }
+      for (const svc of services) {
+        staleKeychainEntries.push({ service: svc, isCurrent: svc === keychainService });
+      }
+    } catch {
+      // dump-keychain may prompt/fail in restricted contexts — leave list empty.
+    }
+  }
+
+  return {
+    configDir,
+    keypairFile,
+    keypairFileExists,
+    cachedPublicKey,
+    derivedPublicKey,
+    cacheMatchesDerived,
+    privateKeyAvailable: privateKey !== null,
+    privateKeySource,
+    keychainService,
+    staleKeychainEntries,
+    platform
+  };
 }
 
 export function getPrivateKey(): string {

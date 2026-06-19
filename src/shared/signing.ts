@@ -17,6 +17,24 @@ export function generateKeyPair(): KeyPair {
   };
 }
 
+/**
+ * Derive the SPKI/DER-hex public key from a PKCS8/DER-hex Ed25519 private key.
+ *
+ * Read-only / pure: reproduces the stored public-key hex exactly (verified for OGP's
+ * exact key format). Used by diagnostics (`ogp doctor`) to treat the cached public key
+ * as a healable cache validated against the private-key-derived truth. Does NOT mutate
+ * any stored key material.
+ */
+export function derivePublicKeyFromPrivate(privateKeyHex: string): string {
+  const privateKey = crypto.createPrivateKey({
+    key: Buffer.from(privateKeyHex, 'hex'),
+    format: 'der',
+    type: 'pkcs8'
+  });
+  const publicKey = crypto.createPublicKey(privateKey);
+  return publicKey.export({ type: 'spki', format: 'der' }).toString('hex');
+}
+
 export function sign(message: string, privateKeyHex: string): string {
   const privateKeyDer = Buffer.from(privateKeyHex, 'hex');
   const privateKey = crypto.createPrivateKey({

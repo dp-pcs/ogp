@@ -70,6 +70,7 @@ import {
 } from './cli/project.js';
 import { configCommand, whoami } from './cli/config.js';
 import { keychainCommand } from './cli/keychain.js';
+import { doctorCommand } from './cli/doctor.js';
 import type { ResponseLevel } from './daemon/peers.js';
 import { showContextHelp } from './shared/help.js';
 
@@ -895,6 +896,7 @@ program
 
 program.addCommand(configCommand);
 program.addCommand(keychainCommand);
+program.addCommand(doctorCommand);
 
 // Agent-comms configuration commands
 const agentComms = program
