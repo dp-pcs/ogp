@@ -81,5 +81,5 @@ jobs:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('companion-v{0}', github.run_number) }}
           releaseName: 'OGP Companion ${{ github.ref_type == ''tag'' && github.ref_name || ''(dev build)'' }}'
           releaseBody: 'Universal macOS build (Intel + Apple Silicon), signed & notarized. Drag OGP Companion to Applications.'
-          releaseDraft: true
+          releaseDraft: ${{ github.ref_type != 'tag' }}
           prerelease: false
