@@ -517,7 +517,11 @@ ${payload.text}`;
 
         const synced = await injectMessage(sessionKey, syncNote, peerName);
         if (!synced) {
-          console.warn('[OGP] Hook delivery succeeded, but DM-session sync note failed for peer:', peerName);
+          // bd-wjh0: the [OGP Internal Sync] note is a best-effort courtesy.
+          // injectMessage() already logs the specific (often cosmetic) cause.
+          // The federation message itself was delivered via /hooks/agent above,
+          // so this is informational only — NOT a delivery failure.
+          console.info('[OGP] Federation message delivered via /hooks/agent; the cosmetic sync-note was not injected for peer:', peerName, '(see [OGP Bridge] log above for cause).');
         }
 
         console.log('[OGP] Message delivered to OpenClaw via /hooks/agent for peer:', peerName);
