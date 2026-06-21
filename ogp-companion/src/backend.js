@@ -77,7 +77,7 @@ function mapPeer(p) {
 // plus a frameworks[] list.
 async function fetchSnapshot() {
   const snap = await invoke("ogp_snapshot");
-  // snap = { frameworks: [...], peers: {fw:[...]}, tunnels: {...}, daemon: {...}, activity: {...} }
+  // snap = { frameworks: [...], peers: {fw:[...]}, tunnels: {...}, daemon: {...}, activity: {...}, apps: {...} }
   const peers = {};
   for (const [fw, list] of Object.entries(snap.peers || {})) {
     peers[fw] = (list || []).map(mapPeer);
@@ -89,6 +89,7 @@ async function fetchSnapshot() {
     daemon: snap.daemon || {},
     activity: snap.activity || {},
     transport: snap.transport || {},
+    apps: snap.apps || {},
   };
 }
 

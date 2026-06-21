@@ -20,6 +20,8 @@ import {
   federationShowScopes,
   federationUpdateGrants,
   federationSendAgentComms,
+  federationReplyStatus,
+  federationListPendingReplies,
   federationConnect,
   federationInvite,
   federationAccept,
@@ -826,8 +828,9 @@ federation
   .argument('<message>', 'Message text')
   .option('-p, --priority <level>', 'Priority (low|normal|high)', 'normal')
   .option('-c, --conversation <id>', 'Conversation ID for threading')
-  .option('-w, --wait', 'Wait for reply')
-  .option('-t, --timeout <ms>', 'Reply timeout in milliseconds', '30000')
+  .option('-w, --wait', 'Wait for reply (blocks until reply or timeout)')
+  .option('-d, --detach', 'Send and return a nonce; check reply later with reply-status')
+  .option('-t, --timeout <ms>', 'Reply timeout in milliseconds (--wait only)', '30000')
   .option('--to-agent <persona>', 'Target a specific persona on the peer (requires multi-agent-personas capability)')
   .option('--durable', 'Queue for retry if delivery fails')
   .option('--best-effort', 'Override config.durableDelivery to false')
@@ -836,10 +839,34 @@ federation
       priority: options.priority as 'low' | 'normal' | 'high',
       conversationId: options.conversation,
       waitForReply: options.wait,
+      detach: options.detach,
       replyTimeout: parseInt(options.timeout, 10),
       toAgent: options.toAgent,
       durable: options.durable ? true : options.bestEffort ? false : undefined,
     });
+  });
+
+federation
+  .command('reply-status')
+  .description('Check the status of a detached reply by nonce')
+  .argument('<nonce>', 'Nonce returned by --detach send')
+  .option('--json', 'Output machine-readable JSON')
+  .option('-w, --wait', 'Block and poll until reply arrives or timeout')
+  .option('-t, --timeout <ms>', 'Poll timeout in milliseconds (--wait only)', '60000')
+  .action(async (nonce, options) => {
+    await federationReplyStatus(nonce, {
+      json: options.json,
+      wait: options.wait,
+      timeout: parseInt(options.timeout, 10),
+    });
+  });
+
+federation
+  .command('pending-replies')
+  .description('List all pending detached reply nonces')
+  .option('--json', 'Output machine-readable JSON')
+  .action((options) => {
+    federationListPendingReplies({ json: options.json });
   });
 
 program.addCommand(tunnelCommand);

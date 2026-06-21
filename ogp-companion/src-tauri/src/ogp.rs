@@ -218,11 +218,17 @@ pub fn snapshot() -> Result<Value, OgpError> {
 
         // apps: installed registry (from file) + browse + usage (from CLI).
         // All are cheap to compute and change infrequently; fold into the poll.
-        let installed_raw = app_list(&id).unwrap_or_else(|_| json!({ "apps": [] }));
-        let installed = installed_raw
-            .get("apps")
-            .cloned()
-            .unwrap_or_else(|| json!([]));
+        // `ogp app list --json` returns a bare array; handle both array and
+        // legacy { "apps": [...] } object shapes defensively.
+        let installed_raw = app_list(&id).unwrap_or_else(|_| json!([]));
+        let installed = if installed_raw.is_array() {
+            installed_raw
+        } else {
+            installed_raw
+                .get("apps")
+                .cloned()
+                .unwrap_or_else(|| json!([]))
+        };
         let browse = app_browse(&id).unwrap_or_else(|_| json!([]));
         let usage = app_usage(&id, "").unwrap_or_else(|_| json!([]));
         apps.insert(id.clone(), json!({

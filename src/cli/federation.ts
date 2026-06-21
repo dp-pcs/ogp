@@ -7,6 +7,7 @@ import { federationViaRelay } from '../daemon/relay-client.js';
 import { getPublicKey, getPrivateKey, loadOrGenerateKeyPair } from '../daemon/keypair.js';
 import { signObject, sign } from '../shared/signing.js';
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
@@ -1608,6 +1609,174 @@ export async function federationUpdateIdentity(peerId: string): Promise<void> {
   }
 }
 
+// ── Detached-reply nonce store ────────────────────────────────────
+// Nonces from --detach sends are written to <stateDir>/pending-replies.json
+// so they survive daemon restarts and can be queried by reply-status.
+
+interface PendingNonceMeta {
+  peerId: string;
+  topic: string;
+  sentAt: string;
+  expiresAt: string;
+}
+
+function noncesPath(config: OGPConfig): string {
+  return path.join(config.stateDir, 'pending-replies.json');
+}
+
+function loadNonces(config: OGPConfig): Record<string, PendingNonceMeta> {
+  try {
+    const raw = fs.readFileSync(noncesPath(config), 'utf8');
+    return JSON.parse(raw) as Record<string, PendingNonceMeta>;
+  } catch {
+    return {};
+  }
+}
+
+function saveNonces(config: OGPConfig, nonces: Record<string, PendingNonceMeta>): void {
+  // Prune expired entries before saving.
+  const now = Date.now();
+  const live = Object.fromEntries(
+    Object.entries(nonces).filter(([, m]) => new Date(m.expiresAt).getTime() > now)
+  );
+  fs.writeFileSync(noncesPath(config), JSON.stringify(live, null, 2));
+}
+
+async function persistNonce(nonce: string, meta: Omit<PendingNonceMeta, 'expiresAt'>, config: OGPConfig): Promise<void> {
+  const nonces = loadNonces(config);
+  nonces[nonce] = {
+    ...meta,
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(), // 10 min — matches daemon TTL
+  };
+  saveNonces(config, nonces);
+}
+
+function forgetNonce(nonce: string, config: OGPConfig): void {
+  const nonces = loadNonces(config);
+  delete nonces[nonce];
+  saveNonces(config, nonces);
+}
+
+/**
+ * Check the status of a detached reply by nonce.
+ * Hits GET /federation/reply/:nonce on the local daemon.
+ *
+ * Usage: ogp federation reply-status <nonce> [--json] [--wait] [--timeout <ms>]
+ */
+export async function federationReplyStatus(
+  nonce: string,
+  options: { json?: boolean; wait?: boolean; timeout?: number } = {}
+): Promise<void> {
+  const config = requireConfig();
+  const port = config.daemonPort ?? 18790;
+  const endpoint = `http://127.0.0.1:${port}/federation/reply/${nonce}`;
+
+  const poll = async (): Promise<{ status: string; reply?: any }> => {
+    const res = await fetch(endpoint);
+    if (!res.ok && res.status !== 404) {
+      throw new Error(`Daemon returned ${res.status}`);
+    }
+    return res.json() as Promise<{ status: string; reply?: any }>;
+  };
+
+  // Load meta from disk for context (peer, topic, sentAt).
+  const nonces = loadNonces(config);
+  const meta = nonces[nonce];
+
+  if (options.wait) {
+    const timeout = options.timeout ?? 60000;
+    const interval = 2000;
+    const deadline = Date.now() + timeout;
+    process.stdout.write('Waiting for reply');
+    while (Date.now() < deadline) {
+      try {
+        const data = await poll();
+        if (data.status === 'complete') {
+          process.stdout.write('\n');
+          if (options.json) {
+            console.log(JSON.stringify({ nonce, status: 'complete', reply: data.reply, meta }));
+          } else {
+            console.log('\n✓ Reply received:');
+            if (meta) console.log(`  From: ${meta.peerId}  Topic: ${meta.topic}  Sent: ${meta.sentAt}`);
+            console.log(JSON.stringify(data.reply, null, 2));
+          }
+          forgetNonce(nonce, config);
+          return;
+        }
+      } catch { /* daemon down or transient — keep waiting */ }
+      process.stdout.write('.');
+      await new Promise(r => setTimeout(r, interval));
+    }
+    process.stdout.write('\n');
+    if (options.json) {
+      console.log(JSON.stringify({ nonce, status: 'timeout', meta }));
+    } else {
+      console.log('⏱ Timeout — no reply yet. Try again later.');
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  // Single-shot check.
+  try {
+    const data = await poll();
+    if (data.status === 'complete') {
+      if (options.json) {
+        console.log(JSON.stringify({ nonce, status: 'complete', reply: data.reply, meta }));
+      } else {
+        console.log('✓ Reply received:');
+        if (meta) console.log(`  From: ${meta.peerId}  Topic: ${meta.topic}  Sent: ${meta.sentAt}`);
+        console.log(JSON.stringify(data.reply, null, 2));
+      }
+      forgetNonce(nonce, config);
+    } else {
+      if (options.json) {
+        console.log(JSON.stringify({ nonce, status: 'pending', meta }));
+      } else {
+        console.log(`⏳ Pending — no reply yet for nonce ${nonce}`);
+        if (meta) console.log(`  Sent to: ${meta.peerId}  Topic: ${meta.topic}  At: ${meta.sentAt}`);
+        console.log(`  Check again: ogp federation reply-status ${nonce}`);
+        console.log(`  Or wait:     ogp federation reply-status ${nonce} --wait`);
+      }
+    }
+  } catch (err) {
+    if (options.json) {
+      console.log(JSON.stringify({ nonce, status: 'error', error: (err as Error).message }));
+    } else {
+      console.error(`✗ Could not reach local daemon: ${(err as Error).message}`);
+      console.error('  Is the OGP daemon running? Try: ogp start --background');
+    }
+    process.exitCode = 1;
+  }
+}
+
+/**
+ * List all pending detached reply nonces.
+ */
+export function federationListPendingReplies(options: { json?: boolean } = {}): void {
+  const config = requireConfig();
+  const nonces = loadNonces(config);
+  const entries = Object.entries(nonces);
+  if (options.json) {
+    console.log(JSON.stringify(entries.map(([nonce, meta]) => ({ nonce, ...meta }))));
+    return;
+  }
+  if (entries.length === 0) {
+    console.log('No pending detached replies.');
+    return;
+  }
+  console.log(`${entries.length} pending reply nonce(s):\n`);
+  for (const [nonce, meta] of entries) {
+    console.log(`  ${nonce}`);
+    console.log(`    Peer:    ${meta.peerId}`);
+    console.log(`    Topic:   ${meta.topic}`);
+    console.log(`    Sent:    ${meta.sentAt}`);
+    console.log(`    Expires: ${meta.expiresAt}`);
+    console.log(`    Check:   ogp federation reply-status ${nonce}`);
+    console.log('');
+  }
+}
+
 /**
  * Send an agent-comms message to a peer
  */
@@ -1619,11 +1788,12 @@ export async function federationSendAgentComms(
     priority?: 'low' | 'normal' | 'high';
     conversationId?: string;
     waitForReply?: boolean;
+    detach?: boolean;
     replyTimeout?: number;
     toAgent?: string;
     durable?: boolean;
   } = {}
-): Promise<{ success: boolean; queued?: boolean; error?: string; statusCode?: number }> {
+): Promise<{ success: boolean; queued?: boolean; nonce?: string; error?: string; statusCode?: number }> {
   const config = requireConfig();
 
   // Resolve peer identifier (alias, ID, or public key)
@@ -1664,8 +1834,9 @@ export async function federationSendAgentComms(
   const nonce = crypto.randomUUID();
   const conversationId = options.conversationId || nonce;
 
-  // Build replyTo URL if we want to receive callbacks
-  const replyTo = options.waitForReply
+  // Build replyTo URL if we want to receive callbacks (--wait or --detach)
+  const wantsReply = options.waitForReply || options.detach;
+  const replyTo = wantsReply
     ? `${config.gatewayUrl}/federation/reply/${nonce}`
     : undefined;
 
@@ -1737,6 +1908,17 @@ export async function federationSendAgentComms(
     console.log(`  Topic: ${topic}`);
     console.log(`  Message: ${messageText}`);
 
+    // --detach: fire-and-forget but register a replyTo so the reply is stored
+    // when it arrives. Print the nonce so the caller can check it later with
+    // `ogp federation reply-status <nonce>`.
+    if (options.detach) {
+      await persistNonce(nonce, { peerId, topic, sentAt: new Date().toISOString() }, config);
+      console.log(`✓ Message sent (detached). Check reply with:`);
+      console.log(`  ogp federation reply-status ${nonce}`);
+      console.log(JSON.stringify({ ok: true, nonce }, null, 2));
+      return { success: true, nonce };
+    }
+
     // Poll for reply if requested
     if (options.waitForReply) {
       console.log('\nWaiting for reply...');
@@ -1754,7 +1936,7 @@ export async function federationSendAgentComms(
             if (replyData.status === 'complete' && replyData.reply) {
               console.log('\n✓ Reply received:');
               console.log(JSON.stringify(replyData.reply, null, 2));
-              return { success: true };
+              return { success: true, nonce };
             }
           }
         } catch {
