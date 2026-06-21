@@ -440,6 +440,33 @@ export async function injectMessage(
       from ? `from ${from}` : '',
       message.substring(0, 100)
     );
+  } else {
+    // bd-wjh0: graceful degradation for the cosmetic sessions.send sync-note.
+    // The PRIMARY delivery path (/hooks/agent) is independent and already
+    // succeeded by the time callers reach this courtesy sync-note. When the
+    // OpenClaw gateway has hooks.allowRequestSessionKey=false (a common,
+    // deliberate hardened posture — e.g. clawporate's entrypoint sets it on
+    // every boot), sessions.send to a pinned session key is rejected. That is
+    // EXPECTED and purely cosmetic, not a delivery failure. Emit a clear,
+    // self-explanatory diagnostic so consumer-gateway operators stop
+    // mis-reading this as a dropped federation message.
+    const hooksConfig = loadHooksConfigFromOpenClawConfig();
+    if (hooksConfig?.allowRequestSessionKey !== true) {
+      console.warn(
+        '[OGP Bridge] sessions.send sync-note skipped (cosmetic): OpenClaw ' +
+        'hooks.allowRequestSessionKey is not true, so the courtesy [OGP Internal ' +
+        'Sync] note cannot be pinned to the sender session. Federation message ' +
+        'delivery via /hooks/agent is UNAFFECTED. To enable the sync-note, set ' +
+        'hooks.allowRequestSessionKey=true in the OpenClaw gateway config.'
+      );
+    } else {
+      console.warn(
+        '[OGP Bridge] sessions.send sync-note failed for session:',
+        sessionKey,
+        from ? `(from ${from})` : '',
+        '— federation delivery via /hooks/agent is unaffected.'
+      );
+    }
   }
 
   return ok;
