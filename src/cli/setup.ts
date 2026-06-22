@@ -4,12 +4,14 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import {
   type DelegatedAuthorityConfig,
   type HumanSurfacingMode,
   type InboundFederationMode,
   type OGPConfig,
   type RelayHandlingMode,
+  type TransportConfig,
   requireConfig,
   saveConfig
 } from '../shared/config.js';
@@ -498,28 +500,75 @@ async function promptMultiSelect(
   return selected.length > 0 ? selected : frameworks.filter(f => f.detected);
 }
 
-async function promptGatewayUrl(rl: readline.Interface): Promise<string> {
-  while (true) {
-    const rawGatewayUrl = await rl.question(
-      'Gateway URL (your public URL — run "ogp expose" first; leave blank only if you understand federation/invites will not work until you set it later): '
-    );
+interface TransportSetupResult {
+  gatewayUrl: string;
+  transport: TransportConfig;
+}
 
-    const normalizedGatewayUrl = normalizeGatewayUrlInput(rawGatewayUrl);
-    if (!normalizedGatewayUrl) {
-      return '';
+async function promptTransport(rl: readline.Interface): Promise<TransportSetupResult> {
+  console.log('\n--- How peers will reach you ---');
+  console.log('');
+  console.log('OGP needs a way for federated peers to deliver messages to your daemon.');
+  console.log('Choose the option that fits your setup:');
+  console.log('');
+  console.log('  1. Relay (recommended for most users)');
+  console.log('     No inbound port or tunnel required. Your daemon connects outbound');
+  console.log('     to the OGP relay server and peers reach you through it.');
+  console.log('     Works behind NAT, firewalls, corporate networks, laptops — anywhere.');
+  console.log('');
+  console.log('  2. Direct — I have a public HTTPS endpoint already');
+  console.log('     You have a stable public URL (your own domain, VPS, or a named');
+  console.log('     Cloudflare tunnel). Peers contact your daemon directly over HTTPS.');
+  console.log('     Lower latency, no relay in the path.');
+  console.log('');
+  console.log('  3. Tunnel — I want to set up a tunnel now');
+  console.log('     OGP can set up a Cloudflare tunnel for you via "ogp expose".');
+  console.log('     You will still need cloudflared installed. You can do this after');
+  console.log('     setup by running: ogp expose');
+  console.log('');
+
+  const answer = await rl.question('Choose transport mode [1]: ');
+  const choice = answer.trim() || '1';
+
+  if (choice === '2' || choice.toLowerCase().startsWith('direct')) {
+    // Direct: ask for gateway URL
+    let gatewayUrl = '';
+    while (true) {
+      const raw = await rl.question('Your public gateway URL (e.g. https://gateway.example.com): ');
+      const normalized = normalizeGatewayUrlInput(raw);
+      if (!normalized) {
+        console.log('  A gateway URL is required for direct mode.');
+        continue;
+      }
+      if (!isValidGatewayUrl(normalized)) {
+        console.log('  Invalid URL. Enter a full URL or hostname, e.g. https://gateway.example.com');
+        continue;
+      }
+      if (normalized !== raw.trim()) {
+        console.log(`  Normalized: ${normalized}`);
+      }
+      gatewayUrl = normalized;
+      break;
     }
-
-    if (!isValidGatewayUrl(normalizedGatewayUrl)) {
-      console.log('  Invalid gateway URL. Enter a full URL or hostname, for example: https://gateway.example.com');
-      continue;
-    }
-
-    if (normalizedGatewayUrl !== rawGatewayUrl.trim()) {
-      console.log(`  Normalized gateway URL: ${normalizedGatewayUrl}`);
-    }
-
-    return normalizedGatewayUrl;
+    console.log('  ✓ Direct transport selected');
+    return { gatewayUrl, transport: { mode: 'direct' } };
   }
+
+  if (choice === '3' || choice.toLowerCase().startsWith('tunnel')) {
+    console.log('');
+    console.log('  Tunnel mode: OGP will use a Cloudflare tunnel for your public endpoint.');
+    console.log('  After setup, run: ogp expose');
+    console.log('  This will start the tunnel and update your gatewayUrl automatically.');
+    console.log('  ✓ Tunnel / direct transport selected (gatewayUrl to be set by "ogp expose")');
+    return { gatewayUrl: '', transport: { mode: 'direct' } };
+  }
+
+  // Default: relay
+  console.log('');
+  console.log('  ✓ Relay transport selected');
+  console.log('  Your daemon will connect outbound to the OGP relay on startup.');
+  console.log('  No tunnel, no open port, no cloudflared needed.');
+  return { gatewayUrl: '', transport: { mode: 'relay' } };
 }
 
 async function setupFramework(
@@ -529,7 +578,7 @@ async function setupFramework(
 ): Promise<Framework> {
   console.log(`\n--- Setting up ${framework.name} ---`);
 
-  const gatewayUrl = await promptGatewayUrl(rl);
+  const { gatewayUrl, transport } = await promptTransport(rl);
 
   // Prompt for identity information
   console.log('\n--- Identity Information ---');
@@ -621,6 +670,7 @@ async function setupFramework(
     openclawUrl: openclawUrl.trim() || 'http://localhost:18789',
     openclawToken: openclawToken.trim() || '',
     gatewayUrl: gatewayUrl || '',
+    transport,
     displayName,
     humanName: humanName.trim() || undefined,
     agentName: agentName.trim() || undefined,
@@ -660,6 +710,7 @@ async function setupFramework(
     console.log(`  ✓ Ed25519 keypair generated`);
     console.log(`  ✓ Public key: ${keypair.publicKey.substring(0, 16)}...`);
     console.log(`  ✓ Agent: ${agentId}`);
+    console.log(`  ✓ Transport: ${transport.mode}${gatewayUrl ? ` (${gatewayUrl})` : ''}`);
     if (humanDeliveryTarget.trim()) {
       console.log(`  ✓ Human delivery target: ${humanDeliveryTarget.trim()}`);
     }
@@ -957,19 +1008,69 @@ export async function runSetup(): Promise<void> {
     console.log(`\n✓ Meta configuration saved`);
     console.log(`  Default framework: ${metaConfig.default}`);
 
-    // Step 8: Show success message with next steps
-    console.log('\n=== Setup Complete! ===');
-    console.log('\nNext steps:');
-    console.log('  1. Start the daemon(s):');
-    metaConfig.frameworks.forEach(fw => {
-      if (fw.enabled) {
-        console.log(`     ogp start --framework ${fw.id}`);
+    // Step 8: LaunchAgent — start on login
+    console.log('');
+    if (process.platform === 'darwin') {
+      const installLA = await promptYesNo(
+        rl,
+        'Start OGP daemon automatically on login (installs a macOS LaunchAgent)?',
+        true
+      );
+      if (installLA) {
+        try {
+          const { installLaunchAgent } = await import('./install.js');
+          await installLaunchAgent();
+          console.log('  ✓ LaunchAgent installed — daemon will start on next login');
+          console.log('  Starting daemon now...');
+          try {
+            execSync('ogp start --background', { stdio: 'inherit' });
+          } catch {
+            console.log('  (Could not auto-start — run "ogp start --background" manually)');
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.log(`  LaunchAgent install failed: ${msg}`);
+          console.log('  Run "ogp install" manually after setup to retry.');
+        }
+      } else {
+        console.log('  Skipped. Run "ogp start --background" to start the daemon manually.');
+        console.log('  Run "ogp install" later to set up auto-start.');
       }
-    });
-    console.log('  2. Expose your gateway (if needed):');
-    console.log(`     ogp expose --framework ${metaConfig.default}`);
-    console.log('  3. Start federating with peers:');
-    console.log('     ogp peers add <peer-gateway-url>');
+    } else {
+      console.log('  Auto-start (LaunchAgent) is macOS-only.');
+      console.log('  Start the daemon manually: ogp start --background');
+    }
+
+    // Step 9: Skills install
+    console.log('');
+    const installSkills = await promptYesNo(
+      rl,
+      'Install OGP skills for Claude Code / OpenCode / OpenClaw?',
+      true
+    );
+    if (installSkills) {
+      try {
+        const skillsScript = path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..', 'scripts', 'install-skills.js');
+        execSync(`node "${skillsScript}"`, { stdio: 'inherit' });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`  Skills install failed: ${msg}`);
+        console.log('  Run "ogp-install-skills" manually after setup.');
+      }
+    } else {
+      console.log('  Skipped. Run "ogp-install-skills" to install skills later.');
+    }
+
+    // Step 10: Show summary
+    console.log('\n=== Setup Complete! ===');
+    console.log('');
+    console.log('Your OGP daemon is configured. To federate with a peer:');
+    console.log('  ogp federation invite          # generate an invite code to share');
+    console.log('  ogp federation accept <code>   # accept a peer\'s invite');
+    console.log('  ogp federation list            # see all peers');
+    console.log('');
+    console.log('Check daemon status at any time:');
+    console.log('  ogp status');
 
     rl.close();
   } catch (error) {

@@ -56,6 +56,7 @@ export class RelayCore {
             case 'ping': return socket.send(JSON.stringify({ type: 'pong' }));
             case 'pong': return; // keepalive ack
             case 'deliver': return this.handleDeliver(socket, conn, frame);
+            case 'federation': return this.handleFederation(socket, conn, frame);
             case 'response': return this.handleResponse(conn, frame);
             default:
                 socket.send(JSON.stringify({ type: 'error', code: 'bad-frame', message: `unknown type ${frame.type}` }));
@@ -165,6 +166,37 @@ export class RelayCore {
         // Remember which socket to return the response to, keyed by reqId on the dest.
         this.responseRoute.set(reqId, { replyTo, expiresAt: this.deps.now() + 60_000 });
         dest.send(JSON.stringify({ type: 'deliver', reqId, from: fromPubkey, frame: innerFrame }));
+    }
+    /**
+     * Federation handshake over relay (bd-63bs). Same untrusted forward-by-pubkey +
+     * reqId↔response path as deliver, but the forwarded frame keeps its `op` so the
+     * receiver routes it to the request vs approve handler. The relay never inspects
+     * `frame` (the signed handshake envelope). Exposed for unit tests.
+     */
+    handleFederation(socket, conn, frame) {
+        if (!conn?.pubkey) {
+            socket.send(JSON.stringify({ type: 'error', reqId: frame.reqId, code: 'unauthorized', message: 'auth required' }));
+            return;
+        }
+        const reqId = frame.reqId;
+        const to = frame.to;
+        const op = frame.op;
+        if (typeof reqId !== 'string' || typeof to !== 'string' || !frame.frame
+            || (op !== 'request' && op !== 'approve')) {
+            socket.send(JSON.stringify({ type: 'error', reqId: typeof reqId === 'string' ? reqId : undefined, code: 'bad-frame', message: 'malformed federation' }));
+            return;
+        }
+        this.routeFederation(conn.pubkey, op, reqId, to, frame.frame, socket);
+    }
+    /** Route a federation frame to `to`'s receiver, preserving `op`. Exposed for tests. */
+    routeFederation(fromPubkey, op, reqId, to, innerFrame, replyTo) {
+        const dest = this.routing.get(to);
+        if (!dest) {
+            replyTo.send(JSON.stringify({ type: 'error', reqId, code: 'peer-not-connected', message: `peer ${to.slice(0, 8)}… not connected` }));
+            return;
+        }
+        this.responseRoute.set(reqId, { replyTo, expiresAt: this.deps.now() + 60_000 });
+        dest.send(JSON.stringify({ type: 'federation', op, reqId, from: fromPubkey, frame: innerFrame }));
     }
     responseRoute = new Map();
     handleResponse(conn, frame) {

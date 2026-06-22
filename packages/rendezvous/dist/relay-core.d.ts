@@ -56,6 +56,15 @@ export declare class RelayCore {
      * connected. Exposed for unit tests.
      */
     routeDeliver(fromPubkey: string, reqId: string, to: string, innerFrame: unknown, replyTo: RelayWS): void;
+    /**
+     * Federation handshake over relay (bd-63bs). Same untrusted forward-by-pubkey +
+     * reqId↔response path as deliver, but the forwarded frame keeps its `op` so the
+     * receiver routes it to the request vs approve handler. The relay never inspects
+     * `frame` (the signed handshake envelope). Exposed for unit tests.
+     */
+    private handleFederation;
+    /** Route a federation frame to `to`'s receiver, preserving `op`. Exposed for tests. */
+    routeFederation(fromPubkey: string, op: 'request' | 'approve', reqId: string, to: string, innerFrame: unknown, replyTo: RelayWS): void;
     private readonly responseRoute;
     private handleResponse;
     private sweepChallenges;
