@@ -36,6 +36,7 @@ import { readActivityJsonl } from '../daemon/agent-comms.js';
 import { getPeer } from '../daemon/peers.js';
 import { loadConfig } from '../shared/config.js';
 import { fetchPeerCard } from '../daemon/rendezvous.js';
+import { getProject } from '../daemon/projects.js';
 
 /** Resolve an install ref to a local directory holding ogp-app.json + scripts.
  *  Only `file:` is wired in P3; github:/peer: are resolved in later phases. */
@@ -161,9 +162,6 @@ export async function installApp(
 
   const projectJoinStatus: Record<string, 'joined' | 'not-joined'> = {};
   for (const p of manifest.uses_projects ?? []) {
-    // Soft reference: we do NOT auto-join. Record current join status from the
-    // local project registry would require a daemon read; default not-joined and
-    // let `ogp app show` reconcile. (P6 wires the live reconcile.)
     projectJoinStatus[p] = 'not-joined';
   }
 
@@ -326,12 +324,25 @@ function realRunScript(scriptAbsPath: string, cwd: string): void {
 export const appCommand = new Command('app')
   .description('Manage OGP Apps (declarative ogp-app.json bundles)');
 
+/**
+ * Reconcile projectJoinStatus against the live local projects registry.
+ * Install time hardcodes 'not-joined'; this fixes it up at read time.
+ */
+function reconcileJoinStatus(app: RegisteredApp): RegisteredApp {
+  if (!app.manifest.uses_projects?.length) return app;
+  const updated: Record<string, 'joined' | 'not-joined'> = {};
+  for (const p of app.manifest.uses_projects) {
+    updated[p] = getProject(p) ? 'joined' : 'not-joined';
+  }
+  return { ...app, projectJoinStatus: updated };
+}
+
 appCommand
   .command('list')
   .description('List installed apps')
   .option('--json', 'Output machine-readable JSON')
   .action((options: { json?: boolean }) => {
-    const apps = loadApps();
+    const apps = loadApps().map(reconcileJoinStatus);
     if (options.json) {
       console.log(JSON.stringify(apps, null, 2));
       return;
@@ -352,12 +363,13 @@ appCommand
   .argument('<id>', 'App id')
   .option('--json', 'Output machine-readable JSON')
   .action((id: string, options: { json?: boolean }) => {
-    const app = getApp(id);
-    if (!app) {
+    const raw = getApp(id);
+    if (!raw) {
       console.error(`App not installed: ${id}`);
       process.exitCode = 1;
       return;
     }
+    const app = reconcileJoinStatus(raw);
     if (options.json) {
       console.log(JSON.stringify(app, null, 2));
       return;
