@@ -1,7 +1,7 @@
 import { verifyObject } from '../shared/signing.js';
 import { getPeer, updatePeer } from './peers.js';
 import { getIntent } from './intent-registry.js';
-import { notifyOpenClaw } from './notify.js';
+import { notifyOpenClaw, resolveInternalOpenClawSessionKey } from './notify.js';
 import { checkAccess } from './doorman.js';
 import { handleReply, createReply } from './reply-handler.js';
 import { logActivity, getEffectivePolicy } from './agent-comms.js';
@@ -574,15 +574,14 @@ async function handleAgentComms(
 
   // bd-5ch0: emit receiving-side [OGP Inbound] sync note so inbound
   // federated messages self-surface to the agent without log archaeology.
-  const _cfg = requireConfig();
-  const _sessionKey = `agent:${_cfg.agentId || 'main'}:main`;
+  const sessionKey = resolveInternalOpenClawSessionKey(requireConfig());
   await injectInboundSyncNote(
     displayName,
     topic,
     messageText,
     policy.level,
     injectMessage,
-    _sessionKey
+    sessionKey
   );
 
   return {

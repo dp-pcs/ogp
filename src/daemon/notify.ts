@@ -98,7 +98,7 @@ function resolveHumanDeliveryTarget(config: OGPConfig, agent?: string): string |
   return config.humanDeliveryTarget || resolveNotifyTarget(config, agent);
 }
 
-function resolveInternalOpenClawSessionKey(config: OGPConfig): string {
+export function resolveInternalOpenClawSessionKey(config: OGPConfig): string {
   const agentId = config.agentId || 'main';
   return `agent:${agentId}:main`;
 }
