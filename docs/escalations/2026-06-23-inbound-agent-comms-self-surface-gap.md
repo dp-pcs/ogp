@@ -93,6 +93,10 @@ even though it is currently design-gated.
 3. Is the receive-path injection allowed to reuse the same self-notify primitive the outbound
    side uses, or does it need its own contract?
 
+> **Note — Q1 gates Q3.** If Q1 resolves to "human channel," Q3 is trivially "reuse the
+> existing outbound self-notify primitive" (it already targets the human channel). A genuinely
+> new injection contract is only needed if Q1 is "agent session" or "both." So decide Q1 first.
+
 ## Related
 
 - `bd-pbzz` (P3): `agent-comms logging status` always reads default framework, reports disabled.
