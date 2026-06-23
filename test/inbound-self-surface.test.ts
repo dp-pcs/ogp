@@ -1,5 +1,8 @@
 // test/inbound-self-surface.test.ts
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // We test the note-text shaping logic. The function we'll add is:
 //   injectInboundSyncNote(
@@ -65,5 +68,43 @@ describe('injectInboundSyncNote', () => {
     await expect(
       injectInboundSyncNote('Cosmo', 'testing', 'msg', 'full', throwFn, 'agent:main')
     ).resolves.not.toThrow();
+  });
+});
+
+describe('logging status reads config from the correct framework', () => {
+  let tmpDir: string;
+  let originalOgpHome: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogp-test-'));
+    originalOgpHome = process.env.OGP_HOME;
+  });
+
+  afterEach(() => {
+    if (originalOgpHome !== undefined) {
+      process.env.OGP_HOME = originalOgpHome;
+    } else {
+      delete process.env.OGP_HOME;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('logging status reads config from the correct framework', async () => {
+    // Write a framework config with activityLog: true into a temp dir
+    const config = {
+      agentId: 'test-agent',
+      agentComms: { globalPolicy: {}, defaultLevel: 'off', activityLog: true }
+    };
+    fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify(config));
+
+    // Point OGP_HOME at the temp dir (simulating --for resolving to this framework)
+    process.env.OGP_HOME = tmpDir;
+
+    // Import loadAgentCommsConfig after OGP_HOME is set — use dynamic import to
+    // bypass module-level caching of the config path.
+    const { loadAgentCommsConfig } = await import('../src/daemon/agent-comms.js');
+    const result = loadAgentCommsConfig();
+
+    expect(result.activityLog).toBe(true);
   });
 });

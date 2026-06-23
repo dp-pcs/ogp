@@ -46,6 +46,7 @@ import {
   clearActivity,
   setDefault,
   setLogging,
+  showLoggingStatus,
   setTopic,
   setPeerDefault
 } from './cli/agent-comms.js';
@@ -1059,10 +1060,14 @@ agentComms
 
 agentComms
   .command('logging')
-  .description('Enable or disable activity logging')
-  .argument('<state>', 'on or off')
+  .description('Enable or disable activity logging, or show current status')
+  .argument('<state>', 'on, off, or status')
   .action((state) => {
-    setLogging(state === 'on' || state === 'true' || state === 'enable');
+    if (state === 'status') {
+      showLoggingStatus();
+    } else {
+      setLogging(state === 'on' || state === 'true' || state === 'enable');
+    }
   });
 
 // Intent registry management commands

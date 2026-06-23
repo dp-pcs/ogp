@@ -327,6 +327,14 @@ export function setDefault(level: ResponseLevel): void {
 }
 
 /**
+ * Show current activity logging status (read-only, respects active framework via OGP_HOME)
+ */
+export function showLoggingStatus(): void {
+  const config = loadAgentCommsConfig();
+  console.log(`\nActivity logging: ${config.activityLog ? 'enabled' : 'disabled'}\n`);
+}
+
+/**
  * Enable/disable activity logging
  */
 export function setLogging(enabled: boolean): void {
