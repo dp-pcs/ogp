@@ -51,8 +51,11 @@ const DEFAULT_AGENT_COMMS_CONFIG: AgentCommsConfig = {
  */
 export function loadAgentCommsConfig(): AgentCommsConfig {
   const config = loadConfig();
-  if (!config) return DEFAULT_AGENT_COMMS_CONFIG;
-  return config.agentComms || DEFAULT_AGENT_COMMS_CONFIG;
+  if (!config) return { ...DEFAULT_AGENT_COMMS_CONFIG };
+  // Merge: on-disk values win over defaults so that user-set fields (e.g.
+  // activityLog: false) survive a daemon restart even when the on-disk
+  // agentComms block is partial or absent (bd-r369).
+  return { ...DEFAULT_AGENT_COMMS_CONFIG, ...(config.agentComms ?? {}) };
 }
 
 /**

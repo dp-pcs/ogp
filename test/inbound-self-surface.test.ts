@@ -71,6 +71,48 @@ describe('injectInboundSyncNote', () => {
   });
 });
 
+describe('daemon startup merges on-disk config rather than overwriting it', () => {
+  let tmpDir: string;
+  let originalOgpHome: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogp-test-'));
+    originalOgpHome = process.env.OGP_HOME;
+  });
+
+  afterEach(() => {
+    if (originalOgpHome !== undefined) {
+      process.env.OGP_HOME = originalOgpHome;
+    } else {
+      delete process.env.OGP_HOME;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('daemon startup merges on-disk config rather than overwriting it', async () => {
+    // Write a config where agentComms only has activityLog set to false
+    // (simulating a user who ran `ogp agent-comms logging off`). The default
+    // for activityLog in DEFAULT_AGENT_COMMS_CONFIG is true, so if the loader
+    // clobbers with defaults the value resets to true — the bug bd-r369.
+    const config = {
+      agentId: 'test-agent',
+      agentComms: { activityLog: false }  // partial — no globalPolicy / defaultLevel
+    };
+    fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify(config));
+    process.env.OGP_HOME = tmpDir;
+
+    // Dynamic import bypasses module-level caching of the config path.
+    const { loadAgentCommsConfig } = await import('../src/daemon/agent-comms.js');
+    const result = loadAgentCommsConfig();
+
+    // On-disk activityLog: false must survive — not be clobbered by the default true.
+    expect(result.activityLog).toBe(false);
+    // Defaults fill in missing fields so the object is always complete.
+    expect(result.defaultLevel).toBe('off');
+    expect(result.globalPolicy).toBeDefined();
+  });
+});
+
 describe('logging status reads config from the correct framework', () => {
   let tmpDir: string;
   let originalOgpHome: string | undefined;
