@@ -6,6 +6,7 @@ import { checkAccess } from './doorman.js';
 import { handleReply, createReply } from './reply-handler.js';
 import { logActivity, getEffectivePolicy } from './agent-comms.js';
 import { getReplayResult, recordReplayResult } from './replay-dedup.js';
+import { injectMessage, resolveOpenClawSessionKey } from './openclaw-bridge.js';
 import {
   getProject,
   joinProject,
@@ -411,6 +412,45 @@ async function handleFederationResyncResponse(
         message: 'Please respond with "yes" to restore or "no" for fresh start'
       }
     };
+  }
+}
+
+/**
+ * Emit a best-effort [OGP Inbound] sync note into the local agent session
+ * so the receiving agent is notified without manual log inspection.
+ * Symmetric to the [OGP Internal Sync] note emitted on outbound delivery (bd-wjh0).
+ * bd-5ch0: receiving-end self-surface gap.
+ */
+export async function injectInboundSyncNote(
+  displayName: string,
+  topic: string,
+  messageText: string,
+  level: string,
+  injectFn: (sessionKey: string, text: string) => Promise<boolean>,
+  sessionKey: string
+): Promise<void> {
+  const preview =
+    level === 'full'
+      ? messageText
+      : messageText.length > 80
+        ? messageText.slice(0, 80).trimEnd() + '…'
+        : messageText;
+
+  const note =
+    `[OGP Inbound] Message from ${displayName} on topic "${topic}":\n${preview}\n\n` +
+    `(Delivered to your session via /hooks/agent. ` +
+    `Reply with: ogp agent-comms send <peer-id> ${topic} "your reply")`;
+
+  try {
+    const ok = await injectFn(sessionKey, note);
+    if (!ok) {
+      console.info(
+        '[OGP] Inbound sync note not injected (best-effort; /hooks/agent delivery unaffected). Peer:',
+        displayName
+      );
+    }
+  } catch {
+    console.info('[OGP] Inbound sync note injection failed (best-effort). Peer:', displayName);
   }
 }
 
