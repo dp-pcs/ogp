@@ -6,7 +6,7 @@ import { checkAccess } from './doorman.js';
 import { handleReply, createReply } from './reply-handler.js';
 import { logActivity, getEffectivePolicy } from './agent-comms.js';
 import { getReplayResult, recordReplayResult } from './replay-dedup.js';
-import { injectMessage, resolveOpenClawSessionKey } from './openclaw-bridge.js';
+import { injectMessage } from './openclaw-bridge.js';
 import {
   getProject,
   joinProject,
