@@ -23,8 +23,43 @@ async function getOgpBinaryPath(): Promise<string> {
   }
 }
 
+/**
+ * Resolve a node binary path to a *stable*, version-independent location when possible.
+ *
+ * `process.execPath` on a Homebrew install points at the Cellar versioned path,
+ * e.g. `/opt/homebrew/Cellar/node/25.6.1/bin/node`. Pinning that into a LaunchAgent
+ * plist breaks the daemon on the next `brew upgrade node` (the versioned dir disappears
+ * and dyld can no longer load the moved shared libs) -> launchd exit -6 -> silent outage.
+ * This caused the 2026-06-23 ogp.sarcastek.com 502.
+ *
+ * If `execPath` lives under a Homebrew Cellar dir, prefer the stable `<prefix>/bin/node`
+ * symlink (which Homebrew keeps pointing at the current node) when it exists. We only
+ * swap to a path that actually exists; otherwise we return the original execPath so we
+ * never produce a plist pointing at a missing binary.
+ *
+ * Exported for unit testing; `fileExists` is injectable so tests stay filesystem-free.
+ */
+export function stableNodePath(
+  execPath: string,
+  fileExists: (p: string) => boolean = (p) => fs.existsSync(p),
+): string {
+  // Match Homebrew Cellar layout: <prefix>/Cellar/node<suffix>/<version>/bin/node
+  // <suffix> covers versioned formulae like node@22.
+  const cellarMatch = execPath.match(
+    /^(.*)\/Cellar\/node(?:@[\w.]+)?\/[^/]+\/bin\/node$/,
+  );
+  if (cellarMatch) {
+    const prefix = cellarMatch[1]; // e.g. /opt/homebrew or /usr/local
+    const stable = path.join(prefix, 'bin', 'node');
+    if (stable !== execPath && fileExists(stable)) {
+      return stable;
+    }
+  }
+  return execPath;
+}
+
 function getNodeBinaryPath(): string {
-  return process.execPath;
+  return stableNodePath(process.execPath);
 }
 
 export function generatePlist(nodePath: string, ogpPath: string): string {
