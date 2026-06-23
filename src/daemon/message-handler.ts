@@ -572,6 +572,19 @@ async function handleAgentComms(
     }
   });
 
+  // bd-5ch0: emit receiving-side [OGP Inbound] sync note so inbound
+  // federated messages self-surface to the agent without log archaeology.
+  const _cfg = requireConfig();
+  const _sessionKey = `agent:${_cfg.agentId || 'main'}:main`;
+  await injectInboundSyncNote(
+    displayName,
+    topic,
+    messageText,
+    policy.level,
+    injectMessage,
+    _sessionKey
+  );
+
   return {
     success: true,
     nonce: message.nonce,
