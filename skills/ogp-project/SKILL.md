@@ -34,14 +34,26 @@ requires:
 
 ## Prerequisites
 
-The OGP daemon must be installed and configured. If you see errors like 'ogp: command not found', install it first:
+### Daemon health check (run this first, every session)
 
 ```bash
+ogp status 2>/dev/null | grep -q "Status: Running" && echo "OGP daemon is running" || echo "OGP daemon is NOT running"
+```
+
+**If running:** proceed. The daemon is shared and persistent — do not start a new one.
+
+**If NOT running and OGP is installed:**
+```bash
+ogp start --background
+ogp status
+```
+
+**If `ogp: command not found`:** install first:
+```bash
 npm install -g @dp-pcs/ogp
-ogp-install-skills
 ogp setup
 ogp config show
-ogp start
+ogp start --background
 ```
 
 **Note on Peer IDs (OGP 0.2.24+):** Peers are identified by the first 16 characters of their Ed25519 public key (e.g., `302a300506032b65`). This is stable even when their gateway URL changes. You can also reference peers by their **alias** (the friendly name you assigned during federation).

@@ -230,19 +230,22 @@ function App() {
     stopTunnel() {
       setBusy((b) => ({ ...b, tunnel: true }));
       if (LIVE) {
+        const activeName = st.tunnel?.active?.name;
         Promise.resolve(BK.stopTunnel(fwId))
           .then((res) => {
-            // bd-iakg: report the real outcome. A no-op (gateway served by an
-            // external tunnel ogp can't manage) must NOT show as success.
-            if (res && res.ok === false) {
-              showToast(res.message || "No OGP-managed tunnel to stop", { icon: "alertTriangle", tone: "warn" });
+            // Backend returns { ok, stopped, status }. An external/unmanaged
+            // tunnel reports stopped:false + status:"no-managed-tunnel" — in
+            // that case OGP stopped nothing, so don't claim success or clear
+            // the active-tunnel state.
+            if (res && res.stopped === false && res.status === "no-managed-tunnel") {
+              patch((s) => { pushActivity(s, { kind: "tunnel", dir: null, peer: null, text: "Stop ignored — external (unmanaged) tunnel" }); });
+              showToast("External tunnel — not managed by OGP. Stop it with its own tooling.", { icon: "globe", tone: "warn" });
             } else {
-              showToast("Tunnel stopped", { icon: "globeOff", tone: "danger" });
+              showToast(`Tunnel${activeName ? ` '${activeName}'` : ""} stopped`, { icon: "globeOff", tone: "danger" });
             }
-            return hydrate();
           })
           .catch((e) => showToast(String(e.message || e), { icon: "alertTriangle", tone: "danger" }))
-          .finally(() => setBusy((b) => ({ ...b, tunnel: false, startingId: null })));
+          .finally(() => { hydrate(); setBusy((b) => ({ ...b, tunnel: false, startingId: null })); });
         showToast("Stopping tunnel…", { icon: "globeOff", tone: "danger" });
         return;
       }

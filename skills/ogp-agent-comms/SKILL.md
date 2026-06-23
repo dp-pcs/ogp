@@ -6,14 +6,27 @@ trigger: Use when the user wants to configure how their agent responds to incomi
 ---
 ## Prerequisites
 
-The OGP daemon must be installed. If you see errors like 'ogp: command not found', install it first:
+### Daemon health check (run this first, every session)
 
 ```bash
+ogp status 2>/dev/null | grep -q "Status: Running" && echo "OGP daemon is running" || echo "OGP daemon is NOT running"
+```
+
+**If running:** proceed. The daemon is shared and persistent — do not start a new one.
+
+**If NOT running and OGP is installed:**
+```bash
+ogp start --background
+ogp status
+```
+
+**If `ogp: command not found`:** install first:
+```bash
 npm install -g @dp-pcs/ogp
-ogp-install-skills
 ogp setup
 ogp agent-comms interview
 ogp config show
+ogp start --background
 ```
 
 Full documentation: https://github.com/dp-pcs/ogp

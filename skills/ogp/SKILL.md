@@ -25,18 +25,31 @@ requires:
 
 ## Prerequisites
 
-OGP must be installed and running:
+### Daemon health check (run this first, every session)
 
+```bash
+ogp status 2>/dev/null | grep -q "Status: Running" && echo "OGP daemon is running" || echo "OGP daemon is NOT running"
+```
+
+**If running:** proceed normally. The daemon is persistent — it was started by the user (or their LaunchAgent) and you are just a client. Do not start a new daemon.
+
+**If NOT running and OGP is installed:**
+```bash
+ogp start --background   # start the default framework daemon in the background
+ogp status               # confirm it came up
+```
+
+**If `ogp: command not found`:** OGP is not installed on this machine. The user needs to install and configure it first:
 ```bash
 npm install -g @dp-pcs/ogp
 ogp setup          # interactive first-time setup
-ogp agent-comms interview  # revisit delegated-authority / human-delivery behavior
+ogp agent-comms interview  # configure delegated-authority / human-delivery behavior
 ogp config show    # verify enabled frameworks + default
-ogp start          # starts the default framework
-ogp status         # verify daemon is running
+ogp start --background
+ogp status
 ```
 
-If `ogp: command not found`, install it first.
+You are a client of a shared, persistent daemon — not the owner of the daemon's lifecycle. The daemon holds the keypair, federation approvals, relay socket, and agent-comms policies. Multiple agent sessions (Claude Code, OpenCode, OpenClaw, etc.) on the same machine all share the same daemon.
 
 ---
 

@@ -54,6 +54,51 @@ export function validateTransportDescriptor(raw) {
     }
     return { ok: false, error: `unknown transport mode: ${String(mode)}` };
 }
+/**
+ * Validate an optional transport LIST (bd-maas) from an already-verified payload.
+ * Each entry is validated by validateTransportDescriptor. Absent ⇒ undefined.
+ * The list rides inside the signed payload, so the rendezvous can't reorder/forge it.
+ */
+export function validateTransportList(raw) {
+    if (raw === undefined || raw === null)
+        return { ok: true };
+    if (!Array.isArray(raw))
+        return { ok: false, error: 'transports must be an array' };
+    const out = [];
+    for (const entry of raw) {
+        const r = validateTransportDescriptor(entry);
+        if (!r.ok)
+            return { ok: false, error: `transports[]: ${r.error}` };
+        if (r.descriptor)
+            out.push(r.descriptor);
+    }
+    return { ok: true, transports: out.length > 0 ? out : undefined };
+}
+export function validateCard(raw, registrationPubkey) {
+    if (raw === undefined || raw === null)
+        return { ok: true };
+    if (typeof raw !== 'object')
+        return { ok: false, error: 'card must be an object' };
+    const c = raw;
+    if (typeof c.publicKey !== 'string' || !c.publicKey) {
+        return { ok: false, error: 'card.publicKey is required' };
+    }
+    // TRUST: the card identity must match the key that signed the registration.
+    if (c.publicKey !== registrationPubkey) {
+        return { ok: false, error: 'card.publicKey does not match registration pubkey' };
+    }
+    const card = { publicKey: c.publicKey };
+    if (typeof c.displayName === 'string')
+        card.displayName = c.displayName;
+    if (typeof c.email === 'string')
+        card.email = c.email;
+    if (typeof c.gatewayUrl === 'string')
+        card.gatewayUrl = c.gatewayUrl;
+    if (Array.isArray(c.offeredIntents) && c.offeredIntents.every((x) => typeof x === 'string')) {
+        card.offeredIntents = c.offeredIntents;
+    }
+    return { ok: true, card };
+}
 const peers = new Map();
 const invites = new Map();
 /** Generate a random 6-char alphanumeric token */
@@ -124,19 +169,29 @@ export function validateSignedRegistration(body, verifyImpl = verifyCanonical) {
     if (!verifyResult.ok) {
         return { ok: false, status: 401, error: `Signature verification failed: ${verifyResult.reason}` };
     }
-    // Transport descriptor (bd-b7em): parsed ONLY from the now-verified inner
-    // payload. A `transport` field outside payloadStr is never read, so the
-    // rendezvous can't be tricked into advertising an unsigned transport.
+    // Transport descriptor/list/card (bd-b7em/bd-maas): parsed ONLY from the now-
+    // verified inner payload. Fields outside payloadStr are never read, so the
+    // rendezvous can't be tricked into advertising an unsigned transport or card.
     const transportResult = validateTransportDescriptor(parsed.transport);
     if (!transportResult.ok) {
         return { ok: false, status: 400, error: transportResult.error };
+    }
+    const transportsResult = validateTransportList(parsed.transports);
+    if (!transportsResult.ok) {
+        return { ok: false, status: 400, error: transportsResult.error };
+    }
+    const cardResult = validateCard(parsed.card, pubkey);
+    if (!cardResult.ok) {
+        return { ok: false, status: 400, error: cardResult.error };
     }
     return {
         ok: true,
         pubkey,
         port,
         ...(typeof publicUrl === 'string' && publicUrl ? { publicUrl } : {}),
-        ...(transportResult.descriptor ? { transport: transportResult.descriptor } : {})
+        ...(transportResult.descriptor ? { transport: transportResult.descriptor } : {}),
+        ...(transportsResult.transports ? { transports: transportsResult.transports } : {}),
+        ...(cardResult.card ? { card: cardResult.card } : {})
     };
 }
 // ─────────────────────────────────────────────
@@ -156,12 +211,19 @@ app.post('/register', (req, res) => {
         res.status(validation.status).json({ error: validation.error });
         return;
     }
-    const { pubkey, port, transport } = validation;
+    const { pubkey, port, transport, transports, card } = validation;
     const ip = getCallerIp(req);
     const now = Date.now();
-    peers.set(pubkey, { pubkey, ip, port, lastSeen: now, ...(transport ? { transport } : {}) });
-    const transportLabel = transport ? transport.transport : 'direct';
-    console.log(`[rendezvous] Registered ${pubkey.slice(0, 8)}... from ${ip}:${port} (transport: ${transportLabel})`);
+    peers.set(pubkey, {
+        pubkey, ip, port, lastSeen: now,
+        ...(transport ? { transport } : {}),
+        ...(transports ? { transports } : {}),
+        ...(card ? { card } : {})
+    });
+    const transportLabel = transports
+        ? transports.map((t) => t.transport).join('+')
+        : (transport ? transport.transport : 'direct');
+    console.log(`[rendezvous] Registered ${pubkey.slice(0, 8)}... from ${ip}:${port} (transport: ${transportLabel}${card ? ', card' : ''})`);
     res.json({ ok: true, yourIp: ip });
 });
 // ─────────────────────────────────────────────
@@ -186,6 +248,8 @@ app.get('/peer/:pubkey', (req, res) => {
         port: peer.port,
         lastSeen: peer.lastSeen,
         ...(peer.transport ? { transport: peer.transport } : {}),
+        ...(peer.transports ? { transports: peer.transports } : {}),
+        ...(peer.card ? { card: peer.card } : {}),
     });
 });
 // ─────────────────────────────────────────────

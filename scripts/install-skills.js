@@ -32,10 +32,10 @@ function detectPlatforms() {
     });
   }
 
-  // Check for Claude Code (generic)
-  if (existsSync(join(homedir(), '.claude', 'skills'))) {
+  // Check for Claude Code / OpenCode (both read ~/.claude/skills/)
+  if (existsSync(join(homedir(), '.claude'))) {
     platforms.push({
-      name: 'Claude Code',
+      name: 'Claude Code / OpenCode',
       skillsDir: join(homedir(), '.claude', 'skills'),
       check: () => existsSync(join(homedir(), '.claude'))
     });
