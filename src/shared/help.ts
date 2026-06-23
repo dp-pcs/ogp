@@ -47,8 +47,12 @@ function showTopLevelHelp(): void {
   console.log('  project         Manage project contexts for collaboration');
   console.log('  intent          Manage custom intent handlers');
   console.log('  config          Manage framework configuration');
+  console.log('  tunnel          Manage tunnels (list, start, stop)');
   console.log('  expose          Expose daemon via tunnel (cloudflared/ngrok)');
   console.log('  expose-stop     Stop background tunnel');
+  console.log('  app             Manage OGP Apps (browse, install, list, usage)');
+  console.log('  completion      Install shell tab completion');
+  console.log('  keychain        Manage keypair in system keychain');
   console.log('  shutdown        Stop both daemon and tunnel');
   console.log('  install         Install LaunchAgent (macOS)');
   console.log('  uninstall       Uninstall LaunchAgent (macOS)');

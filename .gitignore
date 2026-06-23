@@ -70,3 +70,6 @@ OGP_Signal Path.png
 # Local agent rule mirrors (point at private .agent/ scaffolding)
 .cursorrules
 .windsurfrules
+
+# Claude Code local settings (IDE-specific permissions, not project config)
+.claude/settings.local.json

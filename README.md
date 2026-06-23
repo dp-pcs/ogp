@@ -1,35 +1,147 @@
-# @dp-pcs/ogp
-
-> Open Gateway Protocol (OGP) - Federation for OpenClaw AI Gateways
+# Open Gateway Protocol (OGP)
 
 [![npm version](https://img.shields.io/npm/v/@dp-pcs/ogp)](https://www.npmjs.com/package/@dp-pcs/ogp)
 [![npm downloads](https://img.shields.io/npm/dt/@dp-pcs/ogp)](https://www.npmjs.com/package/@dp-pcs/ogp)
 [![license](https://img.shields.io/npm/l/@dp-pcs/ogp)](./LICENSE)
 
-> 🚧 **Active build — releasing daily.** This is moving fast. Check the [changelog](https://github.com/dp-pcs/ogp/releases) or `npm show @dp-pcs/ogp version` for the latest. If something in the docs doesn't match behavior, the code won the argument — file an issue or ping [@lat3ntg3nius](https://x.com/lat3ntg3nius) on X. 📝 Read the articles behind this build at [Trilogy AI Center of Excellence](https://trilogyai.substack.com).
+**OGP is a federation protocol for AI agent gateways.** It lets two gateways, owned by different people or organizations, establish a trusted peer relationship — with human approval, cryptographic identity, scoped permissions, and unilateral revocability — so their agents can communicate directly without any central authority.
 
-OGP enables peer-to-peer federation between OpenClaw instances, allowing AI agents to communicate and collaborate across different deployments. Think of it as email for AI agents - each OpenClaw instance can securely send and receive messages from other instances without any central authority.
+> 🚧 **Active build — releasing daily.** Check the [changelog](https://github.com/dp-pcs/ogp/releases) or `npm show @dp-pcs/ogp version` for the latest. Read the articles behind this build at [Trilogy AI Center of Excellence](https://trilogyai.substack.com).
+
+---
+
+## The Problem
+
+AI assistants are siloed. When David's agent needs to collaborate with Cosmo's agent — on a legal document, an insurance authorization, a shared project — the only option today is copy-paste between conversations. There is no protocol for two AI systems owned by different people to establish a trusted, scoped, revocable relationship.
+
+Existing protocols solve adjacent problems:
+
+| Protocol | Layer | What it solves |
+|---|---|---|
+| **MCP** | Application | LLM ↔ tool integration within a single agent's trust boundary |
+| **A2A** | Middleware | Task delegation between agents inside an organization |
+| **ANP** | Internet | Open-web agent discovery and P2P execution (public marketplaces) |
+| **ActivityPub** | Application | Federated social content delivery between servers |
+| **OGP** | Gateway | **Cross-org bilateral trust between AI gateways, human-approved** |
+
+OGP does not compete with any of these. It federates the gateways that agents using other protocols sit behind.
+
+---
+
+## The Design
+
+OGP is modeled on BGP — the protocol that governs routing policy between autonomous networks on the internet. The mapping is precise:
+
+| BGP concept | OGP equivalent |
+|---|---|
+| Autonomous System (AS) | Individual gateway (identified by Ed25519 public-key prefix) |
+| OPEN message | `GET /.well-known/ogp` |
+| Session establishment | `request` → human approval → `approve` callback |
+| Route policy / filters | Per-peer scope grants (intents, rate limits, topics) |
+| MD5 session authentication | Ed25519 per-message signatures |
+| Route dampening | Sliding-window rate limiting in the Doorman |
+| BGP WITHDRAW | `federation remove` — signed tear-down notification |
+| Neighbor states | `init` → `twoWay` → `established` → `degraded` → `down` → `tombstoned` |
+
+**A2A is HTTP — request/response between services. OGP is BGP — trust and policy between autonomous systems owned by different parties.**
+
+### Four Design Principles
+
+1. **Decentralized.** No central registry. You share your gateway URL out-of-band. The protocol handles everything from there.
+2. **Policy-driven.** Every relationship has explicit, bilateral scope. Nothing flows without a configured policy on both ends.
+3. **Human-gated.** Trust is established once, by a human, at the gateway boundary. Federation cannot be automated or bypassed.
+4. **Unilaterally revocable.** Either party can remove the other at any time. Revocation is immediate, signed, and tombstoned — preventing silent re-trust.
+
+### Trust Architecture
+
+```
+┌─────────────────────────────────┐         ┌─────────────────────────────────┐
+│       Gateway A (David)         │         │       Gateway B (Cosmo)         │
+│  publicKey: 302a300506032b65... │         │  publicKey: 1a2b3c4d5e6f7890... │
+│                                 │         │                                 │
+│  ┌──────────┐  ┌─────────────┐  │         │  ┌──────────┐  ┌─────────────┐  │
+│  │  Junior  │  │  Sterling   │  │         │  │  Cosmo   │  │  agents...  │  │
+│  │  (main)  │  │  (finance)  │  │         │  │  (main)  │  │             │  │
+│  └────┬─────┘  └─────────────┘  │         │  └────┬─────┘  └─────────────┘  │
+│       └──── intra-gateway ──────┤         ├───────┴── intra-gateway ────────┤
+│                                 │         │                                 │
+│  OGP Policy:                    │         │  OGP Policy:                    │
+│  • Cosmo: scope=agent-comms     │◄──OGP──►│  • David: scope=agent-comms     │
+│         + project.contribute    │  signed │         + project.contribute    │
+│  • Rate: 100/3600 per intent    │messages │  • Rate: 100/3600 per intent    │
+│  • Auth: Ed25519 per message    │         │  • Auth: Ed25519 per message    │
+│                                 │         │                                 │
+└─────────────────────────────────┘         └─────────────────────────────────┘
+
+  The gateway is the trust boundary. Agents never leave their own gateway.
+  Both sides independently control what the other can request.
+```
+
+The gateway is the trust boundary. A compromised peer agent cannot directly access your agent's tools, memory, or context — it can only send signed intents that your gateway's Doorman validates against your configured policy.
+
+### Three-Layer Scope Model
+
+```
+Layer 1: Gateway Capabilities  → What I CAN support  (advertised at /.well-known/ogp)
+Layer 2: Peer Negotiation      → What I WILL grant YOU  (set at approval time)
+Layer 3: Runtime Enforcement   → Is THIS request within YOUR granted scope  (Doorman)
+```
+
+```bash
+# Approve with granular access control
+ogp federation approve cosmo \
+  --intents agent-comms,project.contribute \
+  --topics project-updates,signal \
+  --rate 100/3600
+
+# cosmo can send: ✓
+ogp federation agent david project-updates "What's the status on the auth system?"
+
+# cosmo cannot send: ✗ 403 Topic not allowed
+ogp federation agent david personal-finances "What's your budget?"
+```
+
+### Federation Lifecycle
+
+Every peer relationship follows an OSPF-inspired state machine:
+
+```
+[no peer]  → init        (federation request received or sent)
+init       → twoWay      (peer approved)
+twoWay     → established (first bidirectional health check succeeds)
+established→ degraded    (one direction fails threshold)
+established→ down        (both directions fail)
+any        → tombstoned  (peer rejected or removed)
+tombstoned → init        (peer re-federates as fresh pending record)
+```
+
+---
 
 ## What This Package Does
 
-This is a companion daemon that adds federation capabilities to any standard OpenClaw installation. It runs alongside your OpenClaw instance on a separate port and handles:
+OGP ships as a companion daemon that runs alongside your AI framework on a separate port. It handles:
 
-- **Cryptographically signed peer-to-peer messaging** using Ed25519
-- **Peer relationship management** (request, approve, reject)
-- **Identity attribution** with separate human and agent names (v0.5.0+)
-- **Project collaboration** with identity snapshots for historical accuracy (v0.6.0+)
-- **Per-contribution signatures** — every project contribution is author-signed and verified on receipt, with a stable ULID id (v0.8.0+)
-- **Multi-agent personas** — multiple local agents per gateway, listable via `ogp config list-agents` (v0.7.0+)
-- **Single-daemon stateDir lock** preventing duplicate `ogp start` write-races (v0.8.0+)
-- **Message verification and relay** to your OpenClaw agent
-- **Public tunnel support** (cloudflared/ngrok) for internet accessibility, managed via `ogp tunnel`
+- **Cryptographically signed peer-to-peer messaging** using Ed25519 (every message, no exceptions)
+- **Peer relationship management** (request, approve, reject, remove)
+- **Three-layer scope enforcement** via the Doorman (capability → grant → runtime)
+- **Agent-to-agent communication** with topic routing and delegated-authority response levels
+- **Identity attribution** — separate human and agent names with snapshot history (v0.5.0+)
+- **Project collaboration** — signed contributions with stable ULIDs, verifiable across the federation (v0.6.0+, v0.8.0+)
+- **Multi-agent personas** — multiple local agents per gateway (v0.7.0+)
+- **Transport independence** — direct, relay, and future P2P transports (v0.10.0+)
+- **OGP Apps** — declarative peer-distributed capability bundles with consent gating
+- **Public tunnel support** (cloudflared/ngrok) via `ogp tunnel`
 - **Optional macOS LaunchAgent** for automatic startup
+
+---
 
 ## Prerequisites
 
 - **Node.js 18 or higher**
-- **OpenClaw installed and running** - Get it at [https://openclaw.ai](https://openclaw.ai)
-- **OpenClaw API token** - Generated during OpenClaw setup
+- **An AI agent framework with a gateway** — the reference implementation supports OpenClaw and Hermes. Any framework that accepts webhooks works.
+- **A public HTTPS endpoint** for your gateway (cloudflared tunnel, ngrok, VPS, or cloud deploy)
+
+---
 
 ## Installation
 
@@ -37,297 +149,164 @@ This is a companion daemon that adds federation capabilities to any standard Ope
 npm install -g @dp-pcs/ogp
 ```
 
-Or from GitHub:
-
-```bash
-npm install -g github:dp-pcs/ogp
-```
-
-After installation, install the OGP skills for Claude Code:
+Install OGP skills for Claude Code:
 
 ```bash
 ogp-install-skills
 ```
 
-This auto-discovers and installs all OGP skills from the `skills/` directory. The installer now replaces each installed skill directory wholesale on upgrade so stale files from older package versions do not survive.
-
-Verify the installed copies after an upgrade:
+Verify installed skill versions after upgrade:
 
 ```bash
 rg -n '^version:' ~/.openclaw/skills/ogp*/SKILL.md ~/.claude/skills/ogp*/SKILL.md 2>/dev/null
 ```
 
-The installed skill versions should match the skills bundled with the `@dp-pcs/ogp`
-version you have installed (run `ogp completion install` / `ogp-install-skills` after
-upgrading to refresh them). If the reported versions are older than the bundled
-`skills/*/SKILL.md` in this package, re-run the skill installer.
-
-### Shell Completion and Help
-
-OGP includes intelligent tab completion and context-sensitive help (inspired by Cisco IOS).
-
-**What tab completion does:** once installed, pressing `Tab` while typing an `ogp`
-command completes command names, subcommands, and flags — and completes some values
-dynamically (for example, `ogp config set-default <Tab>` lists your enabled frameworks).
-It means you don't have to memorize the command tree: type `ogp <Tab>` to see the
-top-level commands, `ogp federation <Tab>` to see federation subcommands, and so on.
-Completion is provided by the `scripts/completion.bash` and `scripts/completion.zsh`
-scripts bundled with the package.
-
-**Install tab completion:**
+### Shell Completion
 
 ```bash
-ogp completion install            # auto-detects your shell (bash or zsh)
-ogp completion install bash       # or target a shell explicitly
-ogp completion install zsh
+ogp completion install            # auto-detects shell (bash or zsh)
+ogp completion install zsh        # explicit
 ```
 
-The installer writes the completion script and wires it into your shell's startup
-file. After installing, **open a new terminal window** (or `source` your shell rc) for
-it to take effect. If you upgrade OGP and new commands don't complete, just re-run
-`ogp completion install` to refresh the script.
-
-**Using it:**
-
-```bash
-ogp <Tab>                         # list top-level commands
-ogp fed<Tab>                      # completes to "federation"
-ogp federation <Tab>              # list federation subcommands
-ogp config set-default <Tab>      # completes enabled framework names
-ogp tunnel <Tab>                  # list / start / stop
-```
+After installing, open a new terminal or `source` your shell rc. Use `ogp <Tab>` to explore commands, `ogp federation <Tab>` for federation subcommands, etc.
 
 **Context-sensitive help:**
 
-Use `help` at any command level to see available options:
-
 ```bash
-ogp help                         # Top-level commands
-ogp config help                  # Config subcommands
-ogp config health-check help     # Health-check options
-ogp federation help              # Federation commands
+ogp help                  # top-level commands
+ogp federation help       # federation commands
+ogp config '?'            # config subcommands
 ```
 
-You can also use `?` (requires quoting in the shell):
-
-```bash
-ogp config '?'
-ogp federation '?'
-```
-
-Both `help` and `?` work identically - use whichever you prefer.
-
-### Multi-Framework Support
-
-OGP supports running alongside multiple AI frameworks (OpenClaw, Hermes, etc.) with isolated configurations. During setup, OGP automatically detects installed frameworks and creates framework-specific configurations:
-
-- **OpenClaw**: `~/.ogp-openclaw/`
-- **Hermes**: `~/.ogp-hermes/`
-- **Standalone**: `~/.ogp/`
-
-All framework configurations are managed from a central meta-config at `~/.ogp-meta/config.json`.
+---
 
 ## Quick Start
 
 ### 1. Setup
 
-Run the interactive setup wizard:
-
 ```bash
 ogp setup
 ```
 
-The wizard automatically detects installed frameworks and guides you through configuration. You'll be prompted for:
-- **Framework Selection** - Which AI frameworks to enable (OpenClaw, Hermes, or standalone)
-- **Agent ID** - Which agent owns each gateway (auto-discovers from framework config)
-- Daemon port (default: 18790 for OpenClaw, 18793 for Hermes)
-- Framework URL and API credentials
-- Your public gateway URL (can update later; rendezvous is optional discovery/invite sugar, not a replacement for reachability)
-- Rendezvous configuration (optional, v0.2.14+)
+The wizard detects installed frameworks and prompts for:
+- Framework selection (OpenClaw, Hermes, or standalone)
+- Agent ID (auto-discovers from framework config)
+- Daemon port (default: 18790)
+- Public gateway URL
 - Display name and email
+- Rendezvous (optional discovery layer)
+- Human delivery target and inbound federation policy
 
-**Working with Multiple Frameworks:**
+### 2. Make Your Gateway Reachable
 
-When multiple frameworks are configured, use the `--for` flag to specify which framework:
+Peers need to reach your gateway over the internet. See [Making Your Gateway Reachable](#making-your-gateway-reachable) below for cloudflared, ngrok, and VPS options.
 
-```bash
-# Use specific framework
-ogp --for openclaw federation list
-ogp --for hermes federation list
-
-# Run on all frameworks
-ogp --for all status
-
-# Set a default framework (no --for needed)
-ogp config set-default openclaw
-```
-
-If only one framework is configured, it's automatically selected (no `--for` flag needed).
-
-### 2. Start the Daemon
-
-```bash
-ogp start
-```
-
-Or run in the background:
+### 3. Start the Daemon
 
 ```bash
 ogp start --background
 ```
 
-**Multi-framework usage:**
+### 4. Federate with a Peer
+
+**Invite flow (recommended, v0.2.15+):**
 
 ```bash
-# Start daemon for specific framework
-ogp --for openclaw start --background
-ogp --for hermes start --background
+# You generate a code, share it with your peer
+ogp federation invite
+# → Your invite code: a3f7k2  (expires in 10 minutes)
 
-# Start all framework daemons
-ogp --for all start --background
+# Your peer runs:
+ogp federation accept a3f7k2
 ```
 
-### 3. Making Your Gateway Reachable
+**Manual URL exchange:**
 
-For OGP federation to work, peers need to be able to reach your gateway over the internet. If you already have a publicly accessible URL (cloud server, VPS, Clawporate gateway), just set it as your `gatewayUrl` in `~/.ogp/config.json` and you're done. Skip to step 4.
-
-If you're a home user behind a router/NAT, you need one of the options below to expose your gateway to the internet.
-
-#### Option 1: Cloudflare Named Tunnel (Recommended — Free)
-
-This is the gold standard for home users. It gives you a permanent, stable URL that never changes and starts automatically on boot once installed as a service.
-
-**Requirements:**
-- Free Cloudflare account
-- A domain on Cloudflare (can be registered or transferred for free on Cloudflare)
-
-**Setup:**
 ```bash
-# 1. Login to Cloudflare
+ogp federation request https://peer.example.com --alias cosmo
+# They approve, then:
+ogp federation agent cosmo general "Hello from David"
+```
+
+### 5. Multi-Framework
+
+When multiple frameworks are configured, use `--for`:
+
+```bash
+ogp --for openclaw federation list
+ogp --for hermes status
+ogp config set-default openclaw   # set default so --for is optional
+ogp --for all start --background  # start all daemons
+```
+
+---
+
+## Making Your Gateway Reachable
+
+For OGP federation to work, peers need to reach your gateway over the internet.
+
+### Option 1: Cloudflare Named Tunnel (Recommended — Free, Permanent URL)
+
+```bash
 cloudflared tunnel login
-
-# 2. Create a tunnel named "ogp"
 cloudflared tunnel create ogp
-
-# 3. Route your domain to the tunnel (replace yourdomain.com)
 cloudflared tunnel route dns ogp ogp.yourdomain.com
 
-# 4. Create config file at ~/.cloudflared/config.yml
 cat > ~/.cloudflared/config.yml <<EOF
 tunnel: <TUNNEL_ID_FROM_STEP_2>
 credentials-file: ~/.cloudflared/<TUNNEL_ID>.json
-
 ingress:
   - hostname: ogp.yourdomain.com
     service: http://localhost:18790
   - service: http_status:404
 EOF
 
-# 5. Install as a system service
 cloudflared service install
-
-# 6. Update your OGP config
-ogp stop
-# Edit ~/.ogp/config.json and set "gatewayUrl": "https://ogp.yourdomain.com"
+# Edit ~/.ogp/config.json: "gatewayUrl": "https://ogp.yourdomain.com"
 ogp start --background
 ```
 
-Your URL is now `https://ogp.yourdomain.com` and will persist across restarts.
+### Option 2: ngrok
 
-#### Option 2: ngrok (Good — Free tier available)
-
-Good fallback if you don't have a domain on Cloudflare. The free tier gives you a stable subdomain that persists across restarts IF you're logged in with an ngrok account.
-
-**Setup:**
 ```bash
-# 1. Sign up for free at https://ngrok.com and get your auth token
-
-# 2. Authenticate ngrok
 ngrok config add-authtoken YOUR_AUTH_TOKEN
-
-# 3. Start the tunnel
 ngrok http 18790
-
-# 4. Copy the HTTPS URL (e.g., https://abc123.ngrok-free.app)
-
-# 5. Update your OGP config
-ogp stop
-# Edit ~/.ogp/config.json and set "gatewayUrl": "https://abc123.ngrok-free.app"
-ogp start --background
+# Copy the HTTPS URL, set as gatewayUrl in ~/.ogp/config.json
 ```
 
-Your ngrok URL will be stable as long as you're authenticated. You can also run `ngrok http 18790 --log stdout > ngrok.log 2>&1 &` to keep it running in the background.
-
-#### Option 3: Cloudflare Anonymous Tunnel (Quick but Ephemeral)
-
-Good for testing only. No account needed, but your URL changes every time you restart the tunnel, so peers need a new URL each time.
+### Option 3: Cloudflare Quick Tunnel (Testing Only — URL Changes on Restart)
 
 ```bash
 cloudflared tunnel --url http://localhost:18790
 ```
 
-Copy the displayed URL and update your `gatewayUrl`. **Not recommended for ongoing federation** — use this only for quick tests.
+### Option 4: Port Forwarding
 
-#### Option 4: Port Forwarding
+Forward port 18790 on your router to your machine. Set `gatewayUrl` to `http://YOUR_PUBLIC_IP:18790`. Use HTTPS tunnels in preference to this.
 
-Forward port 18790 on your router to your machine running OGP. Set `gatewayUrl` to `http://YOUR_PUBLIC_IP:18790`.
-
-This works but exposes your home IP address. Most users should prefer the tunnel options above.
-
-### 4. Share Your URL
-
-Share your gateway URL with peers who want to federate with you. They can discover your public key at:
-
-```
-https://your-gateway-url.com/.well-known/ogp
-```
+---
 
 ## All Commands
 
-All commands support the `--for <framework>` flag to specify which framework configuration to use. Use `--for all` to run commands across all configured frameworks.
-
-**Quick Help:** Add `?` to any command for context-sensitive help:
-
-```bash
-ogp ?                      # Show all commands
-ogp federation ?           # Show federation commands
-ogp federation send ?      # Show send usage with examples
-```
-
-### Tab Completion
-
-Install shell completion for faster command entry:
-
-```bash
-# Bash
-ogp completion install bash
-
-# Zsh
-ogp completion install zsh
-```
-
-After installation, restart your shell or run `source ~/.bashrc` (bash) or `source ~/.zshrc` (zsh).
+All commands support `--for <framework>` to select which framework configuration to use. Use `--for all` to run across all configured frameworks.
 
 ### Daemon Management
 
 | Command | Description |
 |---------|-------------|
-| `ogp setup` | Interactive setup wizard (auto-detects frameworks) |
-| `ogp start [--for <framework>]` | Start daemon in foreground |
-| `ogp start --background [--for <framework>]` | Start daemon as background process |
-| `ogp stop [--for <framework>]` | Stop the daemon |
-| `ogp status [--for <framework>]` | Show daemon status and configuration |
+| `ogp setup` | Interactive setup wizard |
+| `ogp start [--background]` | Start daemon (foreground or background) |
+| `ogp stop` | Stop the daemon |
+| `ogp status` | Show daemon status and configuration |
 
 ### Tunnel Management
 
 | Command | Description |
 |---------|-------------|
-| `ogp tunnel list` | List running cloudflared/ngrok tunnels and reconcile them against your configured `gatewayUrl` (✓/✗/⚠) |
-| `ogp tunnel start cloudflared` | Start a Cloudflare quick tunnel (idempotent — no-op if one is already running) |
-| `ogp tunnel start ngrok` | Start an ngrok tunnel instead of cloudflared |
+| `ogp tunnel list` | List running tunnels and reconcile against `gatewayUrl` |
+| `ogp tunnel start cloudflared` | Start a Cloudflare quick tunnel |
+| `ogp tunnel start ngrok` | Start an ngrok tunnel |
 | `ogp tunnel stop` | Stop the OGP-managed tunnel |
-
-For a stable, named tunnel (recommended for production), see the [Making Your Gateway Reachable](#3-making-your-gateway-reachable) section above or the `ogp-expose` skill.
 
 ### System Integration (macOS)
 
@@ -341,16 +320,16 @@ For a stable, named tunnel (recommended for production), see the [Making Your Ga
 | Command | Description |
 |---------|-------------|
 | `ogp config list` | List all configured frameworks |
-| `ogp config set-default <framework>` | Set default framework (no --for needed) |
+| `ogp config set-default <framework>` | Set default framework |
 | `ogp config enable <framework>` | Enable a framework |
 | `ogp config disable <framework>` | Disable a framework |
-| `ogp config show [--for <framework>]` | Show current configuration |
+| `ogp config show` | Show current configuration |
 | `ogp config list-agents` | List local personas for the active framework (v0.7.0+) |
 | `ogp config show-identity` | Show current identity + personas |
 
 ### Identity Management
 
-OGP separates human operators from agents for clarity in federated networks. This helps multi-agent scenarios, organizational contexts, and agent-to-agent communication.
+OGP separates human operators from agents. This matters for attribution in project contributions and for multi-agent setups.
 
 | Command | Description |
 |---------|-------------|
@@ -362,63 +341,41 @@ OGP separates human operators from agents for clarity in federated networks. Thi
 | `ogp config add-tag <tag>` | Add a single tag |
 | `ogp config remove-tag <tag>` | Remove a single tag |
 
-**Identity fields:**
-- **humanName**: Human operator (e.g., "David Proctor", "Stephen")
-- **agentName**: Agent name (e.g., "Junior", "Apollo", "TrogdorClaw")
-- **organization**: Organization name (optional, e.g., "Trilogy", "AICOE")
-- **tags**: Flexible categorization (e.g., "work", "production", "personal", "research")
-
-Tags are used for local categorization and filtering. They help organize peers in multi-context scenarios (work/personal, different clients, etc.).
-
-**Examples:**
-
 ```bash
-# View current identity
-ogp config show-identity
-
-# Set identity during setup (auto-prompted)
-ogp setup
-
-# Update identity later
-ogp config set-identity --human-name "David Proctor" --agent-name "Junior"
-ogp config set-identity --organization "Trilogy"
-
-# Manage tags
-ogp config set-tags work production client-trilogy
-ogp config add-tag research
-ogp config remove-tag personal
+ogp config set-identity \
+  --human-name "David Proctor" \
+  --agent-name "Junior" \
+  --organization "Trilogy"
 ```
 
 ### Federation Management
 
 | Command | Description |
 |---------|-------------|
-| `ogp federation list [--for <framework>]` | List all peers |
-| `ogp federation list --status pending` | List pending federation requests |
-| `ogp federation list --status approved` | List approved peers |
+| `ogp federation list [--status pending\|approved]` | List peers |
 | `ogp federation list --tag <tag>` | Filter peers by tag |
-| `ogp federation request <url> [alias]` | Request federation (alias auto-resolves if omitted) |
+| `ogp federation request <url> [--alias <name>]` | Request federation |
 | `ogp federation approve <peer-id> [options]` | Approve with optional scope grants |
-| `ogp federation reject <peer-id>` | Reject a federation request |
-| `ogp federation remove <peer-id>` | Remove a peer from federation (asymmetric tear-down) |
-| `ogp federation alias <peer-id> <alias>` | Set friendly alias for a peer |
-| `ogp federation tag <peer-id> <tags...>` | Add tags to a peer (local categorization) |
+| `ogp federation reject <peer-id>` | Reject a request |
+| `ogp federation remove <peer-id>` | Remove a peer (asymmetric tear-down) |
+| `ogp federation alias <peer-id> <alias>` | Set friendly alias |
+| `ogp federation tag <peer-id> <tags...>` | Add tags to a peer |
 | `ogp federation untag <peer-id> <tags...>` | Remove tags from a peer |
-| `ogp federation send <peer-id> <intent> <json>` | Send a message to an approved peer |
-| `ogp federation scopes <peer-id>` | Show scope grants for a peer |
-| `ogp federation grant <peer-id> [options]` | Update scope grants for a peer |
+| `ogp federation send <peer-id> <intent> <json>` | Send a raw message |
+| `ogp federation scopes <peer-id>` | Show scope grants |
+| `ogp federation grant <peer-id> [options]` | Update scope grants |
 | `ogp federation agent <peer-id> <topic> <message>` | Send agent-comms message |
-| `ogp federation ping <peer-url>` | Test connectivity to a peer gateway |
+| `ogp federation ping <peer-url>` | Test connectivity |
 | `ogp federation invite` | Generate a short-lived invite code (v0.2.15+) |
-| `ogp federation accept <token>` | Accept an invite and auto-connect (v0.2.15+) |
-| `ogp federation connect <pubkey>` | Connect to a peer by public key via rendezvous (v0.2.14+) |
+| `ogp federation accept <token>` | Accept an invite (v0.2.15+) |
+| `ogp federation connect <pubkey>` | Connect by public key via rendezvous (v0.2.14+) |
 
-### Scope Options (v0.2.0)
+### Scope Options (v0.2.0+)
 
 When approving or granting scopes:
-- `--intents <list>` - Comma-separated intents (e.g., `message,agent-comms`)
-- `--rate <limit>` - Rate limit as requests/seconds (e.g., `100/3600`)
-- `--topics <list>` - Topics for agent-comms (e.g., `memory-management,task-delegation`)
+- `--intents <list>` — comma-separated intents (e.g., `message,agent-comms,project.contribute`)
+- `--rate <limit>` — rate limit as requests/window-seconds (e.g., `100/3600`)
+- `--topics <list>` — topics for agent-comms (e.g., `general,project-updates`)
 
 ### Intent Management (v0.2.0+)
 
@@ -433,278 +390,224 @@ When approving or granting scopes:
 | Command | Description |
 |---------|-------------|
 | `ogp project create <id> <name> [options]` | Create a new project |
-| `ogp project join <id> [name] [options]` | Join an existing project |
+| `ogp project join <id> [name]` | Join an existing project |
 | `ogp project list` | List all projects |
-| `ogp project contribute <id> <type> <summary>` | Add a contribution by entry type |
-| `ogp project query <id> [options]` | Query project contributions |
+| `ogp project contribute <id> <type> <summary>` | Add a signed contribution |
+| `ogp project query <id> [options]` | Query contributions |
 | `ogp project status <id>` | Show project status |
 | `ogp project request-join <peer> <id> <name>` | Request to join peer's project |
 | `ogp project send-contribution <peer> <id> <type> <summary>` | Send contribution to peer |
-| `ogp project query-peer <peer> <id> [options]` | Query peer's project |
+| `ogp project query-peer <peer> <id>` | Query peer's project |
 | `ogp project status-peer <peer> <id>` | Get peer's project status |
-| `ogp project delete <id> [options]` | Delete a project |
-| `ogp project add-owner <id> <peer-key>` | Grant ownership to another key (owners only) |
-| `ogp project claim-ownership <id>` | Claim a pre-existing project (members only) |
-| `ogp project owners <id>` | List the owners of a project |
-
-### Project Ownership (v0.9.0+)
-
-Projects have owners. The creator is the root owner (established by a signed creation record); additional owners are added via signed grants that any peer can verify independently, so the owner set converges across the federation. Pre-existing (legacy) projects can be claimed by an existing member with `claim-ownership`. Ownership authorizes moderation actions like retracting contributions.
-
-```bash
-ogp project create <id> <name>          # you become the root owner (signed)
-ogp project add-owner <id> <peer-key>   # grant ownership to another key (owners only)
-ogp project claim-ownership <id>        # claim a pre-existing project (members only)
-ogp project owners <id>                 # list the owners
-```
+| `ogp project delete <id>` | Delete a project |
+| `ogp project add-owner <id> <peer-key>` | Grant ownership (owners only) |
+| `ogp project claim-ownership <id>` | Claim a pre-existing project |
+| `ogp project owners <id>` | List project owners |
 
 ### Agent-Comms Policy Management (v0.2.0+)
 
 | Command | Description |
 |---------|-------------|
-| `ogp agent-comms interview` | Re-run the delegated-authority / human-delivery interview |
+| `ogp agent-comms interview` | Re-run delegated-authority / human-delivery interview |
 | `ogp agent-comms policies [peer-id]` | Show response policies |
 | `ogp agent-comms configure [peer-ids] [options]` | Configure response policies |
 | `ogp agent-comms add-topic <peer> <topic> [options]` | Add topic policy |
 | `ogp agent-comms remove-topic <peer> <topic>` | Remove topic policy |
 | `ogp agent-comms reset <peer>` | Reset peer to defaults |
-| `ogp agent-comms activity [peer] [options]` | Show activity log |
+| `ogp agent-comms activity [peer]` | Show activity log |
 | `ogp agent-comms default <level>` | Set default response level |
 | `ogp agent-comms logging <on\|off>` | Enable/disable logging |
 
-### Federation Examples
+---
+
+## Federation Examples
 
 ```bash
 # Request federation (alias auto-resolves from /.well-known/ogp)
 ogp federation request https://peer.example.com
 
-# Or specify a custom alias for easier reference
-ogp federation request https://peer.example.com --alias apollo
-
-# Multi-framework: Request from specific framework
-ogp --for openclaw federation request https://hermes.example.com --alias hermes-gateway
-
-# Check pending requests
-ogp federation list --status pending
-
-# Approve a peer (v0.1 mode - no scope restrictions)
-ogp federation approve apollo
-
-# Approve with scope grants (v0.2.0+)
-ogp federation approve apollo \
-  --intents message,agent-comms \
+# Approve with scope grants
+ogp federation approve cosmo \
+  --intents message,agent-comms,project.contribute \
   --rate 100/3600 \
-  --topics memory-management,task-delegation
+  --topics general,project-updates
 
 # View peer scopes
-ogp federation scopes apollo
+ogp federation scopes cosmo
 
-# Update grants for an existing peer
-ogp federation grant apollo \
-  --intents agent-comms \
-  --topics project-planning
+# Send agent-comms message
+ogp federation agent cosmo general "Hey, status on that PR?"
 
-# Remove a peer from federation (asymmetric tear-down)
-ogp federation remove apollo
+# Send with priority and wait for reply
+ogp federation agent cosmo project-updates \
+  "What decisions were made on the auth system?" \
+  --priority high \
+  --wait \
+  --timeout 60000
 
-# Test connectivity
-ogp federation ping https://peer.example.com
-
-# Send a simple message
-ogp federation send apollo message '{"text":"Hello!"}'
-
-# Send agent-comms (v0.2.0+)
-ogp federation agent apollo memory-management "How do you persist context?"
-
-# Send agent-comms with priority
-ogp federation agent apollo task-delegation "Schedule standup" --priority high
-
-# Send agent-comms and wait for reply
-ogp federation agent apollo queries "What's the status?" --wait --timeout 60000
-
-# Send a task request
-ogp federation send apollo task-request '{
-  "taskType": "analysis",
-  "description": "Analyze recent logs"
-}'
-
-# Send a status update
-ogp federation send apollo status-update '{
-  "status": "completed",
-  "message": "Task finished"
-}'
+# Remove a peer (unilateral; they receive a signed notification)
+ogp federation remove cosmo
 ```
 
-### Project Examples (v0.2.0+)
+---
+
+## Project Examples (v0.2.0+)
 
 ```bash
 # Create a project
-ogp project create my-app "My Awesome App" \
-  --description "Mobile expense tracking application"
+ogp project create signal "Signal AI CoE Hub" \
+  --description "Federated knowledge hub for the AI Center of Excellence"
 
-# Add contributions by entry type
-ogp project contribute my-app progress "Completed authentication system"
-ogp project contribute my-app decision "Using PostgreSQL for persistence"
-ogp project contribute my-app blocker "Waiting for API key approval"
+# Log contributions (every contribution is Ed25519-signed with a stable ULID)
+ogp project contribute signal progress "Completed authentication system"
+ogp project contribute signal decision "Using PostgreSQL for persistence"
+ogp project contribute signal blocker "Waiting for API key approval"
 
 # Query project
-ogp project status my-app
-ogp project query my-app --limit 10
-ogp project query my-app --type progress
+ogp project status signal
+ogp project query signal --limit 10 --type decision
 
 # Collaborate with peers
-ogp project send-contribution alice shared-app progress "Deployed staging"
-ogp project query-peer alice shared-app --limit 10
-ogp project status-peer alice shared-app
-
-# Join peer's project
-ogp project request-join alice mobile-app "Mobile App Project"
+ogp project send-contribution cosmo signal progress "Deployed staging environment"
+ogp project query-peer cosmo signal --limit 5
 ```
 
-### Custom Intent Examples (v0.2.0+)
-
-```bash
-# Register a deployment intent
-ogp intent register deployment \
-  --description "Deployment notifications"
-
-# List all intents
-ogp intent list
-
-# Remove intent
-ogp intent remove deployment
-
-# Grant peer access to custom intent
-ogp federation approve alice --intents deployment --rate 50/3600
-```
-
-### Agent-Comms Policy Examples (v0.2.0+)
-
-```bash
-# View current policies
-ogp agent-comms policies
-
-# Configure global defaults
-ogp agent-comms configure --global \
-  --topics "general,testing" \
-  --level summary
-
-# Configure specific peer
-ogp agent-comms configure stan \
-  --topics "memory-management" \
-  --level full \
-  --notes "Trusted collaborator"
-
-# Add sensitive topic
-ogp agent-comms add-topic stan calendar --level escalate
-
-# Multi-peer configuration
-ogp agent-comms configure stan,leo,alice \
-  --topics "testing,debugging" \
-  --level full
-
-# View activity
-ogp agent-comms activity
-ogp agent-comms activity stan --last 20
-```
+---
 
 ## How Federation Works
 
-### Single Framework Architecture
+### Single Framework
 
 ```
 ┌─────────────┐         ┌──────────────┐         ┌─────────────┐
 │  OpenClaw   │◄────────│  OGP Daemon  │◄────────│   Remote    │
 │  :18789     │  webhook│  :18790      │  signed │   Peer      │
-│             │         │              │  message│  (OGP)      │
+│             │         │              │ message │  (OGP)      │
 └─────────────┘         └──────────────┘         └─────────────┘
 ```
 
-### Multi-Framework Architecture
+### Multi-Framework
 
 ```
 ┌─────────────┐         ┌──────────────────┐         ┌─────────────┐
 │  OpenClaw   │◄────────│  OGP Daemon      │◄────────│   Remote    │
 │  :18789     │  webhook│  :18790          │  signed │   Peer      │
-└─────────────┘         │ (~/.ogp-openclaw)│  message│  (OGP)      │
+└─────────────┘         │ (~/.ogp-openclaw)│ message │  (OGP)      │
                         └──────────────────┘         └─────────────┘
-                               ▲
-┌─────────────┐                │
-│   Hermes    │◄────────┌──────────────────┐         ┌─────────────┐
-│  :18792     │  webhook│  OGP Daemon      │◄────────│   Remote    │
-└─────────────┘         │  :18793          │  signed │   Peer      │
-                        │ (~/.ogp-hermes)  │  message│  (OGP)      │
+┌─────────────┐         ┌──────────────────┐         ┌─────────────┐
+│   Hermes    │◄────────│  OGP Daemon      │◄────────│   Remote    │
+│  :18792     │  webhook│  :18793          │  signed │   Peer      │
+└─────────────┘         │ (~/.ogp-hermes)  │ message │  (OGP)      │
                         └──────────────────┘         └─────────────┘
-                               ▲
-                               │
+                                 ▲
                         ┌──────────────────┐
                         │   Meta Config    │
                         │ (~/.ogp-meta/)   │
-                        │ - Framework list │
-                        │ - Default        │
-                        │ - Aliases        │
                         └──────────────────┘
 ```
 
 ### Federation Flow
 
-1. **Discovery**: Peers discover each other via `/.well-known/ogp` endpoint or rendezvous server
-2. **Request**: Alice requests federation with Bob's OGP instance
-3. **Approval**: Bob approves (or rejects) the federation request
-4. **Messaging**: Approved peers can send cryptographically signed messages
-5. **Verification**: Recipient OGP daemon verifies signatures using sender's public key
-6. **Relay**: Valid messages are forwarded to the local AI agent via webhook
+1. **Discovery** — Peer discovers your gateway via `/.well-known/ogp` or an invite code
+2. **Request** — Peer sends a signed federation request
+3. **Approval** — A human approves (or rejects) at the receiving gateway
+4. **Messaging** — Approved peers send Ed25519-signed messages
+5. **Doorman** — Every message is validated against the peer's granted scopes and rate limits
+6. **Delivery** — Valid messages are forwarded to the local agent via `POST /hooks/agent`
 
-All messages are signed with Ed25519 cryptographic signatures to prevent tampering and impersonation.
+---
 
-## Rendezvous — Optional Discovery And Invite Layer (v0.2.14+)
+## Key Features In Depth
 
-Rendezvous is an optional convenience layer for pubkey lookup and short invite codes. It is useful when you want easier onboarding for gateways that are already publicly reachable.
+### Signed Project Contributions (v0.8.0+)
 
-### What It Actually Solves
+Every project contribution is signed by its author. When you `ogp project contribute`, the CLI mints a sortable **ULID**, builds a canonical record (`id, projectId, authorId, entryType, summary, metadata, timestamp`), and signs it with your Ed25519 key. The same signed envelope is used for the local store and every peer the contribution is pushed to, so a contribution keeps one stable ID across the whole federation.
 
-Traditional federation still requires the peer you are trying to reach to be publicly reachable. Rendezvous helps with:
-- pubkey discovery
-- short invite codes instead of sharing long URLs or raw pubkeys
-- reducing manual coordination once each gateway already has a stable public endpoint
+On receipt, the daemon verifies three things at the authentication layer: the signature is valid, the signed `authorId` matches the federation-authenticated sender, and the signed `projectId` matches the target project. Unsigned live contributions are rejected (`400`); bad, forged, or mismatched signatures are rejected (`401`). `authorId` is the Ed25519 public key — no separate key distribution is needed.
 
-Rendezvous does **not** provide NAT traversal, hole punching, or message relay.
+### Delegated-Authority Precedence (v0.4.2+)
 
-### How It Works
+Policy evaluation for inbound messages follows a fixed 7-layer precedence chain (most general → most specific):
 
-1. Your OGP daemon auto-registers with the rendezvous server on startup (`POST /register`) using your public key and connection details
-2. A 30-second heartbeat keeps your registration alive (90-second TTL)
-3. Peers can look you up by public key (`GET /peer/:pubkey`) and connect directly
-4. On shutdown, your daemon auto-deregisters (`DELETE /peer/:pubkey`)
+1. Legacy `inboundFederationPolicy` mode (safety fallback)
+2. Global default rule
+3. Peer-specific default rule
+4. Global message-class rule (`agent-work`, `human-relay`, `approval-request`, `status-update`)
+5. Peer message-class override
+6. Global topic-level rule
+7. Peer topic-level override
 
-The rendezvous server **never touches message content** — it only stores connection hints. All OGP messages remain end-to-end signed between peers.
-
-### Configuration
-
-Add the `rendezvous` block to `~/.ogp/config.json`:
-
-```json
-{
-  "daemonPort": 18790,
-  "openclawUrl": "http://localhost:18789",
-  "openclawToken": "your-token",
-  "rendezvous": {
-    "enabled": true,
-    "url": "https://rendezvous.elelem.expert"
-  }
-}
-```
-
-Rendezvous is optional. OGP works without it if peers can share public URLs directly.
-
-**For cloud/ECS gateways behind load balancers**, set the `OGP_PUBLIC_URL` environment variable to override automatic IP detection:
+More specific rules always win. Peer defaults cannot erase class or topic safeguards.
 
 ```bash
-export OGP_PUBLIC_URL=https://your-gateway.example.com
-ogp start
+# Re-run the delegated-authority interview at any time
+ogp agent-comms interview
 ```
 
-Or add `publicUrl` to the rendezvous config:
+### Default-Deny Agent-Comms (v0.2.9+)
+
+```bash
+ogp agent-comms default off   # block everything not explicitly allowed
+ogp agent-comms configure --global --topics "general,project-updates" --level summary
+```
+
+When a topic hits `off`, the daemon returns a cryptographically signed rejection (`{ status: "rejected", reason: "topic-not-permitted" }`) rather than silently dropping. The sender knows the topic is blocked.
+
+### Identity Snapshots (v0.6.0+)
+
+```bash
+ogp config set-identity --human-name "David Proctor" --agent-name "Junior"
+
+ogp project contribute signal progress "Completed auth system"
+ogp project query signal
+# [2026-06-23 14:00:00] David Proctor (Junior)
+#   progress: Completed auth system
+```
+
+Identity is captured at contribution time. If you later rename your agent, historical contributions stay attributed to the name that made them.
+
+### Project Ownership (v0.9.0+)
+
+The creator is the root owner (established by a signed creation record). Additional owners are added via signed grants that any peer can verify independently. Pre-existing projects can be claimed by an existing member.
+
+```bash
+ogp project create signal "Signal Hub"   # you become root owner
+ogp project add-owner signal <peer-key>  # grant ownership (owners only)
+ogp project owners signal                # list all owners
+```
+
+---
+
+## Agent-Comms Response Policies
+
+| Level | Behavior |
+|-------|----------|
+| `full` | Respond openly, share details |
+| `summary` | High-level responses only |
+| `escalate` | Ask human before responding |
+| `deny` | Politely decline |
+| `off` | Default-deny: send signed rejection, do not process |
+
+```bash
+ogp agent-comms policies                          # view all policies
+ogp agent-comms configure cosmo \
+  --topics "project-updates,signal" \
+  --level full --notes "Trusted collaborator"
+ogp agent-comms add-topic cosmo finance --level escalate
+ogp agent-comms activity cosmo --last 20
+```
+
+When a message arrives, your agent receives the policy level in metadata:
+
+```
+[OGP Agent-Comms] Cosmo → project-updates [FULL]: What's the status on the auth system?
+```
+
+---
+
+## Rendezvous — Optional Discovery Layer (v0.2.14+)
+
+Rendezvous is an optional convenience service for pubkey lookup and short invite codes. It does **not** provide NAT traversal or message relay — it only stores connection hints.
 
 ```json
 {
@@ -716,78 +619,175 @@ Or add `publicUrl` to the rendezvous config:
 }
 ```
 
-### Federation Invite Flow (v0.2.15+)
+Your daemon auto-registers on startup and heartbeats every 30 seconds. Registrations expire after 90 seconds without a heartbeat.
 
-The invite flow removes the need to exchange public keys manually. One command generates a short-lived token; your peer uses it to connect instantly.
+### Invite Flow (v0.2.15+)
 
-**Generate an invite:**
 ```bash
 ogp federation invite
-```
+# → Your invite code: a3f7k2  (expires in 10 minutes)
 
-Output:
-```
-Your invite code: a3f7k2  (expires in 10 minutes)
-Share this with your peer — they run: ogp federation accept a3f7k2
-```
-
-**Accept an invite:**
-```bash
+# Peer runs:
 ogp federation accept a3f7k2
+# → Connected to a3f7k2... via rendezvous ✅
 ```
 
-Output:
-```
-Connected to a3f7k2... via rendezvous ✅
-```
+Tokens are non-consuming — multiple peers can accept the same invite within the TTL window.
 
-**How invite codes work:**
-- `ogp federation invite` generates a 6-character alphanumeric token stored on the rendezvous server with a 10-minute TTL
-- `ogp federation accept <token>` resolves the token to a pubkey + address and auto-connects
-- Tokens are non-consuming (multiple peers can accept the same invite within the TTL window)
+### Privacy
 
-### Direct Connection by Public Key (v0.2.14+)
-
-Connect to any peer registered on rendezvous by their public key:
+Rendezvous stores only: public key, IP address, port, and last-seen timestamp. No message content passes through it. Public instance: `https://rendezvous.elelem.expert`. Self-hostable:
 
 ```bash
-ogp federation connect <pubkey>
-```
-
-This looks up the peer on the rendezvous server and establishes federation directly. The peer still needs a reachable gateway endpoint behind that lookup.
-
-### Privacy & Self-Hosting
-
-**Privacy:**
-- Rendezvous stores only: public key, IP address, port, and last-seen timestamp
-- No message content passes through rendezvous
-- Registrations expire after 90 seconds without heartbeat
-- Open source and self-hostable
-
-**Public instance:** `https://rendezvous.elelem.expert`
-
-**Self-host:**
-```bash
-cd packages/rendezvous
-npm install
-npm run build
+cd packages/rendezvous && npm install && npm run build
 PORT=3000 node dist/index.js
 ```
 
-Update your `rendezvous.url` config to point to your instance.
+---
 
-### Message Format
+## Configuration
+
+`~/.ogp/config.json`:
+
+```json
+{
+  "daemonPort": 18790,
+  "openclawUrl": "http://localhost:18789",
+  "openclawToken": "your-token",
+  "gatewayUrl": "https://your-gateway.example.com",
+  "displayName": "David Proctor",
+  "email": "david@example.com",
+  "stateDir": "~/.ogp",
+  "agentId": "main",
+  "humanDeliveryTarget": "telegram:123456789",
+  "inboundFederationPolicy": {
+    "mode": "summarize"
+  },
+  "notifyTargets": {
+    "main": "telegram:123456789",
+    "scribe": "telegram:987654321"
+  },
+  "rendezvous": {
+    "enabled": true,
+    "url": "https://rendezvous.elelem.expert"
+  }
+}
+```
+
+### Human Delivery Preferences (v0.4.2+)
+
+Two separate questions for inbound federation traffic:
+
+1. **Where should human-facing followups go?** → `humanDeliveryTarget`
+2. **How should the agent behave?** → `inboundFederationPolicy.mode`
+
+Supported modes: `forward` · `summarize` · `autonomous` · `approval-required`
+
+### Notification Routing (v0.2.28+)
+
+Resolution priority: `humanDeliveryTarget` → `notifyTargets[agentId]` → `notifyTarget` → framework default.
+
+### Multi-Framework Config
+
+Configurations are isolated per framework:
+- `~/.ogp-meta/config.json` — enabled frameworks, aliases, and default
+- `~/.ogp/config.json` — OpenClaw gateway config
+- `~/.ogp-hermes/config.json` — Hermes gateway config
+
+### Environment Variables
+
+- `OGP_PUBLIC_URL` — override IP detection for rendezvous (cloud/ECS gateways)
+- `OGP_KEYPAIR_SECRET` — encryption secret for private key at rest (non-macOS)
+- `OGP_META_HOME` — override the meta-config directory location
+
+### State Files
+
+| File | Purpose |
+|------|---------|
+| `~/.ogp/keypair.json` | Public key cache (macOS: private key lives in Keychain) |
+| `~/.ogp/peers.json` | Federated peers + scope grants |
+| `~/.ogp/intents.json` | Intent registry |
+| `~/.ogp/projects.json` | Projects and contributions |
+| `~/.ogp/agent-comms-config.json` | Response policies and activity log |
+| `~/.ogp/apps.json` | Installed OGP Apps registry |
+
+On macOS, deleting `keypair.json` alone does **not** rotate gateway identity — the private key lives in Keychain. Use `ogp setup --reset-keypair` for intentional rotation.
+
+---
+
+## OGP Apps
+
+OGP Apps are declarative bundles (`ogp-app.json`) that describe a piece of software in terms of the OGP capabilities it uses — what intents it fires, what skills it installs into your AI agent, and where its output lives. Apps are discovered through your federation: peers advertise the apps they publish, you browse and install them with a consent gate.
+
+### App Manifest (`ogp-app.json`)
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "signal",
+  "name": "Signal",
+  "version": "1.0.0",
+  "description": "Federated AI-CoE knowledge hub",
+  "uses_intents": ["project.contribute", "project.query"],
+  "uses_projects": ["signal"],
+  "installs_skills": [
+    { "name": "signal-contribute", "install": "scripts/install-signal-contribute.sh" }
+  ],
+  "published_output": "https://aicoe.elelem.expert",
+  "publisher": {
+    "name": "Trilogy AI CoE",
+    "key": "<ed25519-pubkey-hex>"
+  }
+}
+```
+
+Get your public key: `ogp whoami --json | jq .publicKey`
+
+### Publishing and Installing
+
+```bash
+# Publish
+ogp app install file:/path/to/my-app-dir   # validate + register locally
+ogp app advertise my-app                   # expose to approved peers
+
+# Discover and install (as a peer)
+ogp app browse                             # see all peers' apps
+ogp app install peer:<peerId>/<appId>      # consent gate shows scripts + intents first
+ogp app install peer:<peerId>/<appId> --yes  # skip prompt for automation
+
+# Manage
+ogp app list
+ogp app show <appId>
+ogp app usage [appId]
+ogp app remove <appId>
+```
+
+The consent gate shows exactly which install scripts will run and which intents the app calls — nothing executes until you confirm.
+
+### Companion App (GUI)
+
+The [OGP Companion app](./ogp-companion/) provides a desktop UI for the full Apps workflow:
+
+- **Gallery tab** — browse apps advertised by your peers
+- **Installed tab** — manage installed apps sorted by name, date, or usage
+- **Usage tab** — attributed intent call counts per app
+- **Consent modal** — same consent gate as the CLI before install
+
+---
+
+## Message Format
 
 ```json
 {
   "message": {
-    "intent": "message",
-    "from": "peer-alice",
-    "to": "peer-bob",
+    "intent": "agent-comms",
+    "from": "302a300506032b65...",
+    "to": "1a2b3c4d5e6f7890...",
     "nonce": "550e8400-e29b-41d4-a716-446655440000",
-    "timestamp": "2026-03-19T10:30:00Z",
+    "timestamp": "2026-06-23T14:00:00Z",
     "payload": {
-      "text": "Hello, Bob!"
+      "topic": "project-updates",
+      "text": "What decisions were made on the auth system?"
     }
   },
   "signature": "a1b2c3d4..."
@@ -796,681 +796,74 @@ Update your `rendezvous.url` config to point to your instance.
 
 ### Default Intents
 
-- **message**: Simple text message
-- **task-request**: Request peer to perform a task
-- **status-update**: Status update from a peer
-- **agent-comms**: Agent-to-agent communication with topic routing (v0.2.0+)
-- **project**: Collaborative project management with contributions (v0.2.0+)
+| Intent | Description |
+|--------|-------------|
+| `message` | Simple text message |
+| `agent-comms` | Agent-to-agent communication with topic routing |
+| `project.contribute` | Send a signed project contribution |
+| `project.query` | Query peer's project contributions |
+| `project.status` | Get peer's project status |
+| `task-request` | Request peer to perform a task |
+| `status-update` | Status update from a peer |
 
-Custom intents can be registered with `ogp intent register` (v0.2.0+).
+Custom intents: `ogp intent register <name>`
 
-## Key Features
+---
 
-### Signed Project Contributions (v0.8.0+)
-
-Every project contribution is signed by its author. When you `ogp project contribute`,
-the CLI mints a sortable **ULID**, builds a canonical record
-(`id, projectId, authorId, entryType, summary, metadata, timestamp`), and signs it with
-your Ed25519 key. The same signed envelope is used for the local store **and** every
-peer the contribution is pushed to, so a contribution keeps one stable id across the
-whole federation.
-
-On receipt, the daemon verifies three things before storing, all at the authentication
-layer: the signature is valid, the signed `authorId` matches the federation-authenticated
-sender, and the signed `projectId` matches the target project. Unsigned live contributions
-are rejected (`400`); bad/forged/mismatched signatures are rejected (`401`). Pre-existing
-unsigned contributions are migrated once and tagged `verified: false, legacy: true` so old
-data is preserved but honestly marked. `authorId` **is** the Ed25519 public key, so no key
-distribution is needed — verification is against the key embedded in the signed bytes.
-
-### 1. Scope Negotiation (v0.2.0+)
-
-Three-layer scope model based on BGP-style per-peer policies:
-
-```
-Layer 1: Gateway Capabilities  → What I CAN support (advertised globally)
-Layer 2: Peer Negotiation      → What I WILL grant YOU (per-peer, during approval)
-Layer 3: Runtime Enforcement   → Is THIS request within YOUR granted scope (doorman)
-```
-
-**How It Works:**
-1. **Discovery**: Peers discover capabilities via `/.well-known/ogp`
-2. **Request**: Peer A requests federation (peer-id auto-resolves)
-3. **Grant**: Peer B approves with specific scope grants (intents, rate limits, topics)
-4. **Enforcement**: Doorman validates every incoming message against granted scopes
-
-**Example:**
-```bash
-# Approve with granular access control
-ogp federation approve stan \
-  --intents agent-comms \
-  --topics memory-management \
-  --rate 10/60
-
-# Stan can send: ✓
-ogp federation agent david memory-management "How do you persist context?"
-
-# Stan cannot send: ✗ 403 Topic not allowed
-ogp federation agent david personal-finances "What's your budget?"
-```
-
-### 2. Agent-to-Agent Communication (v0.2.0+)
-
-Rich agent collaboration with topic routing, priority levels, and response policies.
-
-**Topics**: Categorize messages (e.g., `memory-management`, `task-delegation`, `planning`)
-**Priority**: Low, normal, high
-**Policies**: Control responses (full, summary, escalate, deny)
-**Threading**: Multi-turn conversations with `conversationId`
-**Replies**: Async callbacks or polling
-
-**Example:**
-```bash
-# Send with priority and wait for reply
-ogp federation agent stan memory-management \
-  "How do you persist context?" \
-  --priority high \
-  --wait \
-  --timeout 60000
-```
-
-### 3. Identity Attribution (v0.5.0+)
-
-Separate human and agent identity with automatic snapshots for historical accuracy.
-
-**Features:**
-- **Human/Agent Separation**: Distinguish between human operator and agent names
-- **Identity Snapshots (v0.6.0+)**: Project contributions capture identity at contribution time
-- **Update Federation**: Send updated identity to existing peers
-- **Flexible Tags**: Categorize with custom tags (e.g., "work", "production", "client-trilogy")
-
-**Example:**
-```bash
-# Configure your identity
-ogp config set-identity \
-  --human-name "David Proctor" \
-  --agent-name "Junior" \
-  --organization "Trilogy"
-
-# Update existing federated peers
-ogp federation update-identity apollo
-
-# Contributions now show: "David Proctor (Junior)"
-ogp project contribute my-app progress "Completed auth system"
-ogp project query my-app
-# [2026-04-20 10:30:00] David Proctor (Junior)
-#   Entry type: progress
-#   Summary: Completed auth system
-```
-
-**Why This Matters:**
-
-Identity snapshots preserve accurate attribution even if someone later changes their identity settings. When "David (Junior)" contributes a decision in March, it stays attributed to "David (Junior)" even if they rename their agent to "Apollo" in April.
-
-### 4. Project Intent System (v0.2.0+)
-
-Projects are optional collaboration boundaries layered on top of federation. They let each person keep their own tools while their agents log high-level project context and query collaborators through OGP when needed.
-
-**Features:**
-- Create projects with contextual setup (repo, workspace, notes, collaborators)
-- Log high-level contributions by entry type (progress, decision, blocker, context)
-- Query local and peer contributions for project-aware coordination
-- Use project IDs as agent-comms topics for collaborator questions and summaries
-- **Identity snapshots (v0.6.0+)**: Contributions preserve author identity for accurate historical attribution
-- **Auto-registration (v0.2.9+)**: Project IDs auto-register as agent-comms topics for approved peers who are explicit project members
-
-**Example:**
-```bash
-# Create project (auto-registers as agent-comms topic for approved project members)
-ogp project create my-app "My App" --description "Expense tracker"
-
-# Log work by entry type (automatically captures your identity)
-ogp project contribute my-app progress "Completed authentication"
-ogp project contribute my-app decision "Using PostgreSQL"
-
-# Ask a collaborator or query peer project state
-ogp federation agent alice my-app "My user is about to work on auth. Anything already decided?"
-ogp project query-peer alice shared-app --limit 10
-```
-
-### 5. Custom Intent Registry (v0.2.0+)
-
-Register custom intent handlers for specialized workflows.
-
-**Example:**
-```bash
-# Register deployment intent
-ogp intent register deployment \
-  --session-key "agent:main:main" \
-  --description "Deployment notifications"
-
-# Grant to peer
-ogp federation approve alice --intents deployment --rate 50/3600
-```
-
-### 6. Auto Peer-Alias Resolution (v0.2.3+)
-
-Peer aliases automatically resolve from `/.well-known/ogp` - no need to specify manually.
-
-**Example:**
-```bash
-# Specify a friendly alias when connecting (recommended)
-ogp federation request https://peer.example.com --alias alice
-
-# New way (auto-resolves from gateway display name)
-ogp federation request https://peer.example.com
-```
-
-### 6. OpenClaw Human Delivery (v0.2.3+, refined in v0.4.2+)
-
-For OpenClaw-backed agents, OGP now prefers `POST /hooks/agent` for inbound federated work that should be interpreted and surfaced by the local agent. This lets OpenClaw run a real agent turn, apply the configured human-delivery policy, and deliver through the correct channel surface (Telegram, iMessage, etc.).
-
-When OGP needs direct session injection, it uses Gateway RPC with the correct secure WebSocket transport (`wss://`) when the OpenClaw gateway is TLS-enabled.
-
-### 6.1 Delegated-Authority Precedence (v0.4.2)
-
-Policy evaluation now follows a fixed order so more specific rules cannot be silently overwritten. The runtime in `src/daemon/notify.ts` applies:
-1. Legacy `inboundFederationPolicy` mode as a safety fallback
-2. Global default rule from the delegated-authority config
-3. Peer-specific default rule (per-peer overrides)
-4. Global message-class rule (e.g., `agent-work`, `human-relay`, `approval-request`, `status-update`)
-5. Peer message-class override for that same class
-6. Global topic-level rule
-7. Peer topic-level override
-
-Approval requests receive immediate `approval-required` handling and `human-relay` obligations are treated according to their relay mode (deliver, summarize, or approval) before human delivery is asserted. This ordering guarantees peer defaults cannot erase more specific class/topic safeguards, so `human-relay` stays strict even when a trusted peer asks for more autonomy and topic overrides continue to behave predictably.
-
-OGP now tries to pin `/hooks/agent` to the actual human session key when the local OpenClaw `hooks.allowRequestSessionKey` setting allows it (see `~/.openclaw/openclaw.json`). If the value is `false` or the requested key does not match the allowed prefixes, the hook still runs but falls back to the default hook session, so downstream heuristics must still parse peer identity from the injected payload. Native sender identity parity in Telegram therefore remains a known limitation for `v0.4.2`; the runtime will log a warning whenever it cannot request a session override so that the human knows the limitation is intentional.
-
-### 7. Enhanced Daemon Status (v0.2.3+)
-
-`ogp status` detects externally-started daemons via port probe fallback.
-
-### 8. Default-Deny Agent-Comms (v0.2.9+)
-
-Set `off` as the default response level to implement a default-deny security posture. When topics hit `off`, the daemon sends a cryptographically signed rejection response instead of silently dropping:
-
-```bash
-# Enable default-deny
-ogp agent-comms default off
-
-# Explicitly allow specific topics
-ogp agent-comms configure --global --topics "general,project-updates" --level summary
-```
-
-### 9. Project Topic Auto-Registration (v0.2.9+)
-
-When you create a project, its ID is automatically registered as an agent-comms topic at `summary` level for approved peers who are explicit project members. When you approve a new peer, existing local projects are auto-registered only if that peer is already in the project's member list.
-
-```bash
-# Creates project AND registers as topic for approved project members
-ogp project create my-app "My Application"
-
-# Approving a peer also registers existing projects as topics
-ogp federation approve alice --intents agent-comms
-```
-
-### Backward Compatibility
-
-- v0.1 peers work without scope negotiation (default rate limits apply)
-- v0.2+ gateways automatically detect protocol version
-- **petname → alias migration**: The deprecated `--petname` flag automatically maps to `--alias` with a deprecation warning. Existing peer data with `petname` fields is auto-migrated to `alias` on load.
-- No breaking changes - existing federations continue working
-
-## Peer Aliases vs Public Key IDs
-
-OGP uses two different identifiers for peers:
+## Peer Identity: Aliases vs Public Key IDs
 
 | Identifier | Purpose | Example |
 |------------|---------|---------|
-| **Public Key ID** | Cryptographic identity used in messages | `abc123...def456` (Ed25519 public key) |
-| **Alias** | User-friendly name for CLI convenience | `alice`, `big-papa`, `staging-server` |
+| **Public Key ID** | Cryptographic identity (stable, used in messages) | `302a300506032b65...` |
+| **Alias** | User-friendly name for CLI convenience | `cosmo`, `alice` |
 
-### How Aliases Work
+OGP auto-resolves aliases from the peer's `displayName` in `/.well-known/ogp`. Change an alias with `ogp federation alias <peer-id> <new-alias>`.
 
-- When you request federation, you can optionally specify an alias: `ogp federation request <url> --alias alice`
-- If omitted, OGP auto-resolves an alias from the peer's `displayName` in `/.well-known/ogp`
-- The alias is stored locally in `~/.ogp/peers.json` alongside the peer's public key
-- You reference peers by alias in all CLI commands (`ogp federation send alice message ...`)
+The `--petname` flag is deprecated — use `--alias`. Existing `petname` fields in `peers.json` are auto-migrated on daemon startup.
 
-### Setting or Changing an Alias
-
-```bash
-# Set alias when requesting federation
-ogp federation request https://peer.example.com --alias big-papa
-
-# Set alias when connecting by public key (rendezvous)
-ogp federation connect <pubkey> --alias big-papa
-
-# Set alias when accepting an invite
-ogp federation accept <token> --alias big-papa
-
-# Change alias for existing peer
-ogp federation alias <peer-id> <new-alias>
-```
-
-### Legacy petname Support
-
-The `--petname` flag is deprecated but still works for backward compatibility:
-
-```bash
-# This will work but show a deprecation warning
-ogp federation request https://peer.example.com --petname big-papa
-# ⚠️  --petname is deprecated. Use --alias instead.
-```
-
-Data migration happens automatically:
-- On daemon startup, any peer with a `petname` field gets migrated to `alias`
-- The deprecated `petname` field is removed from storage after migration
-
-## Agent-Comms Response Policies
-
-Control how your agent responds to incoming agent-comms messages with per-peer policies.
-
-### Response Levels
-
-| Level | Behavior |
-|-------|----------|
-| `full` | Respond openly, share details |
-| `summary` | High-level responses only |
-| `escalate` | Ask human before responding |
-| `deny` | Politely decline to discuss |
-| `off` | Default-deny: send signed rejection, do not process |
-
-The `off` level enables a default-deny security posture. When a topic hits `off` (explicitly or via default), the daemon sends a signed rejection response with `{ status: "rejected", reason: "topic-not-permitted", topic: "<topic>" }` rather than silently dropping the message.
-
-### Policy Commands
-
-```bash
-# View all policies
-ogp agent-comms policies
-
-# Re-run the delegated-authority / human-delivery interview
-ogp agent-comms interview
-
-# View policies for a specific peer
-ogp agent-comms policies stan
-
-# Configure global defaults
-ogp agent-comms configure --global --topics "general,testing" --level summary
-
-# Configure specific peer(s)
-ogp agent-comms configure stan --topics "memory-management" --level full --notes "Trusted"
-ogp agent-comms configure stan,leo,alice --topics "testing" --level full  # Multi-select
-
-# Add/remove topics
-ogp agent-comms add-topic stan calendar --level escalate
-ogp agent-comms remove-topic stan personal
-
-# Reset peer to global defaults
-ogp agent-comms reset stan
-
-# View activity log
-ogp agent-comms activity
-ogp agent-comms activity --last 20
-ogp agent-comms activity stan  # Filter by peer
-
-# Settings
-ogp agent-comms default summary    # Set default level
-ogp agent-comms logging on         # Enable/disable logging
-```
-
-### Policy Inheritance
-
-1. **Peer-specific** policies override global policies
-2. **Global** policies apply to all peers without specific config
-3. **Default level** applies to unknown topics
-
-When an agent-comms message arrives, your agent receives the policy level in metadata:
-```
-[OGP Agent-Comms] Stanislav → memory-management [FULL]: How do you persist context?
-```
-
-Your agent can then respond according to the policy level.
-
-## Configuration
-
-Configuration is stored in `~/.ogp/config.json`:
-
-```json
-{
-  "daemonPort": 18790,
-  "openclawUrl": "http://localhost:18789",
-  "openclawToken": "your-openclaw-api-token",
-  "gatewayUrl": "https://your-public-url.com",
-  "displayName": "Your Name",
-  "email": "you@example.com",
-  "stateDir": "~/.ogp",
-  "agentId": "main",
-  "humanDeliveryTarget": "telegram:123456789",
-  "inboundFederationPolicy": {
-    "mode": "summarize"
-  },
-  "notifyTarget": "telegram:123456789",
-  "notifyTargets": {
-    "main": "telegram:123456789",
-    "scribe": "telegram:987654321"
-  },
-  "rendezvous": {
-    "enabled": true,
-    "url": "https://rendezvous.elelem.expert",
-    "publicUrl": "https://your-gateway.example.com"
-  }
-}
-```
-
-### Agent ID (v0.2.28+)
-
-The `agentId` field identifies which OpenClaw agent owns this OGP gateway. This is important for:
-
-- **Federation ownership**: Messages sent from this gateway are attributed to the specified agent
-- **Routing context**: Incoming federation requests include the agent ID for proper routing
-- **Multi-agent setups**: When running multiple agents (main, scribe, optimus, etc.), each can have its own OGP configuration
-
-When you run `ogp setup`, the wizard auto-discovers agents from your OpenClaw configuration and presents a list to choose from:
-
-```
-Available agents:
-  1. 🦝 Junior (main)
-  2. ✍️ Scribe (scribe)
-  3. ⚡ Optimus (optimus)
-
-Which agent owns this gateway? (number or ID) [1]:
-```
-
-You can also specify a custom agent ID if needed.
-```
-
-### Human Delivery Preferences (v0.4.2+)
-
-OGP has two separate questions to answer for inbound federation traffic:
-
-1. **Where should human-facing followups go?**
-2. **How should the agent behave when a peer asks it to do something?**
-
-Those should not be inferred from the currently active conversation.
-
-**Configuration fields:**
-- **`humanDeliveryTarget`**: Explicit human-facing destination for OGP-triggered followups. Examples: `telegram:123456789` or a raw session key like `agent:main:telegram:direct:123456789`.
-- **`inboundFederationPolicy.mode`**: Default behavior for how the local agent should handle inbound federated requests.
-
-For OpenClaw specifically, this configuration feeds the `/hooks/agent` delivery path. In other words:
-- `humanDeliveryTarget` tells OGP where human-facing followups should go
-- `inboundFederationPolicy.mode` tells the local agent how to treat federated requests once they arrive
-- OGP should not infer either of those from "whatever session is active right now"
-
-**Supported behavior modes:**
-- **`forward`**: Tell me everything. Forward inbound federated items to my configured channel.
-- **`summarize`**: Summarize and surface only important, actionable, or uncertain items.
-- **`autonomous`**: Act autonomously when possible, but surface blockers, approvals, or explicit relay requests.
-- **`approval-required`**: Do not act on or reply to federated requests until I explicitly approve.
-
-**Example configuration:**
-
-```json
-{
-  "agentId": "main",
-  "humanDeliveryTarget": "telegram:123456789",
-  "inboundFederationPolicy": {
-    "mode": "autonomous"
-  }
-}
-```
-
-When you run `ogp setup`, the wizard asks for both:
-- the primary human delivery target for OGP followups
-- the default inbound federation handling mode
-
-If the user wants to revisit just this part later, use:
-
-```bash
-ogp --for openclaw agent-comms interview
-ogp --for hermes agent-comms interview
-```
-
-That command re-runs the delegated-authority / human-delivery interview for the active framework without repeating the rest of first-time setup.
-
-### Notification Routing (v0.2.28+)
-
-The `notifyTargets` field enables per-agent notification routing. When OGP sends notifications to your OpenClaw instance, it routes to specific agents based on the message context.
-
-**Configuration fields:**
-- **`notifyTarget`** (legacy, string): Single notification target for all messages. Maintained for backward compatibility.
-- **`notifyTargets`** (object): Map of agent names to notification targets. Example: `{"main": "telegram:...", "scribe": "telegram:..."}`
-- **`humanDeliveryTarget`** (preferred for human-facing followups): Explicit destination for OGP-triggered notifications and relay obligations.
-
-**Example configuration with multiple agents:**
-
-```json
-{
-  "daemonPort": 18790,
-  "openclawUrl": "http://localhost:18789",
-  "openclawToken": "your-token",
-  "gatewayUrl": "https://your-gateway.example.com",
-  "displayName": "Alice",
-  "email": "alice@example.com",
-  "stateDir": "~/.ogp",
-  "notifyTarget": "telegram:123456789",
-  "humanDeliveryTarget": "telegram:123456789",
-  "inboundFederationPolicy": {
-    "mode": "summarize"
-  },
-  "notifyTargets": {
-    "main": "telegram:123456789",
-    "scribe": "telegram:987654321",
-    "optimus": "telegram:555666777"
-  },
-  "agentId": "main"
-}
-```
-
-**Resolution priority:**
-
-When routing notifications, OGP resolves the target in this order:
-
-1. **`humanDeliveryTarget`** — If set, use it as the explicit human-facing OGP destination
-2. **`notifyTargets[agent]`** — If the agent is specified and exists in `notifyTargets`, use that target
-3. **`notifyTarget`** — Fall back to the legacy single target for backward compatibility
-4. **Default** — If none are set, OGP falls back to the agent's default session
-
-This allows you to:
-- Route federation messages to different agents based on context
-- Explicitly separate "the agent that owns this gateway" from "the human-facing channel for OGP followups"
-- Maintain backward compatibility with existing single-agent setups
-- Gradually migrate to multi-agent routing without breaking existing configurations
-
-### OpenClaw Transport Notes
-
-If you are debugging OpenClaw integration directly:
-
-- **Hooks path**: `https://localhost:18789/hooks/agent` is the preferred local delivery path for human-facing federated work.
-- **Gateway RPC path**: when using `openclaw gateway call` against a TLS-enabled local gateway, use `wss://localhost:18789`, not `ws://localhost:18789`.
-- A plain session injection succeeding does not necessarily mean the agent has interpreted the task the way you want; `/hooks/agent` is the path designed for that agentic behavior.
-
-### Environment Variables
-
-- `OGP_PUBLIC_URL` (v0.2.17+): Override automatic IP detection for rendezvous registration. Use this for cloud/ECS gateways behind load balancers where the detected IP differs from the public endpoint.
-
-  ```bash
-  export OGP_PUBLIC_URL=https://your-gateway.example.com
-  ogp start
-  ```
-
-  Takes precedence over `rendezvous.publicUrl` in config.json.
-
-### State Files
-
-- `~/.ogp/keypair.json` - Public key cache plus key material metadata. On macOS the private key lives in an instance-specific Keychain entry; on non-macOS OGP encrypts the private key at rest when `OGP_KEYPAIR_SECRET`, `openclawToken`, or `hermesWebhookSecret` is available.
-- `~/.ogp/peers.json` - Federated peer list with scope grants
-- `~/.ogp/intents.json` - Intent registry (built-in + custom)
-- `~/.ogp/projects.json` - Project contexts and contributions
-- `~/.ogp/agent-comms-config.json` - Response policies and activity log
-
-On macOS, deleting `keypair.json` by itself does **not** rotate the gateway identity if the matching private key is still present in Keychain. Use `ogp setup --reset-keypair` when you intentionally want a new identity.
-
-On non-macOS, OGP prefers this secret source order for encrypting the private key at rest:
-- `OGP_KEYPAIR_SECRET`
-- `hermesWebhookSecret`
-- `openclawToken`
-
-If no encryption secret is available, OGP falls back to legacy plaintext key storage and logs a warning. Set one of the secrets above, then run `ogp setup --reset-keypair` to harden the instance.
-
-## OGP Apps
-
-OGP Apps are declarative bundles (`ogp-app.json`) that describe a piece of software in terms of the OGP capabilities it uses — what intents it fires, what skills it installs into your AI agent, and where its output lives. Apps are discovered through your federation: peers advertise the apps they publish, you browse and install them with a consent gate.
-
-### App manifest (`ogp-app.json`)
-
-```json
-{
-  "schemaVersion": 1,
-  "id": "my-app",
-  "name": "My App",
-  "version": "1.0.0",
-  "description": "What this app does.",
-  "uses_intents": ["project.contribute", "message"],
-  "uses_projects": ["my-project"],
-  "installs_skills": [
-    { "name": "my-skill", "install": "scripts/install-my-skill.sh" }
-  ],
-  "published_output": "https://my-app.example.com",
-  "publisher": {
-    "name": "Your Name / Org",
-    "key": "<your-ogp-ed25519-public-key-hex>"
-  }
-}
-```
-
-Get your public key with `ogp whoami --json | jq .publicKey`.
-
-### Publishing an app
-
-```bash
-# 1. Write ogp-app.json in your app's repo (see manifest shape above)
-
-# 2. Install it locally — validates the manifest, runs install scripts, registers it
-ogp app install file:/path/to/my-app-dir
-
-# 3. Advertise it so approved peers can discover it
-ogp app advertise my-app
-
-# 4. To stop advertising
-ogp app unadvertise my-app
-```
-
-Once advertised, the app appears in `/.well-known/ogp` and your rendezvous card. Any approved peer can browse and install it.
-
-### Subscribing to an app (as a user)
-
-```bash
-# Browse apps advertised by all approved peers
-ogp app browse
-
-# Browse a specific peer's apps
-ogp app browse <peerId>
-
-# Install from a peer — triggers consent gate (shows scripts + intents before running)
-ogp app install peer:<peerId>/<appId>
-
-# Install from a local directory (same flow, no peer lookup)
-ogp app install file:/path/to/app-dir
-
-# Skip the consent prompt (automation / --yes flows)
-ogp app install peer:<peerId>/<appId> --yes
-```
-
-The consent gate shows exactly which install scripts will run and which intents the app will call — nothing executes until you confirm.
-
-### Managing installed apps
-
-```bash
-ogp app list                    # List installed apps
-ogp app show <appId>            # Manifest, skills, project join status, output link
-ogp app usage [appId]           # Intent call attribution (how much is this app doing?)
-ogp app remove <appId>          # Remove an app
-```
-
-### Usage attribution
-
-Once an app is installed, the OGP daemon starts attributing observed intent calls to it. The daemon logs every intent call to `activity.jsonl`; `ogp app usage` maps intent names back to installed apps via `uses_intents` and disambiguates by `projectId` where possible. No backfill — attribution starts from install time.
-
-### Companion app (GUI)
-
-The [OGP Companion app](./ogp-companion/) exposes the full Apps workflow in a desktop UI:
-
-- **Gallery tab** — browse apps advertised by your peers, with search and peer filter
-- **Installed tab** — manage what's installed; sort by name, install date, or usage
-- **Usage tab** — attributed intent call counts per app, with shared-intent warnings
-- **Detail slide-over** — manifest, publisher trust, project join status, usage bars
-- **Consent modal** — same consent gate as the CLI, surfaced as a modal before install
-- **Add from ref** — install any app by pasting a `peer:` or `file:` ref directly in the UI
+---
 
 ## Skills (Claude Code)
 
-OGP includes skills for Claude Code agents. Install them with:
-
-```bash
-ogp-install-skills
-```
-
-After upgrading, verify the installed skill headers:
-
-```bash
-rg -n '^version:' ~/.openclaw/skills/ogp*/SKILL.md ~/.claude/skills/ogp*/SKILL.md 2>/dev/null
-```
-
-Expected changed skill versions for the `0.4.2` release line:
-- `ogp` `2.6.0`
-- `ogp-agent-comms` `0.6.0`
-- `ogp-project` `2.2.0`
-
-### Available Skills
-
 | Skill | Purpose |
 |-------|---------|
-| **ogp** | Core protocol: federation setup, peer management, sending messages |
-| **ogp-expose** | Tunnel setup: cloudflared/ngrok configuration |
-| **ogp-agent-comms** | Interactive wizard: configure response policies plus delegated-authority / human-delivery interview |
-| **ogp-project** | Agent-aware project context: interviews, logging, and project-aware peer coordination |
+| `ogp` | Core protocol: federation setup, peer management, messaging |
+| `ogp-expose` | Tunnel setup: cloudflared/ngrok configuration |
+| `ogp-agent-comms` | Delegated-authority interview + response policy wizard |
+| `ogp-project` | Project context management and peer coordination |
 
-Skills auto-install from the `skills/` directory. The `ogp-agent-comms` skill now uses `ogp agent-comms interview` as the canonical conversational path for delegated-authority / human-delivery configuration, plus the existing per-peer policy commands. The `ogp-project` skill enables conversational project management with context interviews, high-level project logging, and project-aware peer coordination.
+```bash
+ogp-install-skills   # install or upgrade all skills
+```
 
-## Documentation
-
-### Getting Started
-- [Getting Started Guide](./docs/GETTING-STARTED.md) - Comprehensive setup guide for single and multi-framework setups
-- [Quick Start Guide](./docs/quickstart.md) - Fast-track setup for single framework
-- [CLI Reference](./docs/CLI-REFERENCE.md) - Complete command reference with examples
-- [Migration Guide](./docs/MIGRATION.md) - Upgrading from single to multi-framework setup
-
-### Core Features
-- [Federation Flow](./docs/federation-flow.md) - How federation works internally
-- [Scope Negotiation](./docs/scopes.md) - Per-peer scope configuration (v0.2.0)
-- [Agent Communications](./docs/agent-comms.md) - Agent-to-agent messaging (v0.2.0)
-- [Rendezvous & Invite Flow](./docs/rendezvous.md) - Optional discovery and invite service (v0.2.14+)
-- [OGP Apps Spec](./docs/superpowers/specs/2026-06-13-ogp-apps-layer-spec.md) - Apps layer design and manifest schema
-- [Apps Companion Contract](./docs/ogp-apps-companion-contract.md) - GUI/CLI contract for the companion app
-
-### Advanced
-- [Multi-Framework Design](./docs/MULTI-FRAMEWORK-DESIGN.md) - Design principles for multi-framework support
-- [Multi-Framework Implementation](./docs/MULTI-FRAMEWORK-IMPL.md) - Implementation details
-- [Protocol Specification](https://github.com/dp-pcs/openclaw-federation) - Full OGP protocol spec
+---
 
 ## Security
 
-- **Ed25519 signatures**: All messages are cryptographically signed
-- **Peer approval required**: Only approved peers can send messages
-- **Signature verification**: Invalid signatures are rejected
-- **HTTPS tunnels**: Encrypted transport via cloudflared/ngrok
-- **Nonce tracking**: Prevents replay attacks
+**Cryptographic guarantees:**
+- Ed25519 signatures on every message — no unsigned messages accepted
+- Per-message nonces + 5-minute timestamp window prevent replay attacks
+- Public key is the identity — no separate key distribution or PKI
+- `authorId` in signed contributions equals the Ed25519 public key — forgery is detectable
+
+**Trust model:**
+- Human approval is mandatory for federation — no automated path
+- Three-layer Doorman enforcement separates capability from grant from runtime
+- Unilateral revocation with tombstoning prevents silent re-trust
+- Default-deny mode available for high-security postures
+
+**Key storage:**
+- macOS: private key in instance-specific Keychain entry (`keypair.json` holds only the public key cache)
+- Non-macOS: private key encrypted at rest using `OGP_KEYPAIR_SECRET` (or framework token as fallback)
+- Use `ogp setup --reset-keypair` for intentional key rotation
 
 **Best practices:**
-- Treat `~/.ogp/keypair.json` as identity material even when it contains only the public key cache on macOS.
-- On macOS, remember the private key source of truth is the instance-specific Keychain entry, not `keypair.json`; use `ogp setup --reset-keypair` for intentional rotation.
-- On non-macOS, provide `OGP_KEYPAIR_SECRET` or a platform secret so OGP can encrypt the private key at rest; `chmod 600` remains enforced but is not sufficient by itself.
 - Verify peer identity out-of-band before approving federation requests
 - Always use HTTPS tunnels (never expose raw HTTP)
-- Monitor OpenClaw logs for suspicious peer activity
+- Set `inboundFederationPolicy.mode` explicitly — don't rely on defaults for production
+- Use `ogp agent-comms default off` for maximum control over what peers can initiate
+
+---
 
 ## Development
 
@@ -1484,73 +877,124 @@ npm run build
 npm link
 ```
 
+### Run Tests
+
+```bash
+npm test
+```
+
+### Run Benchmarks
+
+```bash
+node bench/ogp-bench.mjs
+```
+
 ### Project Structure
 
 ```
 src/
-  cli.ts              # Main CLI entrypoint
+  cli.ts                   # Main CLI entrypoint
   daemon/
-    server.ts         # HTTP server and endpoints
-    keypair.ts        # Ed25519 keypair management
-    peers.ts          # Peer storage and management
-    scopes.ts         # Scope types and utilities (v0.2.0+)
-    doorman.ts        # Scope enforcement + rate limiting (v0.2.0+)
-    reply-handler.ts  # Async reply mechanism (v0.2.0+)
-    agent-comms.ts    # Agent-comms policy resolution (v0.2.0+)
-    projects.ts       # Project storage and management (v0.2.0+)
-    intent-registry.ts # Intent definitions and custom registry
-    message-handler.ts # Message verification and routing
-    notify.ts         # OpenClaw/Hermes delivery backends
+    server.ts              # HTTP server and endpoints
+    keypair.ts             # Ed25519 keypair management
+    peers.ts               # Peer storage and management
+    scopes.ts              # Scope types and utilities
+    doorman.ts             # Three-layer scope enforcement + rate limiting
+    agent-comms.ts         # Agent-comms policy resolution
+    projects.ts            # Project storage and contributions
+    contribution-signing.ts# Per-contribution Ed25519 signing
+    message-handler.ts     # Message verification and routing
+    notify.ts              # OpenClaw/Hermes delivery backends
+    relay-client.ts        # Relay transport client
+    outbox.ts              # Durable delivery outbox
   cli/
-    setup.ts          # Setup wizard
-    federation.ts     # Federation commands (scopes, agent-comms)
-    project.ts        # Project management commands (v0.2.0+)
-    expose.ts         # Tunnel management
-    install.ts        # LaunchAgent installation
+    setup.ts               # Setup wizard
+    federation.ts          # Federation commands
+    project.ts             # Project management commands
+    expose.ts              # Tunnel management
+    install.ts             # LaunchAgent installation
   shared/
-    signing.ts        # Ed25519 sign/verify utilities
-    config.ts         # Configuration management
+    signing.ts             # Ed25519 sign/verify utilities
+    config.ts              # Configuration management
+bench/
+  ogp-bench.mjs            # Performance benchmark suite
 skills/
-  ogp/              # Core OGP skill
-  ogp-expose/       # Tunnel configuration skill
-  ogp-agent-comms/  # Response policy wizard
-  ogp-project/      # Project context management skill
+  ogp/                     # Core OGP skill
+  ogp-expose/              # Tunnel configuration skill
+  ogp-agent-comms/         # Response policy wizard
+  ogp-project/             # Project context management skill
 ```
+
+---
+
+## Troubleshooting
+
+| Error | Likely Cause | Fix |
+|-------|-------------|-----|
+| `Peer not found` | Not yet federated | `ogp federation request <url>` |
+| `Peer not approved` | Request pending | `ogp federation list --status pending` |
+| `400 Bad Request` on push | Peer hasn't granted you scopes | Ask peer to run `ogp federation grant <your-peer-id>` |
+| `Invalid signature` | Version mismatch | Peer needs `npm install -g @dp-pcs/ogp@latest` |
+| `Send failed` on agent-comms | Topic blocked on receiver's side | Receiver runs `ogp agent-comms policies <peer-id>` |
+| `ogp: command not found` | Not installed | `npm install -g @dp-pcs/ogp` |
+| Daemon not running | Process died or wrong framework | `ogp config show`, then `ogp --for <framework> start --background` |
+
+```bash
+ogp config show             # verify active framework
+ogp --for openclaw status   # check daemon status
+tail -f ~/.ogp/daemon.log   # view daemon logs
+
+# Restart
+ogp --for openclaw stop
+ogp --for openclaw start --background
+```
+
+---
 
 ## Known Issues
 
-### OpenClaw Delivery Model
+### OpenClaw Delivery
 
-**Current implementation:**
-- **Primary:** `POST /hooks/agent` for inbound federated requests that should be processed by the local OpenClaw agent
-- **Fallback / sync:** `openclaw gateway call ... sessions.send` over `wss://` when direct session injection is needed
+`POST /hooks/agent` is the primary delivery path for inbound federated requests. `openclaw gateway call ... sessions.send` over `wss://` is used for compact sync notes. OpenClaw may render direct session injections with sender metadata like `cli` — OGP includes peer identity in message content where needed. Native sender identity parity in Telegram is a known v0.4.2 limitation; the runtime logs a warning when it cannot request a session override.
 
-Why this split exists:
-- `/hooks/agent` is the right primitive for "an external federated task arrived; let the agent interpret it, act on it, and deliver the result through the configured human channel."
-- `sessions.send` is still useful for direct session injection and compact synchronization notes, but it is not the primary delivery mechanism for human-facing federated work.
+---
 
-Important nuance:
-- OpenClaw may still render direct session injections with sender metadata like `cli`, so OGP continues to include peer identity in message content where needed.
-- Hook-run awareness and human-DM continuity are related but not identical. OGP can mirror a compact sync note into the DM session, but the important success criterion is correct delivery and behavior, not whether raw internal transport artifacts are visible in the user-facing transcript.
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Protocol Comparison](./docs/protocol-comparison.md) | OGP vs A2A, ANP, MCP, ACP, ActivityPub |
+| [Architecture](./docs/ARCHITECTURE.md) | Design principles, BGP analogy, trust model, scope model |
+| [Protocol Spec](./docs/PROTOCOL.md) | Wire format, endpoints, signing, federation lifecycle |
+| [Getting Started](./docs/GETTING-STARTED.md) | Comprehensive setup guide |
+| [CLI Reference](./docs/CLI-REFERENCE.md) | Complete command reference |
+| [Migration Guide](./docs/MIGRATION.md) | Upgrading from single to multi-framework |
+| [Federation Flow](./docs/federation-flow.md) | Handshake walkthrough |
+| [Scope Negotiation](./docs/scopes.md) | Per-peer scope configuration |
+| [Agent Communications](./docs/agent-comms.md) | Agent-to-agent messaging |
+| [Rendezvous](./docs/rendezvous.md) | Optional discovery and invite service |
+| [Multi-Framework Design](./docs/MULTI-FRAMEWORK-DESIGN.md) | Architecture for multiple frameworks |
+| [OGP Apps Spec](./docs/superpowers/specs/2026-06-13-ogp-apps-layer-spec.md) | Apps layer design |
+
+---
+
+## macOS Menu Bar App
+
+A lightweight native app for monitoring OGP status at a glance — color-coded status indicator, quick daemon/tunnel/peer view, and one-click start/stop. See [macos-menubar-app/QUICKSTART.md](./macos-menubar-app/QUICKSTART.md).
+
+---
 
 ## License
 
 MIT
 
-## macOS Menu Bar App
-
-A lightweight native macOS app for monitoring OGP status at a glance:
-
-- **Status Indicator**: Color-coded dot in menu bar (🟢/🟡/🔴)
-- **Quick View**: Daemon, tunnel, and peer status
-- **Quick Actions**: Start/stop services with one click
-- **Peer List**: See federated peers, intents, and last activity
-
-See [macos-menubar-app/QUICKSTART.md](./macos-menubar-app/QUICKSTART.md) for setup instructions.
+---
 
 ## Links
 
-- **GitHub Repository**: https://github.com/dp-pcs/ogp
-- **Issues**: https://github.com/dp-pcs/ogp/issues
-- **OGP Protocol Spec**: https://github.com/dp-pcs/openclaw-federation
-- **OpenClaw**: https://openclaw.ai
+- **npm** — https://www.npmjs.com/package/@dp-pcs/ogp
+- **GitHub** — https://github.com/dp-pcs/ogp
+- **Issues** — https://github.com/dp-pcs/ogp/issues
+- **Substack** — https://trilogyai.substack.com
+- **Website** — https://ogp.elelem.expert
+- **OpenClaw** — https://openclaw.ai
