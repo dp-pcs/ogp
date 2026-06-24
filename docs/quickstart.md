@@ -26,7 +26,7 @@ Then verify the installed skill versions:
 rg -n '^version:' ~/.openclaw/skills/ogp*/SKILL.md ~/.claude/skills/ogp*/SKILL.md 2>/dev/null
 ```
 
-For the current `0.4.2` release line, expect `ogp` `2.6.0`, `ogp-agent-comms` `0.6.0`, and `ogp-project` `2.2.0`.
+For the current `0.11.x` release line, expect `ogp` `0.6.0`, `ogp-agent-comms` `0.6.0`, `ogp-expose` `0.7.0`, and `ogp-project` `0.6.0`.
 
 ## Step 2: Configure
 

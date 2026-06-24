@@ -63,6 +63,17 @@ patent-disclosures/
 SOUL.md
 scripts/synapse.sh
 
+# LaTeX build artifacts
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.out
+paper/.obsidian/
+paper/tmp*.tmp
+paper/REVIEW-*.md
+
 # Large binary assets — host via releases, not git.
 ogp-assets.zip
 OGP_Signal Path.png

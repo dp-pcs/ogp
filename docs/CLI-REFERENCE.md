@@ -8,11 +8,14 @@ Complete command-line reference for OGP (Open Gateway Protocol).
 - [Environment Variables](#environment-variables)
 - [Setup and Configuration](#setup-and-configuration)
 - [Daemon Management](#daemon-management)
+- [Identity](#identity)
 - [Federation Commands](#federation-commands)
 - [Agent Communications](#agent-communications)
 - [Project Management](#project-management)
+- [App Management](#app-management)
 - [Intent Management](#intent-management)
 - [Tunnel Management](#tunnel-management)
+- [Keychain Management](#keychain-management)
 - [System Integration](#system-integration)
 - [Completion](#completion)
 - [Multi-Framework Operations](#multi-framework-operations)
@@ -112,27 +115,33 @@ resolve the same paths.
 
 ### ogp setup
 
-Interactive setup wizard. Detects installed frameworks and guides through configuration.
+Interactive setup wizard. Detects installed frameworks and guides through configuration, keypair generation, and human-delivery preferences.
 
 **Syntax:**
 ```bash
-ogp setup [--force]
+ogp setup [options]
 ```
 
 **Options:**
 - `--force` - Force re-setup even if already configured
+- `--reset-keypair` - Generate a new Ed25519 keypair (new gateway identity — existing peers must re-federate)
+- `--non-interactive` - Skip all prompts; requires `--answers`
+- `--answers <path>` - JSON file with pre-filled answers for non-interactive setup
 
-**Example:**
+**Examples:**
 ```bash
-ogp setup
+ogp setup                          # interactive first-time setup
+ogp setup --force                  # re-run setup
+ogp setup --reset-keypair          # rotate keypair (peers must re-federate)
+ogp setup --non-interactive --answers /etc/ogp-setup.json  # automated provisioning
 ```
 
-**Prompts:**
+**Interactive prompts:**
 1. Framework selection (auto-detected)
 2. Agent selection (auto-discovered from framework config)
 3. Daemon port (default: 18790 for OpenClaw, 18793 for Hermes)
 4. Framework URL and API credentials
-5. Gateway URL (your public URL)
+5. Gateway URL (your public HTTPS URL)
 6. Rendezvous configuration (optional)
 7. Display name and email
 8. Delegated-authority / human-delivery interview
@@ -443,6 +452,30 @@ OGP Daemon Status:
   Gateway URL: https://ogp.example.com
 ```
 
+## Identity
+
+### ogp whoami
+
+Show current gateway identity and configuration.
+
+**Syntax:**
+```bash
+ogp whoami [--json] [--for <framework>]
+```
+
+**Options:**
+- `--json` — machine-readable JSON (includes `publicKey` field)
+- `--for <framework>` — Framework to use
+
+**Examples:**
+```bash
+ogp whoami
+ogp whoami --json
+ogp whoami --json | grep publicKey    # extract public key for ogp-app.json publisher field
+```
+
+---
+
 ## Federation Commands
 
 ### ogp federation list
@@ -451,11 +484,13 @@ List all peers.
 
 **Syntax:**
 ```bash
-ogp federation list [--status <status>] [--for <framework>]
+ogp federation list [--status <status>] [--tag <tag>] [--json] [--for <framework>]
 ```
 
 **Options:**
 - `--status <status>` - Filter by status: `pending`, `approved`, `rejected`, `removed`
+- `--tag <tag>` - Filter by local tag
+- `--json` - Machine-readable JSON output
 - `--for <framework>` - Framework to query (default: current/default)
 
 **Examples:**
@@ -466,11 +501,26 @@ ogp federation list
 # List pending requests
 ogp federation list --status pending
 
-# List approved peers
-ogp federation list --status approved
+# List approved peers tagged "work"
+ogp federation list --status approved --tag work
 
 # List peers across all frameworks
 ogp --for all federation list
+```
+
+### ogp federation status
+
+Show federation health and alias → public key mappings.
+
+**Syntax:**
+```bash
+ogp federation status [--json] [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp federation status
+ogp --for all federation status
 ```
 
 ### ogp federation request
@@ -664,39 +714,95 @@ ogp federation agent <peer-id> <topic> <message> [options] [--for <framework>]
 
 **Options:**
 - `--priority <level>` - Priority: `low`, `normal`, `high` (default: `normal`)
-- `--wait` - Wait for reply
-- `--timeout <ms>` - Reply timeout in milliseconds (default: 30000)
+- `--wait` - Wait for reply (blocks until reply arrives or timeout)
+- `--detach` - Send and return a nonce immediately; check for reply later with `reply-status`
+- `--timeout <ms>` - Reply timeout in milliseconds (default: 30000); used with `--wait`
 - `--conversation <id>` - Conversation ID for threading
 - `--to-agent <persona>` - Target a specific persona on the peer (requires multi-agent-personas capability)
-- `--durable` - Queue for retry if delivery fails (bd-8rd.3)
+- `--durable` - Queue for retry if delivery fails
 - `--best-effort` - Override `config.federation.durableDelivery` to false
 - `--for <framework>` - Framework to use (default: current/default)
 
 **Examples:**
 ```bash
 # Simple agent-comms
-ogp federation agent apollo memory-management "How do you persist context?"
+ogp federation agent cosmo memory-management "How do you persist context?"
 
 # High-priority message
-ogp federation agent apollo task-delegation "Schedule standup ASAP" --priority high
+ogp federation agent cosmo task-delegation "Schedule standup ASAP" --priority high
 
-# Wait for reply
-ogp federation agent apollo queries "What's the status?" --wait --timeout 60000
+# Wait synchronously for a reply (up to 60 seconds)
+ogp federation agent cosmo queries "What's the status?" --wait --timeout 60000
+
+# Fire and check later (detach pattern)
+ogp federation agent cosmo general "Run that analysis" --detach
+# → Returns: nonce: abc123xyz
 
 # Threaded conversation
-ogp federation agent apollo project-planning "Let's discuss sprint goals" --conversation sprint-42
-
-# Target a specific persona
-ogp federation agent apollo queries "hello specialist" --to-agent apollo --wait
-
-# Durable delivery
-ogp federation agent apollo task-delegation "Important task" --durable
-
-# Best-effort override
-ogp federation agent apollo memory-management "Quick question" --best-effort
+ogp federation agent cosmo project-planning "Let's discuss sprint goals" --conversation sprint-42
 ```
 
-**Note:** `ogp agent-comms send` is an alias for this command and accepts the same options.
+**Note:** `ogp agent-comms send` is an alias for this command and accepts the same options, except `--detach`.
+
+### ogp federation reply-status
+
+Check the status of a detached reply by its nonce.
+
+**Syntax:**
+```bash
+ogp federation reply-status <nonce> [--for <framework>]
+```
+
+**Arguments:**
+- `<nonce>` - Nonce returned by `ogp federation agent --detach`
+
+**Examples:**
+```bash
+ogp federation reply-status abc123xyz
+```
+
+### ogp federation pending-replies
+
+List all outstanding nonces from detached sends that have not yet received a reply.
+
+**Syntax:**
+```bash
+ogp federation pending-replies [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp federation pending-replies
+```
+
+### ogp federation tag
+
+Add local tags to a peer for filtering and organization.
+
+**Syntax:**
+```bash
+ogp federation tag <peer-id> <tags...> [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp federation tag cosmo work trusted
+ogp federation list --tag work    # filter by tag
+```
+
+### ogp federation untag
+
+Remove tags from a peer.
+
+**Syntax:**
+```bash
+ogp federation untag <peer-id> <tags...> [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp federation untag cosmo trusted
+```
 
 ### ogp federation scopes
 
@@ -1011,6 +1117,48 @@ ogp agent-comms remove-topic <peer-id> <topic> [--for <framework>]
 ogp agent-comms remove-topic apollo personal
 ```
 
+### ogp agent-comms set-topic
+
+Create or update a topic policy for a peer (upsert). Use this when you want to set a policy whether or not one already exists, rather than using `add-topic` (which errors if the topic already exists).
+
+**Syntax:**
+```bash
+ogp agent-comms set-topic <peer-id> <topic> <level> [--for <framework>]
+```
+
+**Arguments:**
+- `<peer-id>` - Peer identifier or alias
+- `<topic>` - Topic name
+- `<level>` - Response level: `full`, `summary`, `escalate`, `deny`, `off`
+
+**Examples:**
+```bash
+ogp agent-comms set-topic cosmo finance off
+ogp agent-comms set-topic cosmo project-updates full
+```
+
+### ogp agent-comms set-default
+
+Set the per-peer default response level for unknown topics. This overrides the global default for this specific peer only.
+
+**Syntax:**
+```bash
+ogp agent-comms set-default <peer-id> <level> [--for <framework>]
+```
+
+**Arguments:**
+- `<peer-id>` - Peer identifier or alias
+- `<level>` - Response level: `full`, `summary`, `escalate`, `deny`, `off`
+
+**Examples:**
+```bash
+# Trust cosmo — summarize unknown topics by default
+ogp agent-comms set-default cosmo summary
+
+# Restrict unknown peer to default-deny
+ogp agent-comms set-default stranger off
+```
+
 ### ogp agent-comms reset
 
 Reset a peer to global defaults.
@@ -1041,24 +1189,29 @@ ogp agent-comms activity [peer-id] [options] [--for <framework>]
 - `[peer-id]` - Optional peer filter
 
 **Options:**
-- `--last <n>` - Show last N entries (default: 10)
+- `--last <n>` - Show last N entries (default: 50)
+- `--clear` - Clear the activity log
+- `--json` - Machine-readable JSON output
 - `--for <framework>` - Framework to use (default: current/default)
 
 **Examples:**
 ```bash
-# Show recent activity
+# Show recent activity (last 50)
 ogp agent-comms activity
 
 # Show last 20 entries
 ogp agent-comms activity --last 20
 
 # Filter by peer
-ogp agent-comms activity apollo
+ogp agent-comms activity cosmo
+
+# Clear the activity log
+ogp agent-comms activity --clear
 ```
 
 ### ogp agent-comms default
 
-Set default response level for unknown topics.
+Set the **global** default response level for unknown topics (applies to all peers without a specific per-peer default). See also `set-default` for per-peer defaults.
 
 **Syntax:**
 ```bash
@@ -1070,16 +1223,21 @@ ogp agent-comms default <level> [--for <framework>]
 
 **Examples:**
 ```bash
-# Allow unknown topics (summary response)
+# Summarize all unknown topics globally
 ogp agent-comms default summary
 
-# Default-deny (send signed rejection)
+# Global default-deny (send signed rejection for all unknown topics)
 ogp agent-comms default off
 ```
 
 ### ogp agent-comms logging
 
-Enable or disable activity logging.
+Enable, disable, or check activity logging status.
+
+**Syntax:**
+```bash
+ogp agent-comms logging <on|off|status> [--for <framework>]
+```
 
 **Syntax:**
 ```bash
@@ -1087,12 +1245,13 @@ ogp agent-comms logging <on|off> [--for <framework>]
 ```
 
 **Arguments:**
-- `<on|off>` - Enable or disable logging
+- `<on|off|status>` - Enable logging, disable it, or show current status
 
 **Examples:**
 ```bash
 ogp agent-comms logging on
 ogp agent-comms logging off
+ogp agent-comms logging status
 ```
 
 ## Project Management
@@ -1342,19 +1501,79 @@ Delete a project.
 
 **Syntax:**
 ```bash
-ogp project delete <id> [--confirm] [--for <framework>]
+ogp project delete <id> [--force] [--for <framework>]
 ```
 
 **Arguments:**
 - `<id>` - Project identifier
 
 **Options:**
-- `--confirm` - Skip confirmation prompt
+- `--force` - Skip confirmation prompt
 - `--for <framework>` - Framework to use (default: current/default)
 
 **Examples:**
 ```bash
-ogp project delete old-project --confirm
+ogp project delete old-project --force
+```
+
+### ogp project remove
+
+Remove a project from your local registry (does not notify peers). Use `delete` to permanently destroy the project and all contributions; use `remove` to just drop it from your local list.
+
+**Syntax:**
+```bash
+ogp project remove <id> [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp project remove old-project
+```
+
+### ogp project owners
+
+List the owners of a project.
+
+**Syntax:**
+```bash
+ogp project owners <id> [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp project owners signal
+```
+
+### ogp project add-owner
+
+Grant ownership of a project to another peer. Owners only. Ownership is established by a signed grant that any peer can independently verify.
+
+**Syntax:**
+```bash
+ogp project add-owner <id> <peer-key> [--for <framework>]
+```
+
+**Arguments:**
+- `<id>` - Project identifier
+- `<peer-key>` - Peer's Ed25519 public key (hex) — get with `ogp federation list --json`
+
+**Examples:**
+```bash
+ogp project add-owner signal 302a300506032b65...
+```
+
+### ogp project claim-ownership
+
+Claim ownership of a pre-existing project that has no explicit ownership records (legacy projects created before v0.9.0). Requires existing membership.
+
+**Syntax:**
+```bash
+ogp project claim-ownership <id> [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp project claim-ownership signal
 ```
 
 ## Intent Management
@@ -1372,14 +1591,13 @@ ogp intent register <name> [options] [--for <framework>]
 - `<name>` - Intent name
 
 **Options:**
-- `--session-key <key>` - Session key for routing (e.g., `agent:main:main`)
+- `--script <path>` - Path to a script to run when this intent is received
 - `--description <text>` - Intent description
 - `--for <framework>` - Framework to use (default: current/default)
 
 **Examples:**
 ```bash
 ogp intent register deployment \
-  --session-key "agent:main:main" \
   --description "Deployment notifications"
 ```
 
@@ -1468,7 +1686,7 @@ ogp app install <ref> [-y|--yes] [--for <framework>]
 **Arguments:**
 - `<ref>` — One of:
   - `file:/abs/path` — local directory containing `ogp-app.json` and install scripts
-  - `peer:<peerId>/<appId>` — app advertised by an approved peer (fetched, publisher-key verified, then installed)
+  - `peer:<peerId>/<appId>` — app advertised by an approved peer (fetched, publisher-key verified, then installed). **Note:** peer-sourced installs require peer app discovery to be active; check `ogp app browse` first to confirm availability.
 
 **Options:**
 - `-y, --yes` — skip the consent prompt (for automation)
@@ -1595,51 +1813,64 @@ ogp app browse --json
 
 ## Tunnel Management
 
-### ogp expose
+OGP includes built-in tunnel management for Cloudflare and ngrok tunnels. If you already have a publicly accessible URL (cloud server, VPS, named Cloudflare tunnel), set `gatewayUrl` in your config and skip this section.
 
-Start a public tunnel to expose the daemon to the internet.
+### ogp tunnel list
 
-**Note:** This command is **optional**. Only use it if you need help getting public access to your gateway. If you already have a publicly accessible URL (cloud server, VPS, reverse proxy, etc.), just set your `gatewayUrl` in the config and skip this command.
-
-**Syntax:**
-```bash
-ogp expose [--background] [--method <method>] [--for <framework>]
-```
-
-**Options:**
-- `--background` - Run as background process
-- `--method <method>` - Tunnel method: `cloudflared`, `ngrok` (default: `cloudflared`)
-- `--for <framework>` - Framework to use (default: current/default)
-
-**Examples:**
-```bash
-# Start cloudflared tunnel (foreground)
-ogp expose
-
-# Start in background
-ogp expose --background
-
-# Use ngrok
-ogp expose --method ngrok
-
-# Expose specific framework
-ogp --for hermes expose --background
-```
-
-### ogp expose stop
-
-Stop the tunnel.
+List running tunnels and reconcile them against your configured `gatewayUrl`. Shows whether the running tunnel URL matches the configured gateway URL.
 
 **Syntax:**
 ```bash
-ogp expose stop [--for <framework>]
+ogp tunnel list [--for <framework>]
+```
+
+**Aliases:** `ogp tunnel show`
+
+**Examples:**
+```bash
+ogp tunnel list
+ogp --for all tunnel list
+```
+
+### ogp tunnel start
+
+Start a quick tunnel (ephemeral — URL changes on restart). Use a named Cloudflare tunnel for production.
+
+**Syntax:**
+```bash
+ogp tunnel start <method> [--for <framework>]
+```
+
+**Arguments:**
+- `<method>` — `cloudflared` or `ngrok`
+
+**Examples:**
+```bash
+ogp tunnel start cloudflared
+ogp tunnel start ngrok
+ogp --for hermes tunnel start cloudflared
+```
+
+After starting, run `ogp tunnel list` to see the assigned URL, then update `gatewayUrl` in your config if needed.
+
+### ogp tunnel stop
+
+Stop the OGP-managed tunnel.
+
+**Syntax:**
+```bash
+ogp tunnel stop [--for <framework>]
 ```
 
 **Examples:**
 ```bash
-ogp expose stop
-ogp --for all expose stop
+ogp tunnel stop
+ogp --for all tunnel stop
 ```
+
+---
+
+> **Deprecated:** `ogp expose` and `ogp expose stop` are kept for backward compatibility but map to `ogp tunnel start` and `ogp tunnel stop`. Use the `ogp tunnel` commands going forward.
 
 ## System Integration
 
@@ -1671,6 +1902,75 @@ ogp uninstall [--for <framework>]
 ```bash
 ogp uninstall
 ogp --for openclaw uninstall
+```
+
+### ogp shutdown
+
+Stop both the OGP daemon and any managed tunnel in one command.
+
+**Syntax:**
+```bash
+ogp shutdown [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp shutdown
+ogp --for all shutdown
+```
+
+## Keychain Management
+
+OGP stores Ed25519 private keys in the system keychain on macOS. On non-macOS, keys are encrypted at rest using `OGP_KEYPAIR_SECRET`.
+
+### ogp keychain status
+
+Show the current state of the keypair in the system keychain.
+
+**Syntax:**
+```bash
+ogp keychain status [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp keychain status
+```
+
+**Output:**
+```
+Keychain: ✓ Unlocked
+  Service: com.ogp.keypair.openclaw
+  Key present: yes
+  Public key: 302a300506032b65...
+```
+
+### ogp keychain init
+
+Initialize the keychain entry for this gateway. Run if the daemon reports keychain errors on startup.
+
+**Syntax:**
+```bash
+ogp keychain init [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp keychain init
+```
+
+### ogp keychain unlock
+
+Unlock a locked keychain entry (macOS only). The system may lock the keychain after sleep or a password change.
+
+**Syntax:**
+```bash
+ogp keychain unlock [--for <framework>]
+```
+
+**Examples:**
+```bash
+ogp keychain unlock
 ```
 
 ## Completion
