@@ -75,7 +75,8 @@ URL for the HotNets submission's reference list.
 |-------|----------|
 | Sub-ms enforcement overhead | `bench/results.json` — 65μs full lifecycle |
 | Ed25519 overhead vs HMAC | `bench/results.json` — 2.3× sign, 5.4× verify |
-| Active deployment | David+Cosmo federation (bidirectional, cross-org) |
-| 386 commits, 3 months | `git log \| wc -l` |
+| Active deployments | Cosmo (AWS, autonomous), Stephen Barr (Seattle, direct), Stanislav Huseletov (Spain, direct); author advertises relay |
+| Nearly 400 commits, 3 months | `git rev-list --count HEAD` (388 at review) |
+| ~20k LOC core daemon | `find src -name '*.ts' \| xargs wc -l` |
 | Structural security gap vs. other protocols | `docs/protocol-comparison.md` |
-| 7 of 16 arXiv:2602.11327 risks addressed | Table 2 in paper |
+| Addresses full auth/access-control category + select supply-chain/operational risks of the **12** in arXiv:2602.11327 | Table 2 in paper |
