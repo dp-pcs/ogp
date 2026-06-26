@@ -371,6 +371,31 @@ async function runHealthChecks(): Promise<void> {
 }
 
 /**
+ * Pure selector for the contribution-backfill fan-out (bd-ydjk).
+ * Builds the capped (project, peer) work list, skipping self and any peer that is
+ * not in `reachableApproved`. Extracted so the down-peer skip is unit-testable
+ * without standing up the daemon.
+ */
+export function selectBackfillWork(
+  projects: Array<{ id: string; members: string[] }>,
+  reachableApproved: Set<string>,
+  selfId: string | null | undefined,
+  maxPeers: number,
+): Array<{ projectId: string; peerId: string }> {
+  const work: Array<{ projectId: string; peerId: string }> = [];
+  for (const project of projects) {
+    for (const member of project.members) {
+      if (member === selfId) continue;
+      if (!reachableApproved.has(member)) continue;
+      work.push({ projectId: project.id, peerId: member });
+      if (work.length >= maxPeers) break;
+    }
+    if (work.length >= maxPeers) break;
+  }
+  return work;
+}
+
+/**
  * Periodic anti-entropy pass (bd-53c). For each local project, pull contributions
  * from the project's other members (approved peers) over the signed project.query
  * path and union-merge by id. Capped fan-out so large projects can't flood a tick.
@@ -389,19 +414,20 @@ async function runContributionBackfill(): Promise<void> {
   if (projects.length === 0) return;
 
   const selfId = getLocalPeerId();
-  const approved = new Set(listPeers('approved').map((p) => p.id));
+  // Only fan out backfill to peers we can actually reach. Skipping peers whose
+  // healthState is 'down' avoids hammering a dead origin with project.query on
+  // every heartbeat tick (each attempt fails with a transport error, e.g. a
+  // 502 from a peer whose tunnel/origin is offline). The heartbeat health probe
+  // already revives a peer to 'established' once it comes back, at which point
+  // it re-enters this work list naturally. (bd-ydjk)
+  const reachableApproved = new Set(
+    listPeers('approved')
+      .filter((p) => p.healthState !== 'down')
+      .map((p) => p.id),
+  );
 
   // Build the (project, peer) work list, capped at maxPeers total this pass.
-  const work: Array<{ projectId: string; peerId: string }> = [];
-  for (const project of projects) {
-    for (const member of project.members) {
-      if (member === selfId) continue;
-      if (!approved.has(member)) continue;
-      work.push({ projectId: project.id, peerId: member });
-      if (work.length >= maxPeers) break;
-    }
-    if (work.length >= maxPeers) break;
-  }
+  const work = selectBackfillWork(projects, reachableApproved, selfId, maxPeers);
   if (work.length === 0) return;
 
   const deps = {
