@@ -44,6 +44,7 @@ function getKeychainOptions(): KeychainOptions {
 }
 
 let keychainUnlockedFor: string | null = null;
+const legacyKeychainMigrationAttemptedFor = new Set<string>();
 
 function unlockKeychainIfConfigured(opts: KeychainOptions): void {
   if (!opts.path) {
@@ -144,12 +145,16 @@ function keychainLoad(): string | null {
       const oldService = 'ogp-federation';
       const oldResult = execFileSync('security', buildFindArgs(oldService), { stdio: 'pipe' }).toString().trim();
       if (oldResult) {
-        console.log(`[OGP] Migrating private key from shared keychain (${oldService}) to instance-specific keychain (${getKeychainService()})`);
-        try {
-          keychainStore(oldResult);
-        } catch (storeErr) {
-          const message = storeErr instanceof Error ? storeErr.message : String(storeErr);
-          console.warn(`[OGP] Could not migrate private key into instance-specific keychain entry: ${message}`);
+        const currentService = getKeychainService();
+        if (!legacyKeychainMigrationAttemptedFor.has(currentService)) {
+          legacyKeychainMigrationAttemptedFor.add(currentService);
+          console.log(`[OGP] Migrating private key from shared keychain (${oldService}) to instance-specific keychain (${currentService})`);
+          try {
+            keychainStore(oldResult);
+          } catch (storeErr) {
+            const message = storeErr instanceof Error ? storeErr.message : String(storeErr);
+            console.warn(`[OGP] Could not migrate private key into instance-specific keychain entry: ${message}`);
+          }
         }
         return oldResult;
       }

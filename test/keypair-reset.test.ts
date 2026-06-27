@@ -257,4 +257,46 @@ describe('resetKeyPair', () => {
     });
     expect(fs.chmodSync).toHaveBeenCalledWith(keypairFile, 0o600);
   });
+
+  it('warns only once per process when old macOS keychain migration cannot write the new service entry', () => {
+    vi.mocked(fs.existsSync).mockImplementation((target: any) => {
+      if (target === configDir || target === keypairFile) {
+        return true;
+      }
+      return false;
+    });
+
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+      publicKey: 'public-key-1234567890'
+    }));
+
+    vi.mocked(execFileSync).mockImplementation((_cmd: any, args: any) => {
+      if (Array.isArray(args) && args.includes('add-generic-password')) {
+        throw new Error('User interaction is not allowed');
+      }
+      if (Array.isArray(args) && args.includes('find-generic-password')) {
+        const serviceIndex = args.indexOf('-s');
+        const service = args[serviceIndex + 1];
+        if (service === 'ogp-federation') {
+          return 'private-key-1234567890' as any;
+        }
+        throw new Error('not found');
+      }
+      return '' as any;
+    });
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    Object.defineProperty(process, 'platform', {
+      value: 'darwin'
+    });
+
+    loadOrGenerateKeyPair();
+    loadOrGenerateKeyPair();
+
+    const migrationWarnings = warn.mock.calls.filter(([message]) =>
+      String(message).includes('Could not migrate private key into instance-specific keychain entry')
+    );
+    expect(migrationWarnings).toHaveLength(1);
+  });
 });
