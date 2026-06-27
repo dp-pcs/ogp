@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { loadMetaConfig, saveMetaConfig } from '../shared/meta-config.js';
+import { getMetaConfigPath, loadMetaConfig, saveMetaConfig } from '../shared/meta-config.js';
 import { detectFrameworks } from '../shared/framework-detection.js';
 import {
   loadConfig,
@@ -73,7 +73,7 @@ function showConfig(): void {
   }
 
   // Meta config path
-  console.log(`Meta config: ~/.ogp-meta/config.json`);
+  console.log(`Meta config: ${getMetaConfigPath()}`);
   console.log('');
 }
 
