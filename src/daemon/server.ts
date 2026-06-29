@@ -29,6 +29,7 @@ import { notifyOpenClaw } from './notify.js';
 import { startDoormanCleanup, stopDoormanCleanup } from './doorman.js';
 import { startReplyCleanup, stopReplyCleanup, getPendingReply, deletePendingReply, storePendingReply, type ReplyPayload } from './reply-handler.js';
 import { startRendezvous, stopRendezvous, resolveOwnRelayUrl } from './rendezvous.js';
+import { getOutboundHealthSnapshot } from './outbound-health.js';
 import { startRelayClient, stopRelayClient } from './relay-client.js';
 import { startHeartbeat, stopHeartbeat } from './heartbeat.js';
 import { connectBridge, disconnectBridge } from './openclaw-bridge.js';
@@ -1144,11 +1145,20 @@ export function startServer(config?: OGPConfig, background = false): void {
 
   // GET /federation/ping - Simple liveness + identity check (no auth required)
   app.get('/federation/ping', (req: Request, res: Response) => {
+    // bd-kclo: surface outbound egress health. Previously this returned 200 even
+    // while egress was fully wedged (the bd-sj90 blind spot) — outboundHealthy and
+    // lastOutboundSuccess (per host/probe class) make that observable.
+    const outbound = getOutboundHealthSnapshot();
     res.json({
       pong: true,
       displayName: cfg.displayName,
       gatewayUrl: cfg.gatewayUrl,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      outboundHealthy: outbound.outboundHealthy,
+      lastOutboundSuccess: outbound.lastOutboundSuccess,
+      outboundConsecutiveFailures: outbound.consecutiveFailures,
+      outboundLastTripAt: outbound.lastTripAt,
+      outboundTripCount: outbound.tripCount
     });
   });
 

@@ -12,6 +12,27 @@
 import type { RendezvousConfig, TransportConfig, TransportMode } from '../shared/config.js';
 import { resolveTransportList } from '../shared/config.js';
 import type { AppAdvertisement } from '../shared/app-manifest.js';
+import { recordOutboundSuccess, recordOutboundFailure, hostFromUrl } from './outbound-health.js';
+
+/**
+ * Outbound fetch wrapper (bd-kclo). Records success/failure with the outbound
+ * watchdog, keyed by host, so a wedged egress pool/DNS state is detected even
+ * while the inbound listener stays healthy. Re-throws on failure so all existing
+ * error handling/timeouts are unchanged on the happy path and the unhappy path.
+ */
+async function trackedFetch(url: string, init?: RequestInit): Promise<Response> {
+  const host = hostFromUrl(url);
+  try {
+    const res = await fetch(url, init);
+    // A completed HTTP exchange (even a 4xx/5xx) proves egress is alive.
+    recordOutboundSuccess(host);
+    return res;
+  } catch (err) {
+    // Network-level failure or AbortSignal timeout ⇒ egress may be wedged.
+    recordOutboundFailure(host);
+    throw err;
+  }
+}
 
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
 
@@ -171,7 +192,7 @@ let activeConfig: RendezvousConfig | null = null;
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function detectPublicIp(): Promise<string> {
-  const res = await fetch('https://api.ipify.org?format=json', {
+  const res = await trackedFetch('https://api.ipify.org?format=json', {
     signal: AbortSignal.timeout(8000)
   });
   if (!res.ok) throw new Error(`ipify returned ${res.status}`);
@@ -239,7 +260,7 @@ async function doRegister(
 
   const { payloadStr, signature } = signCanonical(innerPayload, getPrivateKey());
 
-  const res = await fetch(`${config.url}/register`, {
+  const res = await trackedFetch(`${config.url}/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ payloadStr, signature }),
@@ -332,7 +353,7 @@ export async function stopRendezvous(): Promise<void> {
   if (!activeConfig || !registeredPubkey) return;
 
   try {
-    await fetch(`${activeConfig.url}/peer/${encodeURIComponent(registeredPubkey)}`, {
+    await trackedFetch(`${activeConfig.url}/peer/${encodeURIComponent(registeredPubkey)}`, {
       method: 'DELETE',
       signal: AbortSignal.timeout(5000)
     });
@@ -356,7 +377,7 @@ export async function lookupPeer(
   if (!config.enabled) return null;
 
   try {
-    const res = await fetch(`${config.url}/peer/${encodeURIComponent(pubkey)}`, {
+    const res = await trackedFetch(`${config.url}/peer/${encodeURIComponent(pubkey)}`, {
       signal: AbortSignal.timeout(8000)
     });
 
@@ -446,7 +467,7 @@ async function fetchPeerRecord(
   pubkey: string
 ): Promise<PeerLookupResponse | null> {
   if (!config.enabled) return null;
-  const res = await fetch(`${config.url}/peer/${encodeURIComponent(pubkey)}`, {
+  const res = await trackedFetch(`${config.url}/peer/${encodeURIComponent(pubkey)}`, {
     signal: AbortSignal.timeout(8000)
   });
   if (res.status === 404) return null;
