@@ -2039,19 +2039,46 @@ export async function federationAccept(token: string, alias?: string): Promise<v
     }
 
     const data = await res.json() as { pubkey: string; ip: string; port: number };
-    const peerUrl = `http://${data.ip}:${data.port}`;
 
-    console.log(`✓ Resolved peer via rendezvous: ${data.pubkey.slice(0, 8)}... at ${peerUrl}`);
-    console.log(`Sending federation request...`);
+    console.log(`✓ Resolved peer via rendezvous: ${data.pubkey.slice(0, 8)}...`);
 
-    const success = await federationRequest(peerUrl, data.pubkey, alias);
+    // Walk the peer's advertised transports (relay-first) rather than hardcoding
+    // the raw ip:port from the invite payload — relay-only peers can't be reached
+    // directly and would fail the /.well-known/ogp preflight.
+    const transports = await lookupPeerTransports(config.rendezvous, data.pubkey);
 
-    if (success) {
-      console.log(`\nConnected to ${data.pubkey.slice(0, 8)}... via rendezvous ✅`);
-    } else {
-      console.error(`\n✗ Failed to connect to ${data.pubkey.slice(0, 8)}...`);
-      process.exit(1);
+    if (transports.length === 0) {
+      // Fall back to the ip:port from the invite if rendezvous has no transport record yet.
+      const peerUrl = `http://${data.ip}:${data.port}`;
+      console.log(`Sending federation request (direct fallback)...`);
+      const success = await federationRequest(peerUrl, data.pubkey, alias);
+      if (success) {
+        console.log(`\nConnected to ${data.pubkey.slice(0, 8)}... via rendezvous ✅`);
+      } else {
+        console.error(`\n✗ Failed to connect to ${data.pubkey.slice(0, 8)}...`);
+        process.exit(1);
+      }
+      return;
     }
+
+    for (const t of transports) {
+      if (t.mode === 'direct') {
+        console.log(`Sending federation request (direct)...`);
+        if (await federationRequest(t.url, data.pubkey, alias)) {
+          console.log(`\nConnected to ${data.pubkey.slice(0, 8)}... via rendezvous ✅`);
+          return;
+        }
+      } else if (t.mode === 'relay') {
+        console.log(`Sending federation request via relay...`);
+        if (await federationRequestViaRelay(t.relayUrl, data.pubkey, alias)) {
+          console.log(`\nConnected to ${data.pubkey.slice(0, 8)}... via relay ✅`);
+          return;
+        }
+      }
+    }
+
+    console.error(`\n✗ Failed to connect to ${data.pubkey.slice(0, 8)}...`);
+    process.exit(1);
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {
       console.error('✗ Rendezvous lookup timed out');
