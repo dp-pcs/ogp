@@ -50,3 +50,12 @@ is David's call.
 - Decide: merge `agent/heartbeat`→`main` (38 commits, includes much more than this fix) vs.
   cherry-pick `9307598` (+ test commit) onto a clean main → rebuild → restart.
 - Separately address the `degraded-inbound` coverage gap before assuming Cosmo's 502s clear.
+
+## Update — clean unblock vehicle is PR #86
+PR **#86** (`fix/backfill-down-skip-bd-ydjk` → `main`, OPEN + MERGEABLE) isolates exactly the
+bd-ydjk fix as a **single commit** (`f2c70e8`, the fix + `test/backfill-down-skip.test.ts`). So the
+unblock does NOT require merging the 38-commit `agent/heartbeat` branch — just merge #86.
+
+Recommended chain: merge #86 → `npm run build` → restart daemon (and/or `npm publish` patch).
+Coverage gap unchanged: #86 only skips `healthState==='down'`, so Cosmo's `degraded-inbound`
+flapping still 502s until degraded peers are also handled.
