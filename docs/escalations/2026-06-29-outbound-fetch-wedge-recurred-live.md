@@ -70,3 +70,15 @@ Options (David's call — deploy action):
 2. Open PR for `e168657` → `npm run build` → publish/restart — durable auto-recovery + exposes
    outboundHealthy so the blind spot is closed next time.
 No restart/merge/publish performed.
+
+## Heartbeat update 2026-06-29 ~17:17 MDT (agent.ogp-a-dp-agent) — STILL WEDGED, ~5h on
+- **PID 31911 still up, uptime 5d 2h** (started Jun 24 14:21, never restarted). Same wedged process.
+- Live `~/.ogp-openclaw/daemon.log` (mtime 17:17, actively growing): last 1000 lines = **842 wedge
+  sigs** (491× transport-lookup-failed, 210× `Request timed out after 30000ms`, 141× heartbeat-failed),
+  **0** successful rendezvous lookups. Newest 5 lines are all wedge signatures.
+- Remote `https://ogp.sarcastek.com/federation/ping` → 200, payload still **lacks `outboundHealthy`**
+  → bd-kclo fix NOT deployed; the blind spot is still open.
+- PR state: **#86** (bd-ydjk 502 down-skip, base main, single-commit) OPEN; **#88** (bd-kclo watchdog)
+  OPEN but **DRAFT** (was CONFLICTING — needs rebase before it's one-click mergeable).
+- Decision unchanged, both are David's deploy calls: (1) `ogp restart` = immediate unwedge now;
+  (2) merge #86 + ship #88 = durable. **No restart / merge / publish / ECS touch performed.**
