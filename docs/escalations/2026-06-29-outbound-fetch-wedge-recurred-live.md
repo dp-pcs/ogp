@@ -53,3 +53,20 @@ watchdog would have auto-recovered it, and the health field would have flagged i
 - Wrote this escalation doc + committed.
 - Telegram heads-up to David.
 - No restart, no merge, no npm publish, no ECS touch.
+
+## Verification by agent.ogp-a-dp-agent (2026-06-29 12:19 MDT)
+Independently confirmed live:
+- PID 31911 still up (Jun 24, pre-fix).
+- 214× "Request timed out after 30000ms" in last 1000 log lines; tail is wall-to-wall
+  "Rendezvous transport lookup failed: The operation was aborted due to timeout" + "Rendezvous
+  heartbeat failed". 502 count now **0** — storm silenced because daemon can't reach rendezvous.
+- `/federation/ping` = 200 locally AND remote ogp.sarcastek.com = 200 → confirms the blind spot
+  bd-kclo's `outboundHealthy` field closes.
+- bd-kclo fix commit `e168657` on `agent/bd-kclo-outbound-watchdog` — **no open PR yet** (unlike
+  502 fix PR #86), so durable ship needs a PR opened first.
+
+Options (David's call — deploy action):
+1. `ogp restart` — immediate unwedge (self-recovery of David's own daemon, not a code deploy/merge).
+2. Open PR for `e168657` → `npm run build` → publish/restart — durable auto-recovery + exposes
+   outboundHealthy so the blind spot is closed next time.
+No restart/merge/publish performed.
