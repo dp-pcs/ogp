@@ -17,7 +17,7 @@ import { promisify } from 'node:util';
 import JSON5 from 'json5';
 import { requireConfig } from '../shared/config.js';
 import { shouldRelaxTls } from '../shared/tls.js';
-import { resolveOpenClawBin } from '../shared/openclaw-bin.js';
+import { resolveOpenClawBin, buildOpenClawSpawnEnv } from '../shared/openclaw-bin.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -224,6 +224,12 @@ async function callGatewayMethod(params: {
   // LaunchAgent-spawned daemon has a minimal PATH without /opt/homebrew/bin,
   // which made every `spawn openclaw` fail with ENOENT (100% sessions.send loss).
   const openclawBin = resolveOpenClawBin();
+  // bd-wpdw: the resolved `openclaw` binary is a JS entrypoint with a
+  // `#!/usr/bin/env node` shebang. Under the LaunchAgent's stripped PATH the
+  // child's `env node` can't find node ('env: node: No such file or directory'),
+  // dropping every cosmetic sync-note. Augment PATH with the running node's bin
+  // dir so the shebang resolves.
+  const spawnEnv = buildOpenClawSpawnEnv();
 
   for (const candidate of candidates) {
     try {
@@ -240,7 +246,8 @@ async function callGatewayMethod(params: {
         params.method
       ], {
         timeout: 10_000,
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        env: spawnEnv
       });
 
       const response = extractJsonObject(stdout);
