@@ -116,3 +116,62 @@ function safeExists(existsSync: (p: string) => boolean, p: string): boolean {
     return false;
   }
 }
+
+export interface OpenClawSpawnEnvDeps {
+  /** Defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
+  /** Defaults to process.execPath (the node binary running this daemon). */
+  execPath?: string;
+  /** Defaults to process.platform. */
+  platform?: NodeJS.Platform;
+}
+
+/**
+ * Build the environment for spawning the `openclaw` CLI from the daemon.
+ *
+ * BUG (bd-wpdw): bd-bq1 fixed `spawn openclaw ENOENT` by resolving the binary's
+ * absolute path, but the `openclaw` CLI is a JS entrypoint with a
+ * `#!/usr/bin/env node` shebang. Under a macOS LaunchAgent the daemon inherits a
+ * minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that EXCLUDES the bin dir holding
+ * `node`, so the resolved binary launches but its shebang's `env node` dies with
+ * `env: node: No such file or directory` — dropping every cosmetic sync-note.
+ *
+ * Fix: prepend the directory of the running node binary (process.execPath) and
+ * the well-known Homebrew bin dir to PATH for the child. process.execPath is the
+ * exact node running the daemon, so its dirname is guaranteed to contain `node`;
+ * the shebang then resolves. We only PREPEND (never replace) so any PATH the
+ * environment already provides is preserved.
+ */
+export function buildOpenClawSpawnEnv(deps: OpenClawSpawnEnvDeps = {}): NodeJS.ProcessEnv {
+  const env = deps.env ?? process.env;
+  const execPath = deps.execPath ?? process.execPath;
+  const platform = deps.platform ?? process.platform;
+
+  // win32 uses `openclaw.cmd` (no env-node shebang) and the LaunchAgent failure
+  // mode is macOS-only, so leave the env untouched there.
+  if (platform === 'win32') {
+    return { ...env };
+  }
+
+  const sep = ':';
+  const prepend: string[] = [];
+
+  if (execPath) {
+    prepend.push(pathDefault.dirname(execPath));
+  }
+  for (const dir of WELL_KNOWN_UNIX_BIN_DIRS) {
+    prepend.push(dir);
+  }
+
+  const existing = env.PATH ? env.PATH.split(sep).filter(Boolean) : [];
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const dir of [...prepend, ...existing]) {
+    if (dir && !seen.has(dir)) {
+      seen.add(dir);
+      merged.push(dir);
+    }
+  }
+
+  return { ...env, PATH: merged.join(sep) };
+}

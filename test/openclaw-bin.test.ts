@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveOpenClawBin } from '../src/shared/openclaw-bin.js';
+import { resolveOpenClawBin, buildOpenClawSpawnEnv } from '../src/shared/openclaw-bin.js';
 
 /**
  * bd-bq1: the daemon must locate `openclaw` without depending on the ambient
@@ -122,5 +122,77 @@ describe('resolveOpenClawBin', () => {
       existsSync: never,
     });
     expect(result).toBe('openclaw');
+  });
+});
+
+/**
+ * bd-wpdw: bd-bq1 fixed `spawn openclaw ENOENT`, but the resolved binary is a JS
+ * entrypoint with a `#!/usr/bin/env node` shebang. Under the LaunchAgent's
+ * stripped PATH the child's `env node` fails ('env: node: No such file or
+ * directory'), dropping every cosmetic sync-note. The spawn env must carry a
+ * PATH that includes the node bin dir so the shebang resolves.
+ */
+describe('buildOpenClawSpawnEnv', () => {
+  it("prepends the running node's bin dir so the env-node shebang resolves", () => {
+    const result = buildOpenClawSpawnEnv({
+      env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+      execPath: '/opt/homebrew/Cellar/node/26/bin/node',
+      platform: 'darwin',
+    });
+    const dirs = (result.PATH ?? '').split(':');
+    expect(dirs[0]).toBe('/opt/homebrew/Cellar/node/26/bin');
+    // original entries are preserved (only prepended, never replaced)
+    expect(dirs).toContain('/usr/bin');
+    expect(dirs).toContain('/bin');
+  });
+
+  it('includes the well-known Homebrew bin dir for the wrapper symlink', () => {
+    const result = buildOpenClawSpawnEnv({
+      env: { PATH: '/usr/bin:/bin' },
+      execPath: '/usr/local/bin/node',
+      platform: 'darwin',
+    });
+    expect((result.PATH ?? '').split(':')).toContain('/opt/homebrew/bin');
+  });
+
+  it('synthesizes a usable PATH even when none is inherited', () => {
+    const result = buildOpenClawSpawnEnv({
+      env: {},
+      execPath: '/opt/homebrew/bin/node',
+      platform: 'darwin',
+    });
+    const dirs = (result.PATH ?? '').split(':');
+    expect(dirs).toContain('/opt/homebrew/bin');
+  });
+
+  it('de-dupes without dropping order (node bin first, no repeats)', () => {
+    const result = buildOpenClawSpawnEnv({
+      env: { PATH: '/opt/homebrew/bin:/usr/bin' },
+      execPath: '/opt/homebrew/bin/node',
+      platform: 'darwin',
+    });
+    const dirs = (result.PATH ?? '').split(':');
+    expect(dirs.filter((d) => d === '/opt/homebrew/bin')).toHaveLength(1);
+    expect(dirs[0]).toBe('/opt/homebrew/bin');
+  });
+
+  it('preserves other env vars', () => {
+    const result = buildOpenClawSpawnEnv({
+      env: { PATH: '/usr/bin', HOME: '/Users/x', FOO: 'bar' },
+      execPath: '/usr/local/bin/node',
+      platform: 'darwin',
+    });
+    expect(result.HOME).toBe('/Users/x');
+    expect(result.FOO).toBe('bar');
+  });
+
+  it('leaves env untouched on win32 (no env-node shebang there)', () => {
+    const result = buildOpenClawSpawnEnv({
+      env: { PATH: 'C:/Windows', FOO: 'bar' },
+      execPath: 'C:/Program Files/nodejs/node.exe',
+      platform: 'win32',
+    });
+    expect(result.PATH).toBe('C:/Windows');
+    expect(result.FOO).toBe('bar');
   });
 });
