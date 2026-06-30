@@ -133,15 +133,31 @@ export interface HealthCheckResult {
   };
 }
 
-function buildFederationStateReason(
+export function buildFederationStateReason(
   newState: FederationState,
   prevFailures: number | undefined,
-  nextFailures: number | undefined
+  nextFailures: number | undefined,
+  // bd-w6jm: the granular pre-collapse healthState lets us report WHICH side is
+  // degraded. `healthCheckFailures` only counts heartbeat-probe (/.well-known/ogp)
+  // reachability failures — it is NOT wired to the federation send path, so a peer
+  // whose probe still succeeds but whose message sends are 502-ing reports
+  // `failures: 0`. Labeling that 0 as "outbound failures" was the misnomer: the
+  // degraded state is almost always inbound-staleness, not outbound trouble.
+  healthState?: Peer['healthState']
 ): string {
   const failures = nextFailures ?? prevFailures ?? 0;
   switch (newState) {
     case 'established': return failures === 0 ? 'outbound + inbound healthy' : 'failures cleared';
-    case 'degraded': return `outbound failures: ${failures}`;
+    case 'degraded':
+      // Distinguish direction from the granular healthState rather than mislabeling
+      // a probe-only counter as "outbound failures".
+      if (healthState === 'degraded-inbound') return 'inbound stale (probe reachable)';
+      if (healthState === 'degraded-outbound') {
+        return failures > 0
+          ? `outbound probe failures: ${failures}`
+          : 'outbound probe failing';
+      }
+      return failures > 0 ? `probe failures: ${failures}` : 'partial health';
     case 'down': return failures > 0 ? `${failures} consecutive failures` : 'no recent contact';
     case 'twoWay': return 'awaiting first bidirectional health check';
     default: return '';
@@ -346,7 +362,7 @@ async function runHealthChecks(): Promise<void> {
       inboundHealthReport: nextInboundReport
     });
     if (newFederationState !== peer.federationState) {
-      const reason = buildFederationStateReason(newFederationState, peer.healthCheckFailures, updates.healthCheckFailures);
+      const reason = buildFederationStateReason(newFederationState, peer.healthCheckFailures, updates.healthCheckFailures, newState);
       console.log(`[OGP Federation] ${peer.displayName} (${peer.id}): ${peer.federationState ?? 'unknown'} → ${newFederationState}${reason ? ` (${reason})` : ''}`);
       updates.federationState = newFederationState;
       updates.federationStateChangedAt = now;
