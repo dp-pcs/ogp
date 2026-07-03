@@ -69,7 +69,9 @@ import {
   projectStatusPeer,
   projectAddOwner,
   projectClaimOwnership,
-  projectOwners
+  projectOwners,
+  projectArchive,
+  projectReactivate
 } from './cli/project.js';
 import { configCommand, whoami } from './cli/config.js';
 import { keychainCommand } from './cli/keychain.js';
@@ -1301,6 +1303,23 @@ project
   .argument('<project-id>', 'Project ID')
   .action((projectId) => {
     projectOwners(projectId);
+  });
+
+project
+  .command('archive')
+  .description('Mark a project archived (advisory; owners only)')
+  .argument('<project-id>', 'Project ID')
+  .option('--reason <text>', 'Why this project is archived')
+  .action(async (projectId, options) => {
+    await projectArchive(projectId, options.reason);
+  });
+
+project
+  .command('reactivate')
+  .description('Reactivate a previously archived project (owners only)')
+  .argument('<project-id>', 'Project ID')
+  .action(async (projectId) => {
+    await projectReactivate(projectId);
   });
 
 // Completion commands

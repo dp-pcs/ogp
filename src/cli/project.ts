@@ -17,6 +17,7 @@ import {
   setProjectCreation,
   addOwnerGrant,
   isOwner,
+  setProjectStatus,
   type ProjectContribution
 } from '../daemon/projects.js';
 import { loadConfig } from '../shared/config.js';
@@ -355,7 +356,8 @@ export async function projectList(): Promise<void> {
   console.log(`Found ${projects.length} project(s):\n`);
 
   for (const project of projects) {
-    console.log(`${project.name} (${project.id})`);
+    const archived = project.status === 'archived';
+    console.log(`${project.name} (${project.id})${archived ? ' [ARCHIVED]' : ''}`);
     if (project.description) {
       console.log(`  Description: ${project.description}`);
     }
@@ -363,6 +365,9 @@ export async function projectList(): Promise<void> {
     console.log(`  Entry types: ${project.topics.length}`);
     console.log(`  Created: ${new Date(project.createdAt).toLocaleString()}`);
     console.log(`  Updated: ${new Date(project.updatedAt).toLocaleString()}`);
+    if (archived && project.statusReason) {
+      console.log(`  Archived reason: ${project.statusReason}`);
+    }
     console.log();
   }
 }
@@ -584,6 +589,9 @@ export async function projectStatus(projectId: string): Promise<void> {
   console.log(`Members: ${project.members.join(', ')}`);
   console.log(`Created: ${new Date(project.createdAt).toLocaleString()}`);
   console.log(`Updated: ${new Date(project.updatedAt).toLocaleString()}`);
+  if (project.status === 'archived') {
+    console.log(`Status: archived${project.statusReason ? ` (${project.statusReason})` : ''}`);
+  }
   console.log();
 
   if (topics.length === 0) {
@@ -841,7 +849,12 @@ export async function projectQueryPeer(
     }
 
     // Format and display the response
-    const { projectName, contributions } = response.response;
+    const { projectName, contributions, status, statusReason } = response.response;
+
+    if (status === 'archived') {
+      // stderr so it never corrupts the --json stdout contract (a bare array).
+      console.error(`⚠ Project '${projectName}' is archived${statusReason ? `: ${statusReason}` : ''}`);
+    }
 
     // bd-2n3: machine-readable output. Emit the structured contributions
     // (with stable id + ISO timestamps) so consumers can union-merge by id.
@@ -916,6 +929,35 @@ export async function projectStatusPeer(
     console.error('Error sending status request:', err);
     process.exit(1);
   }
+}
+
+/**
+ * Mark a project archived (owners only). Advisory only — does not block
+ * contributions/queries, and is not pushed to peers as a federated intent.
+ * Surfaces via project.query/project.status responses so peers who query it
+ * later can see the reason and self-resolve without escalating to a human.
+ */
+export async function projectArchive(projectId: string, reason?: string): Promise<void> {
+  const config = loadConfig();
+  if (!config) { console.error('Error: Not configured. Run "ogp setup" first.'); process.exit(1); }
+  const project = getProject(projectId);
+  if (!project) { console.error(`Error: Project '${projectId}' not found`); process.exit(1); }
+  if (!isOwner(projectId, getPublicKey())) { console.error(`Error: You are not an owner of '${projectId}'`); process.exit(1); }
+  setProjectStatus(projectId, 'archived', reason);
+  console.log(`✓ Archived project '${projectId}'${reason ? `: ${reason}` : ''}`);
+}
+
+/**
+ * Reactivate a previously archived project (owners only).
+ */
+export async function projectReactivate(projectId: string): Promise<void> {
+  const config = loadConfig();
+  if (!config) { console.error('Error: Not configured. Run "ogp setup" first.'); process.exit(1); }
+  const project = getProject(projectId);
+  if (!project) { console.error(`Error: Project '${projectId}' not found`); process.exit(1); }
+  if (!isOwner(projectId, getPublicKey())) { console.error(`Error: You are not an owner of '${projectId}'`); process.exit(1); }
+  setProjectStatus(projectId, 'active');
+  console.log(`✓ Reactivated project '${projectId}'`);
 }
 
 /**
