@@ -55,6 +55,11 @@ export interface Project {
   creation?: ProjectCreation;
   ownerGrants?: OwnerGrant[];
   pendingGrants?: OwnerGrant[];
+  // Advisory lifecycle status, owner-set on their own local copy and surfaced
+  // to peers via project.query/project.status responses. Absent = 'active'.
+  // Not enforced: archived projects still accept contributions/queries.
+  status?: 'active' | 'archived';
+  statusReason?: string;
 }
 
 export function getContributionEntryType(contribution: Partial<ProjectContribution> | null | undefined): string {
@@ -191,6 +196,31 @@ export function isOwner(projectId: string, key: string): boolean {
   const project = loadProjects().find(p => p.id === projectId);
   if (!project) return false;
   return deriveOwners(project.creation, project.ownerGrants ?? []).has(canonicalPeerId(key));
+}
+
+/**
+ * Set (or clear) a project's advisory lifecycle status. Caller is responsible
+ * for owner-gating — this just persists the field, mirroring updateProject().
+ */
+export function setProjectStatus(
+  projectId: string,
+  status: 'active' | 'archived',
+  reason?: string
+): boolean {
+  const projects = loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  if (!project) return false;
+
+  if (status === 'active') {
+    delete project.status;
+    delete project.statusReason;
+  } else {
+    project.status = status;
+    project.statusReason = reason || undefined;
+  }
+  project.updatedAt = new Date().toISOString();
+  saveProjects(projects);
+  return true;
 }
 
 export function getProject(projectId: string): Project | null {

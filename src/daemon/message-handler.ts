@@ -1101,7 +1101,8 @@ async function handleProjectQuery(
     queryDescription = 'all recent';
   }
 
-  const notificationText = `[OGP Project] ${displayName} queried project '${project.name}' for ${queryDescription} contributions (${contributions.length} found)`;
+  const archivedPrefix = project.status === 'archived' ? '(archived) ' : '';
+  const notificationText = `[OGP Project] ${archivedPrefix}${displayName} queried project '${project.name}' for ${queryDescription} contributions (${contributions.length} found)`;
   await notifyOpenClaw({
     text: notificationText,
     hookAgentId,
@@ -1130,6 +1131,7 @@ async function handleProjectQuery(
     response: {
       projectId,
       projectName: project.name,
+      ...(project.status === 'archived' ? { status: project.status, statusReason: project.statusReason } : {}),
       contributions: contributions.map(c => ({
         id: c.id,
         timestamp: c.timestamp,
@@ -1186,7 +1188,8 @@ async function handleProjectStatus(
     };
   }
 
-  const notificationText = `[OGP Project] ${displayName} requested status for project '${project.name}' (${statusData.topics.length} topics)`;
+  const archivedPrefix = project.status === 'archived' ? '(archived) ' : '';
+  const notificationText = `[OGP Project] ${archivedPrefix}${displayName} requested status for project '${project.name}' (${statusData.topics.length} topics)`;
   await notifyOpenClaw({
     text: notificationText,
     hookAgentId,
@@ -1212,7 +1215,8 @@ async function handleProjectStatus(
         description: project.description,
         members: project.members,
         createdAt: project.createdAt,
-        updatedAt: project.updatedAt
+        updatedAt: project.updatedAt,
+        ...(project.status === 'archived' ? { status: project.status, statusReason: project.statusReason } : {})
       },
       topics: statusData.topics.map(topic => ({
         name: topic.name,
