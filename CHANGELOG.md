@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.5 (2026-06-30)
 
 ### Added
 - **OGP Apps Layer — P4/P5/P6**: The OGP companion Apps UI now has a complete CLI contract.
