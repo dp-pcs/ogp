@@ -1297,13 +1297,18 @@ export async function federationSend(
         return {
           success: false,
           queued: true,
+          nonce: message.nonce,
           error: 'Send failed; message queued for retry.',
           statusCode: status,
         };
       }
       if (result?.error) {
         console.error(`Send failed: ${status ? `${status} ` : ''}${result.error}`);
-        return result;
+        return {
+          ...result,
+          success: false,
+          statusCode: result.statusCode ?? status,
+        };
       }
 
       console.error(`Send failed${status ? `: ${status}` : ''}`);
@@ -1321,7 +1326,12 @@ export async function federationSend(
       : `Failed to send message: ${error instanceof Error ? error.message : String(error)}`;
     if (useDurable) {
       enqueueFrame(peerId, frame, errMsg);
-      return { success: false, queued: true, error: `${errMsg}; message queued for retry.` };
+      return {
+        success: false,
+        queued: true,
+        nonce: message.nonce,
+        error: `${errMsg}; message queued for retry.`,
+      };
     }
     if (error instanceof Error && error.name === 'AbortError') {
       console.error(`Request timed out after ${timeoutMs}ms`);
@@ -1330,6 +1340,40 @@ export async function federationSend(
     }
     return null;
   }
+}
+
+export interface FederationSendCommandOutcome {
+  exitCode: 0 | 1;
+  message?: string;
+}
+
+/** Translate the transport result into an honest shell-facing CLI outcome. */
+export function resolveFederationSendCommandOutcome(
+  result: any | null,
+  peerId: string,
+): FederationSendCommandOutcome {
+  if (result?.queued === true) {
+    const nonce = typeof result.nonce === 'string' ? ` (nonce: ${result.nonce})` : '';
+    return {
+      exitCode: 0,
+      message: `⚠ Delivery deferred; message queued for retry${nonce}`,
+    };
+  }
+
+  if (result === null) {
+    // federationSend already printed the specific transport/configuration error.
+    return { exitCode: 1 };
+  }
+
+  if (result.success === false) {
+    // Non-2xx peer responses are already reported by federationSend.
+    return { exitCode: 1 };
+  }
+
+  return {
+    exitCode: 0,
+    message: `✓ Message delivered to ${peerId}`,
+  };
 }
 
 /**
