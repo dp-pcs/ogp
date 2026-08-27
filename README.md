@@ -149,11 +149,15 @@ OGP ships as a companion daemon that runs alongside your AI framework on a separ
 npm install -g @dp-pcs/ogp
 ```
 
-Install OGP skills for Claude Code:
+Install OGP skills for Claude Code (optional and explicit):
 
 ```bash
 ogp-install-skills
 ```
+
+Installing or upgrading the npm package does not modify your agent's skill
+directories. Run `ogp-install-skills` whenever you want to install or refresh the
+bundled skills.
 
 Verify installed skill versions after upgrade:
 

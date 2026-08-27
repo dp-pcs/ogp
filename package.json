@@ -15,8 +15,7 @@
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "prepublishOnly": "npm run build",
-    "prepare": "npm run build || true",
-    "postinstall": "node scripts/install-skills.js || echo 'Note: Run ogp-install-skills to install OGP skills for your AI agent'"
+    "prepare": "npm run build || true"
   },
   "keywords": [
     "ogp",
