@@ -14,6 +14,7 @@
     "dev": "tsc --watch",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
+    "test:project-intents": "node scripts/test-project-intents.mjs",
     "prepublishOnly": "npm run build",
     "prepare": "npm run build || true",
     "postinstall": "node scripts/install-skills.js || echo 'Note: Run ogp-install-skills to install OGP skills for your AI agent'"

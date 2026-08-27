@@ -16,6 +16,7 @@ The harness creates two isolated local gateways with separate `OGP_HOME` directo
 - `project send-contribution`
 - `project query-peer`
 - `project status-peer`
+- `federation remove`
 
 ## What It Verifies
 
@@ -29,6 +30,7 @@ The automated run checks these behaviors:
 6. The joined peer can send a remote contribution through `project.contribute`.
 7. The joined peer can query the owner project through `project.query`.
 8. The status request path for `project.status` succeeds at the transport level.
+9. Unilateral federation removal tombstones both peers and blocks subsequent project traffic.
 
 ## Useful Variants
 
@@ -67,6 +69,9 @@ If you want to replay the flow by hand, the harness prints the exact commands it
    `project query-peer` should return the contribution after join succeeds.
 5. Local persistence:
    `projects.json` under each `OGP_HOME` should reflect the expected project and topic state.
+6. Revocation enforcement:
+   after `federation remove`, both `peers.json` files should contain tombstones and
+   the removed peer's next `project query-peer` should fail before delivery.
 
 ## Interpreting Success
 
@@ -77,6 +82,7 @@ Project intents are working if all of the following are true:
 - the owner `projects.json` contains the remote member after join
 - the owner `projects.json` contains the remote contribution after send
 - pre-join query fails and post-join query succeeds
+- unilateral removal reaches both gateways and post-removal traffic fails
 
 ## Known Testing Nuance
 

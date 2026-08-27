@@ -562,6 +562,39 @@ async function main() {
       }
     );
 
+    logSection('Unilateral Revocation');
+    await runCommand(
+      process.execPath,
+      [cliPath, 'federation', 'remove', betaPeerOnAlpha.id],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, OGP_HOME: alpha.home },
+        envAdditions: { OGP_HOME: alpha.home },
+        label: 'alpha federation remove'
+      }
+    );
+
+    await waitForPeer(
+      alpha.home,
+      (peer) => peer.publicKey === betaCard.publicKey && peer.status === 'removed'
+    );
+    await waitForPeer(
+      beta.home,
+      (peer) => peer.publicKey === alphaCard.publicKey && peer.status === 'removed'
+    );
+
+    await runCommand(
+      process.execPath,
+      [cliPath, 'project', 'query-peer', refreshedAlphaPeerOnBeta.id, args.projectId, '--limit', '10'],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, OGP_HOME: beta.home },
+        envAdditions: { OGP_HOME: beta.home },
+        expectCode: 1,
+        label: 'beta query-peer after revocation'
+      }
+    );
+
     logSection('Validation Summary');
     console.log('Validated:');
     console.log('- Two isolated local gateways booted with separate OGP_HOME directories.');
@@ -572,6 +605,7 @@ async function main() {
     console.log('- Remote contribution arrived on the owner gateway.');
     console.log('- Remote query succeeded after membership was granted.');
     console.log('- Remote status request path completed without transport failure.');
+    console.log('- Unilateral removal tombstoned both peers and blocked further project traffic.');
 
     console.log('\nManual replay commands:');
     console.log(formatShellCommand(process.execPath, [cliPath, 'federation', 'request', beta.url, 'beta-local', '--alias', 'beta-local'], { OGP_HOME: alpha.home }));
@@ -582,6 +616,7 @@ async function main() {
     console.log(formatShellCommand(process.execPath, [cliPath, 'project', 'send-contribution', refreshedAlphaPeerOnBeta.id, args.projectId, 'decision', 'Beta confirmed remote contribution path', '--metadata', JSON.stringify({ source: 'beta', assertion: 'remote-send' })], { OGP_HOME: beta.home }));
     console.log(formatShellCommand(process.execPath, [cliPath, 'project', 'query-peer', refreshedAlphaPeerOnBeta.id, args.projectId, '--limit', '10'], { OGP_HOME: beta.home }));
     console.log(formatShellCommand(process.execPath, [cliPath, 'project', 'status-peer', refreshedAlphaPeerOnBeta.id, args.projectId], { OGP_HOME: beta.home }));
+    console.log(formatShellCommand(process.execPath, [cliPath, 'federation', 'remove', betaPeerOnAlpha.id], { OGP_HOME: alpha.home }));
 
     console.log(`\nState root: ${runRoot}`);
     console.log(`Alpha logs: ${path.join(logsDir, 'alpha.stdout.log')} / ${path.join(logsDir, 'alpha.stderr.log')}`);
