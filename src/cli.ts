@@ -17,6 +17,7 @@ import {
   federationReject,
   federationRemove,
   federationSend,
+  resolveFederationSendCommandOutcome,
   federationShowScopes,
   federationUpdateGrants,
   federationSendAgentComms,
@@ -785,7 +786,10 @@ federation
   .option('--best-effort', 'Override config.durableDelivery to false')
   .action(async (peerId, intent, payload, options) => {
     const durable = options.durable ? true : options.bestEffort ? false : undefined;
-    await federationSend(peerId, intent, payload, undefined, options.toAgent, durable);
+    const result = await federationSend(peerId, intent, payload, undefined, options.toAgent, durable);
+    const outcome = resolveFederationSendCommandOutcome(result, peerId);
+    if (outcome.message) console.log(outcome.message);
+    if (outcome.exitCode !== 0) process.exitCode = outcome.exitCode;
   });
 
 federation

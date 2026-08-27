@@ -667,6 +667,10 @@ ogp federation send apollo message '{"text":"Important"}' --durable
 ogp federation send apollo message '{"text":"Ephemeral"}' --best-effort
 ```
 
+The command reports whether the peer accepted the message or durable delivery
+queued it for retry. A queued durable send exits successfully and prints its
+nonce; a best-effort transport failure or peer rejection exits non-zero.
+
 ### ogp federation reconcile
 
 Backfill project contributions from a peer. This is the manual recovery path for

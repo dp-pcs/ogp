@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { federationSend } from '../src/cli/federation.js';
+import { federationSend, resolveFederationSendCommandOutcome } from '../src/cli/federation.js';
 import { loadOutbox, getQueueSummary } from '../src/daemon/outbox.js';
 import * as delivery from '../src/daemon/federation-delivery.js';
 import * as peers from '../src/daemon/peers.js';
@@ -68,7 +68,7 @@ describe('durable federation send', () => {
       result: { error: 'peer unreachable' },
     });
     const result = await federationSend('peer-1', 'message', JSON.stringify({ text: 'hi' }), undefined, undefined, true);
-    expect(result).toMatchObject({ success: false, queued: true });
+    expect(result).toMatchObject({ success: false, queued: true, nonce: expect.any(String) });
     const summary = getQueueSummary();
     expect(summary).toHaveLength(1);
     expect(summary[0].count).toBe(1);
@@ -81,7 +81,7 @@ describe('durable federation send', () => {
       result: { error: 'peer unreachable' },
     });
     const result = await federationSend('peer-1', 'message', JSON.stringify({ text: 'hi' }), undefined, undefined, false);
-    expect(result).toMatchObject({ error: 'peer unreachable' });
+    expect(result).toMatchObject({ success: false, error: 'peer unreachable', statusCode: 503 });
     expect(result).not.toHaveProperty('queued');
     expect(getQueueSummary()).toHaveLength(0);
   });
@@ -94,5 +94,36 @@ describe('durable federation send', () => {
     const result = await federationSend('peer-1', 'message', JSON.stringify({ text: 'hi' }), undefined, undefined, true);
     expect(result).toMatchObject({ received: true });
     expect(getQueueSummary()).toHaveLength(0);
+  });
+});
+
+describe('federation send CLI outcome', () => {
+  it('reports a durable queue acceptance with its nonce as shell success', () => {
+    expect(resolveFederationSendCommandOutcome({
+      success: false,
+      queued: true,
+      nonce: 'nonce-123',
+    }, 'peer-1')).toEqual({
+      exitCode: 0,
+      message: '⚠ Delivery deferred; message queued for retry (nonce: nonce-123)',
+    });
+  });
+
+  it('turns a transport failure into shell failure', () => {
+    expect(resolveFederationSendCommandOutcome(null, 'peer-1')).toEqual({ exitCode: 1 });
+  });
+
+  it('turns a peer rejection into shell failure without duplicating its logged error', () => {
+    expect(resolveFederationSendCommandOutcome({
+      success: false,
+      error: 'intent not granted',
+    }, 'peer-1')).toEqual({ exitCode: 1 });
+  });
+
+  it('confirms successful delivery', () => {
+    expect(resolveFederationSendCommandOutcome({ success: true }, 'peer-1')).toEqual({
+      exitCode: 0,
+      message: '✓ Message delivered to peer-1',
+    });
   });
 });

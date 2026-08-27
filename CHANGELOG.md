@@ -32,6 +32,9 @@
     credential.
 
 ### Fixed
+- **`federation send` now reports the real delivery outcome to humans and shell callers.**
+  Successful delivery prints a confirmation; durable fallback prints the queued nonce; transport
+  failures and peer rejections set a non-zero exit code instead of silently exiting `0`.
 - **Gateway auth failures now surface a WARN instead of looping silently.** `callGatewayMethod()`
   previously collapsed every failure to a bare `false`, so a rotated-out OpenClaw gateway token
   produced an indefinite silent 401. The daemon now classifies `401/403/unauthorized/invalid-token`
